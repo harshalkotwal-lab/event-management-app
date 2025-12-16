@@ -1,6 +1,5 @@
 streamlit==1.28.1
 pandas==2.0.3  # Downgraded to compatible version
 python-dateutil==2.8.2
-pillow>=9.5.0,<10.0.0  # Compatible version range
 pygithub==1.59.0
 requests==2.31.0
