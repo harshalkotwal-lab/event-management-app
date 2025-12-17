@@ -1155,16 +1155,22 @@ def display_event_card_social(event, current_user=None):
         if current_user and current_user != "None":
             st.markdown("---")
             st.markdown("**Social Interactions**")
-            
+    
             col_social = st.columns(5)
-            
-            # LIKE button
+    
+            # Get current states from session state (these were updated earlier)
+            user_liked = st.session_state.get(f"{event_id}_liked", False)
+            user_favorited = st.session_state.get(f"{event_id}_favorited", False)
+            user_interested = st.session_state.get(f"{event_id}_interested", False)
+    
+            # LIKE button - FIXED: Dynamic text based on current state
             with col_social[0]:
+                # Determine button text based on current state
                 like_icon = "❤️" if user_liked else "🤍"
-                like_text = f"{like_icon} Like"
-                
-                # Use a form submit button approach
-                if st.button(like_text, key=f"like_btn_{event_id}_{current_user}_{unique_suffix}", use_container_width=True):
+                like_text = f"{like_icon} Unlike" if user_liked else f"{like_icon} Like"
+        
+                # Create button with appropriate text
+                if st.button(like_text, key=f"like_btn_{event_id}_{unique_suffix}", use_container_width=True):
                     with st.spinner("Updating..."):
                         # Toggle like status
                         new_like_status = not user_liked
@@ -1173,29 +1179,28 @@ def display_event_card_social(event, current_user=None):
                             current_user, 
                             add=new_like_status
                         )
-                        
+                
                         if success:
                             # Update session state
                             st.session_state[f"{event_id}_liked"] = new_like_status
-                            
                             # Force immediate UI update
                             st.rerun()
                         else:
                             st.error("Failed to update like")
-                            st.stop()
-                
+        
                 # Display count - update based on session state
-                display_likes = likes_count + (1 if new_like_status else -1) if 'new_like_status' in locals() else likes_count
-                if user_liked and 'new_like_status' not in locals():
-                    display_likes = likes_count
-                st.caption(f"{display_likes} likes")
-            
-            # FAVORITE button
+                current_likes = likes_count
+                if user_liked:
+                    current_likes = likes_count
+                st.caption(f"{current_likes} likes")
+    
+            # FAVORITE button - FIXED: Dynamic text based on current state
             with col_social[1]:
+                # Determine button text based on current state
                 fav_icon = "⭐" if user_favorited else "☆"
-                fav_text = f"{fav_icon} Favorite"
-                
-                if st.button(fav_text, key=f"fav_btn_{event_id}_{current_user}_{unique_suffix}", use_container_width=True):
+                fav_text = f"{fav_icon} Unfavorite" if user_favorited else f"{fav_icon} Favorite"
+        
+                if st.button(fav_text, key=f"fav_btn_{event_id}_{unique_suffix}", use_container_width=True):
                     with st.spinner("Updating..."):
                         # Toggle favorite status
                         new_fav_status = not user_favorited
@@ -1204,29 +1209,28 @@ def display_event_card_social(event, current_user=None):
                             current_user, 
                             add=new_fav_status
                         )
-                        
+                
                         if success:
                             # Update session state
                             st.session_state[f"{event_id}_favorited"] = new_fav_status
-                            
                             # Force immediate UI update
                             st.rerun()
                         else:
                             st.error("Failed to update favorite")
-                            st.stop()
-                
+        
                 # Display count
-                display_favs = favorites_count + (1 if new_fav_status else -1) if 'new_fav_status' in locals() else favorites_count
-                if user_favorited and 'new_fav_status' not in locals():
-                    display_favs = favorites_count
-                st.caption(f"{display_favs} favorites")
-            
-            # INTERESTED button
+                current_favs = favorites_count
+                if user_favorited:
+                    current_favs = favorites_count
+                st.caption(f"{current_favs} favorites")
+    
+            # INTERESTED button - FIXED: Dynamic text based on current state
             with col_social[2]:
+                # Determine button text based on current state
                 int_icon = "✅" if user_interested else "🤔"
-                int_text = f"{int_icon} Interested"
-                
-                if st.button(int_text, key=f"int_btn_{event_id}_{current_user}_{unique_suffix}", use_container_width=True):
+                int_text = f"{int_icon} Not Interested" if user_interested else f"{int_icon} Interested"
+        
+                if st.button(int_text, key=f"int_btn_{event_id}_{unique_suffix}", use_container_width=True):
                     with st.spinner("Updating..."):
                         # Toggle interested status
                         new_int_status = not user_interested
@@ -1235,75 +1239,71 @@ def display_event_card_social(event, current_user=None):
                             current_user, 
                             add=new_int_status
                         )
-                        
+                
                         if success:
                             # Update session state
                             st.session_state[f"{event_id}_interested"] = new_int_status
-                            
                             # Force immediate UI update
                             st.rerun()
                         else:
                             st.error("Failed to update interest")
-                            st.stop()
-                
+        
                 # Display count
-                display_int = interested_count + (1 if new_int_status else -1) if 'new_int_status' in locals() else interested_count
-                if user_interested and 'new_int_status' not in locals():
-                    display_int = interested_count
-                st.caption(f"{display_int} interested")
-            
+                current_int = interested_count
+                if user_interested:
+                    current_int = interested_count
+                st.caption(f"{current_int} interested")
+    
             # SHARE button
             with col_social[3]:
                 share_text = "📤 Share"
-                
-                if st.button(share_text, key=f"share_btn_{event_id}_{current_user}_{unique_suffix}", use_container_width=True):
+        
+                if st.button(share_text, key=f"share_btn_{event_id}_{unique_suffix}", use_container_width=True):
                     with st.spinner("Sharing..."):
                         success = db_manager.increment_event_shares(event_id, current_user)
-                        
+                
                         if success:
                             # Update session state
                             st.session_state[f"{event_id}_shares"] = shares_count + 1
-                            
+                    
                             # Generate share text
                             share_content = f"Check out this event: {event['title']}"
                             if event.get('registration_link'):
                                 share_content += f"\nRegister here: {event['registration_link']}"
-                            
+                    
                             # Show success message
                             st.success(f"Event shared! Total shares: {st.session_state[f'{event_id}_shares']}")
                             # Show shareable text
                             st.code(share_content)
-                            
+                    
                             # Force immediate UI update
                             st.rerun()
                         else:
                             st.error("Failed to share event")
-                            st.stop()
-                
+        
                 # Display count from session state
                 display_shares = st.session_state.get(f"{event_id}_shares", shares_count)
                 st.caption(f"{display_shares} shares")
-            
+    
             # VIEW button
             with col_social[4]:
                 view_text = "👁️ View"
-                
-                if st.button(view_text, key=f"view_btn_{event_id}_{current_user}_{unique_suffix}", use_container_width=True):
+        
+                if st.button(view_text, key=f"view_btn_{event_id}_{unique_suffix}", use_container_width=True):
                     with st.spinner("Recording view..."):
                         success = db_manager.increment_event_views(event_id, current_user)
-                        
+                
                         if success:
                             # Update session state
                             st.session_state[f"{event_id}_views"] = views_count + 1
-                            
+                    
                             st.success(f"View recorded! Total views: {st.session_state[f'{event_id}_views']}")
-                            
+                    
                             # Force immediate UI update
                             st.rerun()
                         else:
                             st.error("Failed to record view")
-                            st.stop()
-                
+        
                 # Display count from session state
                 display_views = st.session_state.get(f"{event_id}_views", views_count)
                 st.caption(f"{display_views} views")
