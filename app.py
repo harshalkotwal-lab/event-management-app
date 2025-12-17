@@ -294,35 +294,110 @@ class JSONDataManager:
     
     def save_image_safe(self, uploaded_file):
         """Safe method to save image that works both locally and on cloud"""
+        if uploaded_file is None:
+            return None
+    
         try:
-            # Try base64 method first (works on cloud)
-            return self.save_image_safe(uploaded_file)
-        except:
+            # Create a temporary file
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as tmp_file:
+                # Write the uploaded file to temp file
+                tmp_file.write(uploaded_file.getvalue())
+                temp_path = tmp_file.name
+        
             try:
-                # Fallback to local file saving
-                if uploaded_file is None:
-                    return None
-            
-                # Generate filename
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                file_ext = os.path.splitext(uploaded_file.name)[1].lower()
-                filename = f"{timestamp}{file_ext}"
-                file_path = self.uploads_dir / filename
-            
-                # Save file
-                with open(file_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-            
                 # Optimize image
-                self._optimize_image(file_path)
+                self._optimize_image(temp_path)
             
-                return str(file_path)
-            except Exception as e:
-                st.error(f"Error saving image: {e}")
+                # Read the optimized image back
+                with open(temp_path, 'rb') as f:
+                    image_bytes = f.read()
+            
+                # Convert to base64 for storage in JSON
+                import base64
+                image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+            
+                # Get file extension
+                file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+            
+                # Create a data URL
+                if file_ext in ['.jpg', '.jpeg']:
+                    mime_type = 'image/jpeg'
+                elif file_ext == '.png':
+                    mime_type = 'image/png'
+                elif file_ext == '.gif':
+                    mime_type = 'image/gif'
+                else:
+                    mime_type = 'image/jpeg'
+                
+                data_url = f"data:{mime_type};base64,{image_base64}"
+            
+                return data_url
+            
+            finally:
+                # Clean up temp file
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+                
+        except Exception as e:
+            st.error(f"Error processing image: {e}")
+            # Fallback: try simple base64 encoding
+            try:
+                import base64
+                image_bytes = uploaded_file.getvalue()
+                image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+            
+                file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+                if file_ext in ['.jpg', '.jpeg']:
+                    mime_type = 'image/jpeg'
+                elif file_ext == '.png':
+                    mime_type = 'image/png'
+                elif file_ext == '.gif':
+                    mime_type = 'image/gif'
+                else:
+                    mime_type = 'image/jpeg'
+                
+                return f"data:{mime_type};base64,{image_base64}"
+            except:
                 return None
+
+    def save_image_simple(self, uploaded_file):
+        """Simple method to save image as base64 string"""
+        if uploaded_file is None:
+            return None
+    
+        try:
+            # Read the uploaded file
+            image_bytes = uploaded_file.getvalue()
+        
+            # Convert to base64
+            import base64
+            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+        
+            # Get file extension
+            file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+        
+            # Create a data URL
+            if file_ext in ['.jpg', '.jpeg']:
+                mime_type = 'image/jpeg'
+            elif file_ext == '.png':
+                mime_type = 'image/png'
+            elif file_ext == '.gif':
+                mime_type = 'image/gif'
+            else:
+                mime_type = 'image/jpeg'
+            
+            data_url = f"data:{mime_type};base64,{image_base64}"
+        
+            return data_url
+        
+        except Exception as e:
+            st.error(f"Error processing image: {e}")
+            return None
     
     def _optimize_image(self, image_path, max_size=(800, 800)):
-        """Optimize image size"""
+        """Optimize image size - safer version"""
         try:
             with Image.open(image_path) as img:
                 # Convert to RGB if necessary
@@ -333,11 +408,13 @@ class JSONDataManager:
                 if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
                     img.thumbnail(max_size, Image.Resampling.LANCZOS)
             
-                # Save optimized image
+                # Save optimized image with reduced quality
                 img.save(image_path, 'JPEG', optimize=True, quality=85)
+            
         except Exception as e:
-            st.warning(f"Could not optimize image: {e}")
-
+            # Don't warn if optimization fails, just use original
+            pass
+            
 # Initialize data manager
 data_manager = JSONDataManager()
 
@@ -741,7 +818,7 @@ Prizes: ₹50,000""")
                         # Save flyer
                         flyer_path = None
                         if flyer:
-                            flyer_path = data_manager.save_image_safe(flyer)
+                            flyer_path = data_manager.save_image_simple(flyer)
                         
                         event_to_save = {
                             'id': str(uuid.uuid4()),
@@ -824,12 +901,13 @@ def display_event_card_social(event, current_user=None):
                 if flyer_path.startswith('data:image/'):
                     # Display base64 image
                     st.image(flyer_path, width=300, caption="Event Flyer")
-                elif os.path.exists(flyer_path):
-                    # Display file path image
-                    image = Image.open(flyer_path)
-                    st.image(image, width=300, caption="Event Flyer")
+                else:
+                    # Try to load as file path
+                    if os.path.exists(flyer_path):
+                        image = Image.open(flyer_path)
+                        st.image(image, width=300, caption="Event Flyer")
             except Exception as e:
-                st.warning(f"Could not display event flyer: {e}")
+                st.warning(f"Could not display event flyer")
         
         # Description
         desc = event.get('description', 'No description')
@@ -1187,7 +1265,7 @@ def faculty_dashboard():
                     # Save flyer
                     flyer_path = None
                     if flyer:
-                        flyer_path = data_manager.save_image_safe(flyer)
+                        flyer_path = data_manager.save_image_simple(flyer)
                 
                     # Combine date and time
                     event_datetime = datetime.combine(event_date, event_time)
