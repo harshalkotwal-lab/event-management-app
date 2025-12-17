@@ -450,40 +450,65 @@ class DatabaseManager:
         return self.execute_query(query, (username,), fetch_all=True)
     
     def update_event_social(self, event_id, likes=None, favorites=None, interested=None, shares=None, views=None):
-        """Update event social stats"""
-        updates = []
-        params = []
+        """Update event social stats - FIXED VERSION"""
+        try:
+            cursor = self.conn.cursor()
         
-        if likes is not None:
-            updates.append("likes = ?")
-            params.append(json.dumps(likes))
+            # Start building the update query
+            updates = []
+            params = []
         
-        if favorites is not None:
-            updates.append("favorites = ?")
-            params.append(json.dumps(favorites))
+            if likes is not None:
+                updates.append("likes = ?")
+                params.append(json.dumps(likes))
         
-        if interested is not None:
-            updates.append("interested = ?")
-            params.append(json.dumps(interested))
+            if favorites is not None:
+                updates.append("favorites = ?")
+                params.append(json.dumps(favorites))
         
-        if shares is not None:
-            updates.append("shares = ?")
-            params.append(shares)
+            if interested is not None:
+                updates.append("interested = ?")
+                params.append(json.dumps(interested))
         
-        if views is not None:
-            updates.append("views = ?")
-            params.append(views)
+            if shares is not None:
+                updates.append("shares = ?")
+                params.append(shares)
         
-        if updates:
+            if views is not None:
+                updates.append("views = ?")
+                params.append(views)
+        
+            # Always update the updated_at timestamp
             updates.append("updated_at = ?")
             params.append(datetime.now().isoformat())
-            
-            query = f"UPDATE events SET {', '.join(updates)} WHERE id = ?"
-            params.append(event_id)
-            
-            return self.execute_query(query, tuple(params))
         
-        return 0
+            if not updates:
+                return False
+        
+            # Add event_id to params
+            params.append(event_id)
+        
+            # Build and execute the query
+            query = f"UPDATE events SET {', '.join(updates)} WHERE id = ?"
+        
+            cursor.execute(query, tuple(params))
+            self.conn.commit()
+        
+            # Verify the update
+            cursor.execute("SELECT likes, favorites, interested, shares, views FROM events WHERE id = ?", (event_id,))
+            result = cursor.fetchone()
+        
+            if result:
+                # st.sidebar.success(f"Updated event {event_id}")
+                # st.sidebar.info(f"New likes: {result[0]}")
+                return True
+            else:
+                # st.sidebar.error(f"Event {event_id} not found after update")
+                return False
+            
+        except Exception as e:
+            # st.sidebar.error(f"Update error: {e}")
+            return False
     
     # ========== REGISTRATIONS ==========
     def add_registration(self, reg_data):
@@ -773,10 +798,23 @@ def display_event_card_social(event, current_user=None):
     import time
     display_key = f"{event_id}_{int(time.time() * 1000) % 10000}"
     
+    # Debug: Show event ID
+    # st.sidebar.info(f"Event ID: {event_id}")
+    # st.sidebar.info(f"Current User: {current_user}")
+    
     # Parse social stats
-    likes = parse_json_list(event.get('likes', '[]'))
-    favorites = parse_json_list(event.get('favorites', '[]'))
-    interested = parse_json_list(event.get('interested', '[]'))
+    likes_json = event.get('likes', '[]')
+    favorites_json = event.get('favorites', '[]')
+    interested_json = event.get('interested', '[]')
+    
+    # Debug: Show raw JSON strings
+    # st.sidebar.info(f"Likes JSON: {likes_json}")
+    # st.sidebar.info(f"Favorites JSON: {favorites_json}")
+    
+    likes = parse_json_list(likes_json)
+    favorites = parse_json_list(favorites_json)
+    interested = parse_json_list(interested_json)
+    
     shares = event.get('shares', 0) or 0
     views = event.get('views', 0) or 0
     
@@ -784,6 +822,10 @@ def display_event_card_social(event, current_user=None):
     user_liked = current_user in likes if current_user else False
     user_favorited = current_user in favorites if current_user else False
     user_interested = current_user in interested if current_user else False
+    
+    # Debug: Show parsed lists
+    # st.sidebar.info(f"Likes list: {likes}")
+    # st.sidebar.info(f"User liked: {user_liked}")
     
     # Use a container to prevent re-render issues
     with st.container():
@@ -858,10 +900,28 @@ def display_event_card_social(event, current_user=None):
                         action_msg = "Liked!"
                     
                     # Update in database
-                    db_manager.update_event_social(event_id, likes=new_likes)
-                    db_manager.log_social_action(event_id, current_user, 'like')
-                    st.success(action_msg)
-                    st.rerun()
+                    try:
+                        # First get current event to ensure we have latest data
+                        current_event = db_manager.get_event(event_id)
+                        if current_event:
+                            # Update the event
+                            success = db_manager.update_event_social(
+                                event_id, 
+                                likes=new_likes
+                            )
+                            
+                            if success:
+                                # Log the action
+                                db_manager.log_social_action(event_id, current_user, 'like')
+                                st.success(action_msg)
+                                st.rerun()
+                            else:
+                                st.error("Failed to update likes")
+                        else:
+                            st.error("Event not found")
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
+                        st.rerun()
                 
                 # Display count
                 st.caption(f"{len(likes)} likes")
@@ -882,10 +942,20 @@ def display_event_card_social(event, current_user=None):
                         action_msg = "Added to favorites!"
                     
                     # Update in database
-                    db_manager.update_event_social(event_id, favorites=new_favorites)
-                    db_manager.log_social_action(event_id, current_user, 'favorite')
-                    st.success(action_msg)
-                    st.rerun()
+                    try:
+                        success = db_manager.update_event_social(
+                            event_id, 
+                            favorites=new_favorites
+                        )
+                        
+                        if success:
+                            db_manager.log_social_action(event_id, current_user, 'favorite')
+                            st.success(action_msg)
+                            st.rerun()
+                        else:
+                            st.error("Failed to update favorites")
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
                 
                 # Display count
                 st.caption(f"{len(favorites)} favorites")
@@ -906,10 +976,20 @@ def display_event_card_social(event, current_user=None):
                         action_msg = "Marked as interested!"
                     
                     # Update in database
-                    db_manager.update_event_social(event_id, interested=new_interested)
-                    db_manager.log_social_action(event_id, current_user, 'interested')
-                    st.success(action_msg)
-                    st.rerun()
+                    try:
+                        success = db_manager.update_event_social(
+                            event_id, 
+                            interested=new_interested
+                        )
+                        
+                        if success:
+                            db_manager.log_social_action(event_id, current_user, 'interested')
+                            st.success(action_msg)
+                            st.rerun()
+                        else:
+                            st.error("Failed to update interested")
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
                 
                 # Display count
                 st.caption(f"{len(interested)} interested")
@@ -923,19 +1003,29 @@ def display_event_card_social(event, current_user=None):
                     new_shares = shares + 1
                     
                     # Update in database
-                    db_manager.update_event_social(event_id, shares=new_shares)
-                    db_manager.log_social_action(event_id, current_user, 'share')
-                    
-                    # Generate share text
-                    share_text = f"Check out this event: {event['title']}"
-                    if event.get('registration_link'):
-                        share_text += f"\nRegister here: {event['registration_link']}"
-                    
-                    # Show success message
-                    st.success(f"Event shared! Total shares: {new_shares}")
-                    # Show shareable text
-                    st.code(share_text)
-                    st.rerun()
+                    try:
+                        success = db_manager.update_event_social(
+                            event_id, 
+                            shares=new_shares
+                        )
+                        
+                        if success:
+                            db_manager.log_social_action(event_id, current_user, 'share')
+                            
+                            # Generate share text
+                            share_text = f"Check out this event: {event['title']}"
+                            if event.get('registration_link'):
+                                share_text += f"\nRegister here: {event['registration_link']}"
+                            
+                            # Show success message
+                            st.success(f"Event shared! Total shares: {new_shares}")
+                            # Show shareable text
+                            st.code(share_text)
+                            st.rerun()
+                        else:
+                            st.error("Failed to update shares")
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
                 
                 # Display count
                 st.caption(f"{shares} shares")
@@ -949,11 +1039,21 @@ def display_event_card_social(event, current_user=None):
                     new_views = views + 1
                     
                     # Update in database
-                    db_manager.update_event_social(event_id, views=new_views)
-                    db_manager.log_social_action(event_id, current_user, 'view')
-                    
-                    st.success(f"View recorded! Total views: {new_views}")
-                    st.rerun()
+                    try:
+                        success = db_manager.update_event_social(
+                            event_id, 
+                            views=new_views
+                        )
+                        
+                        if success:
+                            db_manager.log_social_action(event_id, current_user, 'view')
+                            
+                            st.success(f"View recorded! Total views: {new_views}")
+                            st.rerun()
+                        else:
+                            st.error("Failed to update views")
+                    except Exception as e:
+                        st.error(f"Error: {str(e)}")
                 
                 # Display count
                 st.caption(f"{views} views")
@@ -983,7 +1083,7 @@ def display_event_card_social(event, current_user=None):
             
             # Check if user is registered
             registrations = db_manager.get_registrations_by_student(current_user)
-            is_registered = any(r.get('event_id') == event_id for r in registrations)
+            is_registered = any(r.get('event_id') == event_id for r in registrations) if registrations else False
             
             if is_registered:
                 st.success("✅ You are registered for this event")
@@ -1041,7 +1141,6 @@ def display_event_card_social(event, current_user=None):
             st.markdown('</div>', unsafe_allow_html=True)
         
         st.markdown('</div>', unsafe_allow_html=True)
-
 # ============================================
 # LOGIN PAGE
 # ============================================
@@ -1612,6 +1711,27 @@ def faculty_dashboard():
 # ============================================
 def student_dashboard():
     """Student dashboard"""
+    with st.sidebar.expander("🔧 Debug Panel", expanded=False):
+        if st.button("Check Database"):
+            # Test database connection
+            events = db_manager.get_all_events()
+            users = db_manager.get_all_users()
+            st.info(f"Total Events: {len(events)}")
+            st.info(f"Total Users: {len(users)}")
+            
+            # Check current user
+            student = db_manager.get_user(st.session_state.username)
+            if student:
+                st.json(student)
+            
+            # Check first event
+            if events:
+                first_event = events[0]
+                st.info(f"First Event ID: {first_event.get('id')}")
+                st.info(f"Likes JSON: {first_event.get('likes')}")
+                st.info(f"Parsed Likes: {parse_json_list(first_event.get('likes', '[]'))}")
+    
+    st.sidebar.title("👨‍🎓 Student Panel")
     st.sidebar.title("👨‍🎓 Student Panel")
     st.sidebar.markdown(f"**User:** {st.session_state.name}")
     
