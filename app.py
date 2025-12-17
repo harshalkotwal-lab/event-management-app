@@ -300,36 +300,100 @@ class JSONDataManager:
         return [item for item in data if item.get(field) == value]
 
     def save_image_simple(self, uploaded_file):
-        """Simple method to save image as base64 string"""
+        """Simple method to save image as base64 string - SAFE VERSION"""
         if uploaded_file is None:
             return None
     
         try:
-            # Read the uploaded file
-            image_bytes = uploaded_file.getvalue()
+            # Get file info first
+            file_size = len(uploaded_file.getvalue())
         
-            # Convert to base64
-            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+            # Limit file size to prevent memory issues
+            MAX_SIZE = 5 * 1024 * 1024  # 5MB
+            if file_size > MAX_SIZE:
+                st.warning(f"Image is too large ({file_size/1024/1024:.1f}MB). Max size is 5MB.")
+                return None
         
-            # Get file extension
+            # Check file type
             file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+            allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif']
         
-            # Create a data URL
-            if file_ext in ['.jpg', '.jpeg']:
-                mime_type = 'image/jpeg'
-            elif file_ext == '.png':
-                mime_type = 'image/png'
-            elif file_ext == '.gif':
-                mime_type = 'image/gif'
-            else:
-                mime_type = 'image/jpeg'
+            if file_ext not in allowed_extensions:
+                st.warning(f"Unsupported file type: {file_ext}. Use: {', '.join(allowed_extensions)}")
+                return None
+        
+            # Read and convert to base64
+            try:
+                # Try to load with PIL first to validate it's a valid image
+                from PIL import Image
+                import io
             
-            data_url = f"data:{mime_type};base64,{image_base64}"
-        
-            return data_url
-        
+                # Reset file pointer
+                uploaded_file.seek(0)
+            
+                # Open image with PIL to validate
+                image = Image.open(io.BytesIO(uploaded_file.getvalue()))
+            
+                # Convert to RGB if necessary (removes alpha channel)
+                if image.mode in ('RGBA', 'LA', 'P'):
+                    image = image.convert('RGB')
+            
+                # Resize if too large (max 1200px width)
+                max_width = 1200
+                if image.width > max_width:
+                    ratio = max_width / image.width
+                    new_height = int(image.height * ratio)
+                    image = image.resize((max_width, new_height), Image.Resampling.LANCZOS)
+            
+                # Save optimized image to bytes
+                output_buffer = io.BytesIO()
+                if file_ext in ['.jpg', '.jpeg']:
+                    image.save(output_buffer, format='JPEG', quality=85, optimize=True)
+                    mime_type = 'image/jpeg'
+                elif file_ext == '.png':
+                    image.save(output_buffer, format='PNG', optimize=True)
+                    mime_type = 'image/png'
+                elif file_ext == '.gif':
+                    # For GIFs, keep original (resizing animated GIFs is complex)
+                    uploaded_file.seek(0)
+                    output_buffer = io.BytesIO(uploaded_file.getvalue())
+                    mime_type = 'image/gif'
+            
+                # Convert to base64
+                image_bytes = output_buffer.getvalue()
+                image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+            
+                # Create data URL
+                data_url = f"data:{mime_type};base64,{image_base64}"
+            
+                # Close image to free memory
+                image.close()
+            
+                return data_url
+            
+            except Exception as img_error:
+                st.error(f"Error processing image: {str(img_error)}")
+                # Fallback: try simple base64 conversion
+                try:
+                    uploaded_file.seek(0)
+                    image_bytes = uploaded_file.getvalue()
+                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                
+                    # Determine mime type
+                    mime_types = {
+                        '.jpg': 'image/jpeg',
+                        '.jpeg': 'image/jpeg',
+                        '.png': 'image/png',
+                        '.gif': 'image/gif'
+                    }
+                    mime_type = mime_types.get(file_ext, 'image/jpeg')
+                
+                    return f"data:{mime_type};base64,{image_base64}"
+                except:
+                    return None
+                
         except Exception as e:
-            st.error(f"Error processing image: {e}")
+            st.error(f"Error saving image: {str(e)}")
             return None
     
     def _optimize_image(self, image_path, max_size=(800, 800)):
