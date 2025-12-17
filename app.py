@@ -248,10 +248,17 @@ class JSONDataManager:
     def save(self, data_type, data):
         """Save data to JSON file"""
         try:
-            with open(self.files[data_type], 'w') as f:
+            file_path = self.files[data_type]
+            with open(file_path, 'w') as f:
                 json.dump(data, f, indent=2)
+            # Debug: Check if file was created
+            if os.path.exists(file_path):
+                st.sidebar.info(f"Saved {data_type}: {len(data)} records")
+            else:
+                st.sidebar.error(f"Failed to save {data_type}")
             return True
-        except:
+        except Exception as e:
+            st.sidebar.error(f"Save error for {data_type}: {str(e)}")
             return False
     
     def add_item(self, data_type, item_data):
@@ -583,17 +590,17 @@ def login_page():
         with tab2:
             with st.form("student_registration"):
                 st.markdown("**Create Student Account**")
-                
+        
                 name = st.text_input("Full Name *")
                 roll_no = st.text_input("Roll Number *")
                 department = st.selectbox("Department *", 
-                                         ["CSE", "AIML", "ECE", "EEE", "MECH", "CIVIL", "IT", "DS"])
+                                 ["CSE", "AIML", "ECE", "EEE", "MECH", "CIVIL", "IT", "DS"])
                 year = st.selectbox("Year *", ["I", "II", "III", "IV"])
                 email = st.text_input("Email *")
                 username = st.text_input("Username *")
                 password = st.text_input("Password *", type="password")
                 confirm_pass = st.text_input("Confirm Password *", type="password")
-                
+        
                 if st.form_submit_button("Register", use_container_width=True):
                     if password != confirm_pass:
                         st.error("Passwords don't match")
@@ -601,7 +608,10 @@ def login_page():
                         st.error("Please fill all required fields")
                     else:
                         users = data_manager.load('users')
-                        
+                
+                        # Debug: Show current users
+                        st.sidebar.info(f"Current users in DB: {len(users)}")
+                
                         # Check if username exists
                         if any(u.get('username') == username for u in users):
                             st.error("Username already exists")
@@ -618,12 +628,24 @@ def login_page():
                                 'role': 'student',
                                 'created_at': datetime.now().isoformat()
                             }
-                            
-                            if data_manager.add_item('users', user_data):
+                    
+                            # Add to users list
+                            users.append(user_data)
+                    
+                            # Save to JSON file
+                            if data_manager.save('users', users):
                                 st.success("Registration successful! Please login.")
+                        
+                                # Auto-login after registration
+                                st.session_state.role = 'student'
+                                st.session_state.username = username
+                                st.session_state.name = name
+                                st.session_state.user_id = user_data['id']
+                        
+                                # Force rerun
                                 st.rerun()
                             else:
-                                st.error("Registration failed")
+                                st.error("Registration failed. Could not save to database.")
 
 # ============================================
 # AI EVENT CREATION
@@ -1441,6 +1463,21 @@ def faculty_dashboard():
 # ============================================
 def student_dashboard():
     """Student dashboard"""
+
+    # Debug: Check database
+    if st.sidebar.checkbox("Debug DB", False):
+        users = data_manager.load('users')
+        events = data_manager.load('events')
+        registrations = data_manager.load('registrations')
+        
+        st.sidebar.write(f"Users: {len(users)}")
+        st.sidebar.write(f"Events: {len(events)}")
+        st.sidebar.write(f"Registrations: {len(registrations)}")
+        
+        # Show current user
+        current_user = [u for u in users if u.get('username') == st.session_state.username]
+        if current_user:
+            st.sidebar.json(current_user[0])
     st.sidebar.title("👨‍🎓 Student Panel")
     st.sidebar.markdown(f"**User:** {st.session_state.name}")
     
@@ -1695,6 +1732,14 @@ def main():
         st.session_state.username = None
     if 'name' not in st.session_state:
         st.session_state.name = None
+    if 'user_id' not in st.session_state:
+        st.session_state.user_id = None
+
+    # Initialize data manager - ensure it persists
+    if 'data_manager' not in st.session_state:
+        st.session_state.data_manager = JSONDataManager()
+    
+    data_manager = st.session_state.data_manager
     
     # Route based on login status
     if st.session_state.role is None:
