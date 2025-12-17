@@ -1100,7 +1100,7 @@ def display_event_card_social(event, current_user=None):
     user_interested = st.session_state.get(f"{event_id}_interested", False)
     
     # Use a container with a unique key
-    with st.container(key=card_key):
+    with st.container():
         st.markdown('<div class="event-card">', unsafe_allow_html=True)
         
         # Header with AI badge
