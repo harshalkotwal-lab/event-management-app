@@ -1,1 +1,18 @@
+def safe_json_load(self, file_path):
+    try:
+        text = file_path.read_text().strip()
+        if not text:
+            return []
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return []
+
+def load_users(self):
+    return self.safe_json_load(self.users_file)
+
+def load_events(self):
+    return self.safe_json_load(self.events_file)
+
+def load_registrations(self):
+    return self.safe_json_load(self.registrations_file)
 
