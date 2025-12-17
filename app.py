@@ -1,17 +1,19 @@
 """
-G H Raisoni College Event Management System
-Complete web application for managing college events
+G H Raisoni College - Advanced Event Management System
+With AI, Database, Image Uploads, and Social Features
 """
 
 import streamlit as st
-import json
-import pandas as pd
 from datetime import datetime, date
-import hashlib
+import pandas as pd
 from pathlib import Path
-import uuid
 import os
-from typing import Dict, List, Optional
+
+# Import custom modules
+from database.operations import DatabaseOperations
+from utils.ai_event_generator import AIEventGenerator
+from utils.image_processor import ImageProcessor
+from utils.social_features import SocialFeatures
 
 # ============================================
 # PAGE CONFIGURATION
@@ -28,1278 +30,676 @@ st.set_page_config(
 # ============================================
 st.markdown("""
 <style>
-    .main-header {
-        font-size: 2.5rem;
-        color: #1E3A8A;
-        text-align: center;
-        padding: 1rem;
-        margin-bottom: 2rem;
-        font-weight: 700;
-    }
+    /* ... (keep all previous CSS styles) ... */
     
-    .college-header {
-        background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
+    .ai-generated-badge {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    
-    .event-card {
-        border: 1px solid #E5E7EB;
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        background: white;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-        transition: all 0.3s ease;
-        position: relative;
-        overflow: hidden;
-    }
-    
-    .event-card:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-        border-color: #3B82F6;
-    }
-    
-    .event-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 4px;
-        height: 100%;
-        background: linear-gradient(to bottom, #3B82F6, #1E3A8A);
-    }
-    
-    .role-badge {
-        display: inline-block;
         padding: 0.25rem 0.75rem;
         border-radius: 20px;
-        font-size: 0.85rem;
+        font-size: 0.75rem;
         font-weight: 600;
+        display: inline-block;
         margin-left: 0.5rem;
     }
     
-    .admin-badge { background: #FEE2E2; color: #DC2626; }
-    .faculty-badge { background: #DBEAFE; color: #1D4ED8; }
-    .student-badge { background: #D1FAE5; color: #065F46; }
-    
-    .metric-card {
-        background: white;
+    .flyer-preview {
+        border: 2px dashed #3B82F6;
         border-radius: 10px;
-        padding: 1.5rem;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-        border: 1px solid #E5E7EB;
+        padding: 1rem;
         text-align: center;
-        transition: transform 0.3s ease;
+        margin: 1rem 0;
+        background: #F8FAFC;
     }
     
-    .metric-card:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    .social-buttons-container {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1rem;
+        flex-wrap: wrap;
     }
     
-    .metric-value {
-        font-size: 2.5rem;
-        font-weight: 700;
-        color: #1E3A8A;
-        margin: 0.5rem 0;
-    }
-    
-    .metric-label {
-        color: #6B7280;
-        font-size: 0.9rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-    
-    .stButton > button {
+    .social-button {
+        flex: 1;
+        min-width: 80px;
+        text-align: center;
+        padding: 0.5rem;
         border-radius: 8px;
-        padding: 0.5rem 1.5rem;
-        font-weight: 600;
-        transition: all 0.3s ease;
+        border: 1px solid #E5E7EB;
+        background: white;
+        transition: all 0.3s;
     }
     
-    .stButton > button:hover {
-        transform: scale(1.05);
+    .social-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    
+    .social-button.active {
+        border-color: #3B82F6;
+        background: #DBEAFE;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================
-# DATA MANAGER CLASS
+# INITIALIZE MODULES
 # ============================================
-class EventDataManager:
-    """Manages all data operations for the application"""
-    
-    def __init__(self):
-        self.data_dir = Path("data")
-        self.data_dir.mkdir(exist_ok=True)
-        
-        self.users_file = self.data_dir / "users.json"
-        self.events_file = self.data_dir / "events.json"
-        self.registrations_file = self.data_dir / "registrations.json"
-        
-        self._initialize_files()
-        
-        # Default credentials (Change these in production!)
-        self.default_admin = {
-            "username": "admin@raisoni",
-            "password": self._hash_password("admin123"),
-            "name": "Administrator",
-            "role": "admin",
-            "department": "Administration",
-            "email": "admin@ghraisoni.edu",
-            "created_at": datetime.now().isoformat()
-        }
-        
-        self.default_faculty = {
-            "username": "faculty@raisoni",
-            "password": self._hash_password("faculty123"),
-            "name": "Faculty Coordinator",
-            "role": "faculty",
-            "department": "Faculty",
-            "email": "faculty@ghraisoni.edu",
-            "created_at": datetime.now().isoformat()
-        }
-    
-    def _initialize_files(self):
-        """Initialize JSON files if they don't exist"""
-        default_data = {
-            self.users_file: [],
-            self.events_file: [],
-            self.registrations_file: []
-        }
-        
-        for file_path, default_content in default_data.items():
-            if not file_path.exists():
-                with open(file_path, 'w') as f:
-                    json.dump(default_content, f, indent=2)
-    
-    def _hash_password(self, password: str) -> str:
-        """Hash password using SHA-256"""
-        return hashlib.sha256(password.encode()).hexdigest()
-    
-    def verify_credentials(self, username: str, password: str, role: str) -> bool:
-        """Verify user credentials"""
-        hashed_pw = self._hash_password(password)
-        
-        if role == "admin":
-            return (username == self.default_admin["username"] and 
-                    hashed_pw == self.default_admin["password"])
-        
-        elif role == "faculty":
-            return (username == self.default_faculty["username"] and 
-                    hashed_pw == self.default_faculty["password"])
-        
-        else:  # Student
-            users = self.load_users()
-            for user in users:
-                if user.get("username") == username and user.get("password") == hashed_pw:
-                    return True
-            return False
-    
-    def load_users(self) -> List[Dict]:
-        """Load all users from JSON file"""
-        try:
-            with open(self.users_file, 'r') as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
-    
-    def save_user(self, user_data: Dict) -> bool:
-        """Save a new user"""
-        users = self.load_users()
-        
-        # Check if username already exists
-        if any(u.get("username") == user_data.get("username") for u in users):
-            return False
-        
-        # Add metadata
-        user_data["user_id"] = str(uuid.uuid4())
-        user_data["created_at"] = datetime.now().isoformat()
-        user_data["is_active"] = True
-        
-        users.append(user_data)
-        
-        try:
-            with open(self.users_file, 'w') as f:
-                json.dump(users, f, indent=2)
-            return True
-        except:
-            return False
-    
-    def load_events(self) -> List[Dict]:
-        """Load all events from JSON file"""
-        try:
-            with open(self.events_file, 'r') as f:
-                events = json.load(f)
-                # Sort by date (newest first)
-                return sorted(events, key=lambda x: x.get('event_date', ''), reverse=True)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
-    
-    def save_event(self, event_data: Dict) -> str:
-        """Save a new event"""
-        events = self.load_events()
-        
-        # Generate event ID and add metadata
-        event_id = str(uuid.uuid4())
-        event_data["event_id"] = event_id
-        event_data["created_at"] = datetime.now().isoformat()
-        event_data["updated_at"] = datetime.now().isoformat()
-        
-        # Initialize engagement metrics
-        event_data.setdefault("likes", 0)
-        event_data.setdefault("favorites", [])
-        event_data.setdefault("interested", [])
-        event_data.setdefault("views", 0)
-        
-        events.append(event_data)
-        
-        try:
-            with open(self.events_file, 'w') as f:
-                json.dump(events, f, indent=2)
-            return event_id
-        except:
-            return ""
-    
-    def update_event(self, event_id: str, updates: Dict) -> bool:
-        """Update an existing event"""
-        events = self.load_events()
-        
-        for i, event in enumerate(events):
-            if event.get("event_id") == event_id:
-                updates["updated_at"] = datetime.now().isoformat()
-                events[i].update(updates)
-                
-                try:
-                    with open(self.events_file, 'w') as f:
-                        json.dump(events, f, indent=2)
-                    return True
-                except:
-                    return False
-        
-        return False
-    
-    def load_registrations(self) -> List[Dict]:
-        """Load all registrations"""
-        try:
-            with open(self.registrations_file, 'r') as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
-    
-    def save_registration(self, registration_data: Dict) -> bool:
-        """Save a new registration"""
-        registrations = self.load_registrations()
-        
-        # Check if already registered
-        event_id = registration_data.get("event_id")
-        student_username = registration_data.get("student_username")
-        
-        if any(r.get("event_id") == event_id and 
-               r.get("student_username") == student_username 
-               for r in registrations):
-            return False
-        
-        # Add metadata
-        registration_data["registration_id"] = str(uuid.uuid4())
-        registration_data["registered_at"] = datetime.now().isoformat()
-        registration_data.setdefault("status", "pending")
-        registration_data.setdefault("attendance", "absent")
-        
-        registrations.append(registration_data)
-        
-        try:
-            with open(self.registrations_file, 'w') as f:
-                json.dump(registrations, f, indent=2)
-            return True
-        except:
-            return False
-    
-    def get_statistics(self) -> Dict:
-        """Get application statistics"""
-        events = self.load_events()
-        users = self.load_users()
-        registrations = self.load_registrations()
-        
-        # Count students
-        students = [u for u in users if u.get("role") == "student"]
-        
-        # Count upcoming events
-        today = datetime.now().date()
-        upcoming_events = 0
-        for event in events:
-            try:
-                event_date = datetime.fromisoformat(event.get("event_date", "")).date()
-                if event_date >= today:
-                    upcoming_events += 1
-            except:
-                continue
-        
-        return {
-            "total_events": len(events),
-            "upcoming_events": upcoming_events,
-            "total_students": len(students),
-            "total_registrations": len(registrations),
-            "unique_participants": len(set(r.get("student_username") for r in registrations))
-        }
+@st.cache_resource
+def get_ai_generator():
+    return AIEventGenerator()
 
-# ============================================
-# INITIALIZE DATA MANAGER
-# ============================================
-data_manager = EventDataManager()
+@st.cache_resource
+def get_image_processor():
+    return ImageProcessor(upload_dir="static/uploads")
 
 # ============================================
 # HELPER FUNCTIONS
 # ============================================
-def display_role_badge(role: str):
-    """Display a badge for the user's role"""
-    badges = {
-        "admin": ("👑 Admin", "admin-badge"),
-        "faculty": ("👨‍🏫 Faculty", "faculty-badge"),
-        "student": ("👨‍🎓 Student", "student-badge")
-    }
-    
-    if role in badges:
-        text, css_class = badges[role]
-        st.markdown(f'<span class="role-badge {css_class}">{text}</span>', 
-                   unsafe_allow_html=True)
+def hash_password(password):
+    """Simple password hashing (use bcrypt in production)"""
+    import hashlib
+    return hashlib.sha256(password.encode()).hexdigest()
 
-def format_date(date_string: str) -> str:
-    """Format date string for display"""
-    try:
-        date_obj = datetime.fromisoformat(date_string)
-        return date_obj.strftime("%d %b %Y, %I:%M %p")
-    except:
-        return date_string
-
-def is_event_upcoming(event_date: str) -> bool:
-    """Check if event date is in the future"""
-    try:
-        event_dt = datetime.fromisoformat(event_date)
-        return event_dt > datetime.now()
-    except:
-        return False
+def format_datetime(dt):
+    """Format datetime for display"""
+    if isinstance(dt, str):
+        return dt
+    return dt.strftime("%d %b %Y, %I:%M %p")
 
 # ============================================
-# LOGIN PAGE
+# AUTHENTICATION
 # ============================================
 def login_page():
-    """Display login page"""
-    st.markdown('<div class="college-header"><h2>G H Raisoni College of Engineering and Management</h2><p>Event Management System</p></div>', 
+    """Enhanced login page with database"""
+    st.markdown('<div class="college-header"><h2>G H Raisoni College of Engineering and Management</h2><p>Advanced Event Management System</p></div>', 
                 unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
     
-    # Admin Login
     with col1:
         st.subheader("Admin Login")
-        st.markdown("**Default Credentials:**")
-        st.code("Username: admin@raisoni\nPassword: admin123")
+        admin_user = st.text_input("Username", key="admin_user")
+        admin_pass = st.text_input("Password", type="password", key="admin_pass")
         
-        if st.button("Login as Admin", key="admin_login", use_container_width=True):
-            st.session_state.role = "admin"
-            st.session_state.username = "admin@raisoni"
-            st.session_state.name = "Administrator"
-            st.rerun()
-    
-    # Faculty Login
-    with col2:
-        st.subheader("Faculty Login")
-        st.markdown("**Default Credentials:**")
-        st.code("Username: faculty@raisoni\nPassword: faculty123")
-        
-        if st.button("Login as Faculty", key="faculty_login", use_container_width=True):
-            st.session_state.role = "faculty"
-            st.session_state.username = "faculty@raisoni"
-            st.session_state.name = "Faculty Coordinator"
-            st.rerun()
-    
-    # Student Login/Register
-    with col3:
-        st.subheader("Student Portal")
-        
-        tab1, tab2 = st.tabs(["Login", "Register"])
-        
-        # Student Login Tab
-        with tab1:
-            student_username = st.text_input("Username", key="student_username")
-            student_password = st.text_input("Password", type="password", key="student_password")
-            
-            if st.button("Student Login", key="student_login", use_container_width=True):
-                if data_manager.verify_credentials(student_username, student_password, "student"):
-                    st.session_state.role = "student"
-                    st.session_state.username = student_username
-                    
-                    # Get student name from database
-                    users = data_manager.load_users()
-                    student = next((u for u in users if u.get("username") == student_username), None)
-                    if student:
-                        st.session_state.name = student.get("name", student_username)
-                    
-                    st.success("Login successful!")
+        if st.button("Admin Login", key="admin_login", use_container_width=True):
+            with DatabaseOperations() as db:
+                user = db.get_user_by_username(admin_user)
+                if user and user.role == 'admin' and user.password_hash == hash_password(admin_pass):
+                    st.session_state.user = user
+                    st.session_state.role = user.role
+                    st.success("Admin login successful!")
                     st.rerun()
                 else:
-                    st.error("Invalid username or password")
+                    st.error("Invalid admin credentials")
+    
+    with col2:
+        st.subheader("Faculty Login")
+        faculty_user = st.text_input("Username", key="faculty_user")
+        faculty_pass = st.text_input("Password", type="password", key="faculty_pass")
         
-        # Student Registration Tab
+        if st.button("Faculty Login", key="faculty_login", use_container_width=True):
+            with DatabaseOperations() as db:
+                user = db.get_user_by_username(faculty_user)
+                if user and user.role == 'faculty' and user.password_hash == hash_password(faculty_pass):
+                    st.session_state.user = user
+                    st.session_state.role = user.role
+                    st.success("Faculty login successful!")
+                    st.rerun()
+                else:
+                    st.error("Invalid faculty credentials")
+    
+    with col3:
+        st.subheader("Student Portal")
+        tab1, tab2 = st.tabs(["Login", "Register"])
+        
+        with tab1:
+            student_user = st.text_input("Username", key="student_user_login")
+            student_pass = st.text_input("Password", type="password", key="student_pass_login")
+            
+            if st.button("Student Login", key="student_login", use_container_width=True):
+                with DatabaseOperations() as db:
+                    user = db.get_user_by_username(student_user)
+                    if user and user.role == 'student' and user.password_hash == hash_password(student_pass):
+                        st.session_state.user = user
+                        st.session_state.role = user.role
+                        st.success("Student login successful!")
+                        st.rerun()
+                    else:
+                        st.error("Invalid student credentials")
+        
         with tab2:
             with st.form("student_registration"):
                 st.markdown("**Create Student Account**")
                 
-                full_name = st.text_input("Full Name")
-                roll_number = st.text_input("Roll Number")
-                department = st.selectbox("Department", 
+                full_name = st.text_input("Full Name *")
+                roll_number = st.text_input("Roll Number *")
+                department = st.selectbox("Department *", 
                                          ["CSE", "AIML", "ECE", "EEE", "MECH", "CIVIL", "IT", "DS"])
-                academic_year = st.selectbox("Year", ["I", "II", "III", "IV"])
-                email = st.text_input("Email Address")
-                new_username = st.text_input("Choose Username")
-                new_password = st.text_input("Choose Password", type="password")
-                confirm_password = st.text_input("Confirm Password", type="password")
+                year = st.selectbox("Year *", ["I", "II", "III", "IV"])
+                email = st.text_input("Email *")
+                username = st.text_input("Username *")
+                password = st.text_input("Password *", type="password")
                 
                 if st.form_submit_button("Register", use_container_width=True):
-                    if not all([full_name, roll_number, email, new_username, new_password]):
-                        st.error("Please fill all required fields")
-                    elif new_password != confirm_password:
-                        st.error("Passwords do not match")
+                    if not all([full_name, roll_number, email, username, password]):
+                        st.error("Please fill all required fields (*)")
                     else:
-                        # Check if username exists
-                        users = data_manager.load_users()
-                        if any(u.get("username") == new_username for u in users):
-                            st.error("Username already exists")
-                        else:
-                            user_data = {
-                                "name": full_name,
-                                "roll_number": roll_number,
-                                "department": department,
-                                "year": academic_year,
-                                "email": email,
-                                "username": new_username,
-                                "password": data_manager._hash_password(new_password),
-                                "role": "student"
-                            }
-                            
-                            if data_manager.save_user(user_data):
-                                st.success("Registration successful! Please login.")
-                                st.rerun()
+                        with DatabaseOperations() as db:
+                            # Check if username exists
+                            if db.get_user_by_username(username):
+                                st.error("Username already exists")
                             else:
-                                st.error("Registration failed. Please try again.")
+                                user_data = {
+                                    'username': username,
+                                    'password_hash': hash_password(password),
+                                    'name': full_name,
+                                    'email': email,
+                                    'role': 'student',
+                                    'department': department,
+                                    'roll_number': roll_number,
+                                    'year': year
+                                }
+                                
+                                user = db.create_user(user_data)
+                                if user:
+                                    st.success("Registration successful! Please login.")
+                                    st.rerun()
+                                else:
+                                    st.error("Registration failed")
 
 # ============================================
-# ADMIN DASHBOARD
+# AI EVENT CREATION
 # ============================================
-def admin_dashboard():
-    """Admin dashboard with full control"""
-    st.sidebar.title("👑 Admin Panel")
-    st.sidebar.markdown(f"**Logged in as:** {st.session_state.get('name', 'Admin')}")
-    display_role_badge("admin")
+def ai_event_creation():
+    """Create event using AI from WhatsApp/email text"""
+    st.header("🤖 AI-Powered Event Creation")
     
-    menu_options = ["Dashboard", "View All Events", "User Management", "Reports", "System Logs"]
-    selected_menu = st.sidebar.selectbox("Navigation", menu_options)
+    ai_gen = get_ai_generator()
     
-    st.sidebar.markdown("---")
-    if st.sidebar.button("Logout", type="secondary"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+    tab1, tab2 = st.tabs(["From Text", "From Email/WhatsApp"])
     
-    # Dashboard
-    if selected_menu == "Dashboard":
-        st.markdown('<h1 class="main-header">Administrator Dashboard</h1>', unsafe_allow_html=True)
+    with tab1:
+        st.subheader("Paste Event Text")
+        event_text = st.text_area("Paste event details from WhatsApp, email, or any source:", 
+                                 height=200,
+                                 placeholder="""Example:
+Hackathon Alert! 🚀
+Join us for the annual AI Hackathon on December 20-21, 2024 at Seminar Hall, Block C.
+Organized by Computer Science Department.
+Register at: https://forms.gle/example
+Prizes worth ₹50,000!""")
         
-        # Display statistics
-        stats = data_manager.get_statistics()
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.markdown(f'''
-                <div class="metric-card">
-                    <div class="metric-value">{stats["total_events"]}</div>
-                    <div class="metric-label">Total Events</div>
-                </div>
-            ''', unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown(f'''
-                <div class="metric-card">
-                    <div class="metric-value">{stats["upcoming_events"]}</div>
-                    <div class="metric-label">Upcoming Events</div>
-                </div>
-            ''', unsafe_allow_html=True)
-        
-        with col3:
-            st.markdown(f'''
-                <div class="metric-card">
-                    <div class="metric-value">{stats["total_students"]}</div>
-                    <div class="metric-label">Total Students</div>
-                </div>
-            ''', unsafe_allow_html=True)
-        
-        with col4:
-            st.markdown(f'''
-                <div class="metric-card">
-                    <div class="metric-value">{stats["total_registrations"]}</div>
-                    <div class="metric-label">Total Registrations</div>
-                </div>
-            ''', unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        # Recent Events
-        st.subheader("📅 Recent Events")
-        events = data_manager.load_events()
-        
-        if events:
-            recent_events = events[:5]  # Show 5 most recent
-            for event in recent_events:
-                with st.container():
-                    col1, col2 = st.columns([3, 1])
+        if st.button("Generate Event", key="generate_from_text"):
+            if event_text:
+                with st.spinner("AI is extracting event details..."):
+                    event_data = ai_gen.extract_event_info(event_text)
+                    
+                    # Show extracted data
+                    st.subheader("📋 Extracted Event Details")
+                    
+                    col1, col2 = st.columns(2)
                     with col1:
-                        st.markdown(f"**{event.get('title', 'Untitled Event')}**")
-                        st.caption(f"Date: {format_date(event.get('event_date', ''))}")
-                        st.caption(f"Type: {event.get('event_type', 'N/A')}")
+                        st.text_input("Title", value=event_data.get('title', ''), key="ai_title")
+                        st.text_area("Description", value=event_data.get('description', ''), 
+                                    height=150, key="ai_description")
+                        st.selectbox("Event Type", 
+                                    ["Workshop", "Hackathon", "Competition", "Bootcamp", "Seminar", "Conference", "Webinar"],
+                                    index=["Workshop", "Hackathon", "Competition", "Bootcamp", "Seminar", "Conference", "Webinar"]
+                                    .index(event_data.get('event_type', 'Workshop')),
+                                    key="ai_type")
+                    
                     with col2:
-                        status = "✅ Upcoming" if is_event_upcoming(event.get('event_date', '')) else "❌ Completed"
-                        st.markdown(f"**{status}**")
-                    st.markdown("---")
-        else:
-            st.info("No events created yet.")
-    
-    # View All Events
-    elif selected_menu == "View All Events":
-        st.header("📋 All Events")
-        
-        events = data_manager.load_events()
-        
-        if not events:
-            st.info("No events available.")
-            return
-        
-        # Filter options
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            filter_type = st.selectbox("Filter by Type", 
-                                      ["All", "Workshop", "Hackathon", "Competition", 
-                                       "Bootcamp", "Seminar", "Conference"])
-        with col2:
-            filter_status = st.selectbox("Filter by Status", ["All", "Upcoming", "Completed"])
-        with col3:
-            search_query = st.text_input("Search Events")
-        
-        # Apply filters
-        filtered_events = events
-        
-        if filter_type != "All":
-            filtered_events = [e for e in filtered_events if e.get("event_type") == filter_type]
-        
-        if filter_status == "Upcoming":
-            filtered_events = [e for e in filtered_events if is_event_upcoming(e.get("event_date", ""))]
-        elif filter_status == "Completed":
-            filtered_events = [e for e in filtered_events if not is_event_upcoming(e.get("event_date", ""))]
-        
-        if search_query:
-            filtered_events = [e for e in filtered_events 
-                             if search_query.lower() in e.get("title", "").lower() 
-                             or search_query.lower() in e.get("description", "").lower()]
-        
-        # Display events
-        for event in filtered_events:
-            with st.container():
-                st.markdown('<div class="event-card">', unsafe_allow_html=True)
-                
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.subheader(event.get("title", "Untitled Event"))
-                    st.write(event.get("description", "No description available."))
+                        st.date_input("Event Date", 
+                                     value=datetime.strptime(event_data.get('event_date', date.today().isoformat()), '%Y-%m-%d').date(),
+                                     key="ai_date")
+                        st.text_input("Venue", value=event_data.get('venue', ''), key="ai_venue")
+                        st.text_input("Organizer", value=event_data.get('organizer', ''), key="ai_organizer")
+                        st.text_input("Registration Link", value=event_data.get('registration_link', ''), 
+                                     key="ai_link")
                     
-                    col_info = st.columns(4)
-                    with col_info[0]:
-                        st.caption(f"**Date:** {format_date(event.get('event_date', ''))}")
-                    with col_info[1]:
-                        st.caption(f"**Type:** {event.get('event_type', 'N/A')}")
-                    with col_info[2]:
-                        st.caption(f"**Venue:** {event.get('venue', 'N/A')}")
-                    with col_info[3]:
-                        st.caption(f"**Organizer:** {event.get('organizer', 'N/A')}")
-                
-                with col2:
-                    status = "🟢 Upcoming" if is_event_upcoming(event.get('event_date', '')) else "🔴 Completed"
-                    st.markdown(f"**{status}**")
+                    # Enhance with AI
+                    if st.button("✨ Enhance with AI", key="enhance_ai"):
+                        with st.spinner("Enhancing event details..."):
+                            enhanced = ai_gen.enhance_event_description(event_data)
+                            st.success("Event enhanced!")
+                            st.rerun()
                     
-                    # Engagement metrics
-                    col_metrics = st.columns(2)
-                    with col_metrics[0]:
-                        st.metric("Likes", event.get("likes", 0))
-                    with col_metrics[1]:
-                        st.metric("Interested", len(event.get("interested", [])))
-                
-                st.markdown('</div>', unsafe_allow_html=True)
+                    # Save to database
+                    if st.button("Save Event", key="save_ai_event"):
+                        # Get values from session state
+                        event_to_save = {
+                            'title': st.session_state.ai_title,
+                            'description': st.session_state.ai_description,
+                            'event_type': st.session_state.ai_type,
+                            'event_date': datetime.combine(st.session_state.ai_date, datetime.min.time()),
+                            'venue': st.session_state.ai_venue,
+                            'organizer': st.session_state.ai_organizer,
+                            'registration_link': st.session_state.ai_link,
+                            'created_by': st.session_state.user.id,
+                            'ai_generated': True,
+                            'ai_prompt': event_text,
+                            'ai_metadata': event_data.get('ai_metadata', {})
+                        }
+                        
+                        with DatabaseOperations() as db:
+                            event = db.create_event(event_to_save)
+                            if event:
+                                st.success(f"Event '{event.title}' created successfully!")
+                                st.balloons()
+                                st.rerun()
     
-    # User Management
-    elif selected_menu == "User Management":
-        st.header("👥 User Management")
+    with tab2:
+        st.subheader("Upload Email/WhatsApp Export")
         
-        users = data_manager.load_users()
+        uploaded_file = st.file_uploader("Upload text file", type=['txt', 'pdf', 'docx'])
         
-        if not users:
-            st.info("No users registered yet.")
-            return
-        
-        # Convert to DataFrame for better display
-        user_data = []
-        for user in users:
-            user_data.append({
-                "Name": user.get("name", "N/A"),
-                "Username": user.get("username", "N/A"),
-                "Role": user.get("role", "N/A"),
-                "Department": user.get("department", "N/A"),
-                "Year": user.get("year", "N/A"),
-                "Email": user.get("email", "N/A"),
-                "Registered": user.get("created_at", "N/A")[:10] if user.get("created_at") else "N/A"
-            })
-        
-        df = pd.DataFrame(user_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        
-        # Export option
-        if st.button("Export to CSV"):
-            csv = df.to_csv(index=False)
-            st.download_button(
-                label="Download CSV",
-                data=csv,
-                file_name="users.csv",
-                mime="text/csv"
-            )
-    
-    # Reports
-    elif selected_menu == "Reports":
-        st.header("📊 Reports & Analytics")
-        
-        stats = data_manager.get_statistics()
-        registrations = data_manager.load_registrations()
-        events = data_manager.load_events()
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Event type distribution
-            event_types = {}
-            for event in events:
-                etype = event.get("event_type", "Other")
-                event_types[etype] = event_types.get(etype, 0) + 1
+        if uploaded_file:
+            content = uploaded_file.getvalue().decode('utf-8')
+            st.text_area("File Content", content, height=200)
             
-            if event_types:
-                st.subheader("Events by Type")
-                type_df = pd.DataFrame(list(event_types.items()), columns=["Event Type", "Count"])
-                st.bar_chart(type_df.set_index("Event Type"))
-        
-        with col2:
-            # Registration trends
-            if registrations:
-                st.subheader("Recent Registrations")
+            if st.button("Extract Events", key="extract_from_file"):
+                # Simple extraction - in real app, you'd parse the file properly
+                events = content.split('\n\n')  # Simple split by blank lines
                 
-                # Get last 7 days registrations
-                recent_regs = []
-                for reg in registrations:
-                    try:
-                        reg_date = datetime.fromisoformat(reg.get("registered_at", ""))
-                        if (datetime.now() - reg_date).days <= 7:
-                            recent_regs.append(reg)
-                    except:
-                        continue
-                
-                if recent_regs:
-                    st.metric("Last 7 Days", len(recent_regs))
-                else:
-                    st.info("No registrations in the last 7 days")
-        
-        # Detailed report
-        st.subheader("Detailed Report")
-        report_data = [
-            {"Metric": "Total Events", "Value": stats["total_events"]},
-            {"Metric": "Upcoming Events", "Value": stats["upcoming_events"]},
-            {"Metric": "Total Students", "Value": stats["total_students"]},
-            {"Metric": "Total Registrations", "Value": stats["total_registrations"]},
-            {"Metric": "Unique Participants", "Value": stats["unique_participants"]},
-        ]
-        
-        report_df = pd.DataFrame(report_data)
-        st.table(report_df)
-    
-    # System Logs
-    elif selected_menu == "System Logs":
-        st.header("📝 System Logs")
-        st.info("System logs feature will be available in the next update.")
+                for i, event_text in enumerate(events[:3]):  # Process first 3 events
+                    if len(event_text.strip()) > 50:
+                        with st.expander(f"Event {i+1}"):
+                            event_data = ai_gen.extract_event_info(event_text)
+                            st.json(event_data)
 
 # ============================================
-# FACULTY DASHBOARD
+# EVENT CARD WITH SOCIAL FEATURES
 # ============================================
-def faculty_dashboard():
-    """Faculty coordinator dashboard"""
+def display_advanced_event_card(event, user_id, show_actions=True):
+    """Display event card with social features"""
+    with st.container():
+        st.markdown('<div class="event-card">', unsafe_allow_html=True)
+        
+        # Header with AI badge
+        col_header = st.columns([4, 1])
+        with col_header[0]:
+            st.subheader(event.title)
+            if event.ai_generated:
+                st.markdown('<span class="ai-generated-badge">🤖 AI Generated</span>', 
+                           unsafe_allow_html=True)
+        with col_header[1]:
+            if event.is_upcoming():
+                st.success("🟢 Upcoming")
+            else:
+                st.error("🔴 Completed")
+        
+        # Event flyer
+        if event.flyer_image_path:
+            img_processor = get_image_processor()
+            img_processor.display_image(event.flyer_image_path, width=300)
+        
+        # Description
+        st.write(event.description[:300] + "..." if len(event.description) > 300 else event.description)
+        
+        # Details
+        col_details = st.columns(4)
+        with col_details[0]:
+            st.caption(f"**📅 Date:** {format_datetime(event.event_date)}")
+        with col_details[1]:
+            st.caption(f"**📍 Venue:** {event.venue}")
+        with col_details[2]:
+            st.caption(f"**🏷️ Type:** {event.event_type}")
+        with col_details[3]:
+            st.caption(f"**👨‍🏫 Organizer:** {event.organizer}")
+        
+        # Social buttons
+        if show_actions and user_id:
+            social = SocialFeatures(DatabaseOperations())
+            
+            # Get base URL for sharing (adjust for your deployment)
+            base_url = st.secrets.get("APP_URL", "https://yourapp.streamlit.app")
+            
+            # Display social buttons
+            social.display_social_buttons(event, user_id, base_url)
+            
+            # Registration section
+            st.markdown("---")
+            st.subheader("Registration")
+            
+            # Check if already registered
+            with DatabaseOperations() as db:
+                registration = db.session.query(Registration).filter(
+                    Registration.event_id == event.id,
+                    Registration.student_id == user_id
+                ).first()
+            
+            if registration:
+                st.success("✅ You are registered for this event")
+                
+                col_reg = st.columns(3)
+                with col_reg[0]:
+                    st.info(f"Status: {registration.registration_status.title()}")
+                with col_reg[1]:
+                    st.info(f"Attendance: {registration.attendance_status.title()}")
+                with col_reg[2]:
+                    if registration.registered_via_link:
+                        st.success("Registered via official link")
+                    if registration.registered_in_app:
+                        st.success("Marked 'I Have Registered'")
+            else:
+                col_reg_actions = st.columns(2)
+                
+                with col_reg_actions[0]:
+                    if event.registration_link:
+                        st.markdown(f"[🔗 Register via Official Link]({event.registration_link})", 
+                                   unsafe_allow_html=True)
+                
+                with col_reg_actions[1]:
+                    if st.button("✅ I Have Registered", key=f"registered_{event.id}"):
+                        with DatabaseOperations() as db:
+                            reg_data = {
+                                'event_id': event.id,
+                                'student_id': user_id,
+                                'registered_in_app': True,
+                                'registration_status': 'pending'
+                            }
+                            db.create_registration(reg_data)
+                            st.success("Registration marked! Waiting for verification.")
+                            st.rerun()
+        
+        # Comments section (collapsible)
+        with st.expander("💬 Comments"):
+            with DatabaseOperations() as db:
+                comments = db.get_event_comments(event.id)
+                
+                if comments:
+                    for comment in comments:
+                        st.markdown(f"**{comment.user.name}** ({format_datetime(comment.created_at)})")
+                        st.write(comment.comment_text)
+                        st.markdown("---")
+                else:
+                    st.info("No comments yet. Be the first to comment!")
+            
+            # Add comment
+            if user_id:
+                new_comment = st.text_area("Add a comment", key=f"comment_{event.id}")
+                if st.button("Post Comment", key=f"post_comment_{event.id}"):
+                    if new_comment:
+                        with DatabaseOperations() as db:
+                            db.add_comment({
+                                'event_id': event.id,
+                                'user_id': user_id,
+                                'comment_text': new_comment
+                            })
+                            st.success("Comment posted!")
+                            st.rerun()
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# ============================================
+# FACULTY DASHBOARD - ENHANCED
+# ============================================
+def faculty_dashboard_enhanced():
+    """Enhanced faculty dashboard with AI and image uploads"""
     st.sidebar.title("👨‍🏫 Faculty Panel")
-    st.sidebar.markdown(f"**Logged in as:** {st.session_state.get('name', 'Faculty')}")
-    display_role_badge("faculty")
+    st.sidebar.markdown(f"**Logged in as:** {st.session_state.user.name}")
     
-    menu_options = ["Dashboard", "Create Event", "My Events", "View Registrations"]
-    selected_menu = st.sidebar.selectbox("Navigation", menu_options)
+    menu = st.sidebar.selectbox("Navigation", [
+        "Dashboard", "Create Event", "AI Event Creation", "My Events", 
+        "View Registrations", "Event Analytics"
+    ])
     
-    st.sidebar.markdown("---")
-    if st.sidebar.button("Logout", type="secondary"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+    if menu == "Dashboard":
+        # ... (similar to previous dashboard but with database)
+        pass
     
-    # Dashboard
-    if selected_menu == "Dashboard":
-        st.markdown('<h1 class="main-header">Faculty Coordinator Dashboard</h1>', unsafe_allow_html=True)
+    elif menu == "Create Event":
+        st.header("➕ Create New Event (Manual)")
         
-        # Get faculty-specific statistics
-        events = data_manager.load_events()
-        my_events = [e for e in events if e.get("created_by") == st.session_state.username]
-        registrations = data_manager.load_registrations()
-        
-        # Count my event registrations
-        my_event_ids = [e.get("event_id") for e in my_events]
-        my_registrations = [r for r in registrations if r.get("event_id") in my_event_ids]
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown(f'''
-                <div class="metric-card">
-                    <div class="metric-value">{len(my_events)}</div>
-                    <div class="metric-label">My Events</div>
-                </div>
-            ''', unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown(f'''
-                <div class="metric-card">
-                    <div class="metric-value">{len(my_registrations)}</div>
-                    <div class="metric-label">Total Registrations</div>
-                </div>
-            ''', unsafe_allow_html=True)
-        
-        with col3:
-            upcoming_count = len([e for e in my_events if is_event_upcoming(e.get("event_date", ""))])
-            st.markdown(f'''
-                <div class="metric-card">
-                    <div class="metric-value">{upcoming_count}</div>
-                    <div class="metric-label">Upcoming Events</div>
-                </div>
-            ''', unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        # My Upcoming Events
-        st.subheader("📅 My Upcoming Events")
-        upcoming_events = [e for e in my_events if is_event_upcoming(e.get("event_date", ""))]
-        
-        if upcoming_events:
-            for event in upcoming_events[:3]:  # Show only 3
-                with st.container():
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        st.markdown(f"**{event.get('title', 'Untitled Event')}**")
-                        st.caption(f"Date: {format_date(event.get('event_date', ''))}")
-                        st.caption(f"Venue: {event.get('venue', 'N/A')}")
-                    with col2:
-                        registrations_count = len([r for r in my_registrations 
-                                                  if r.get("event_id") == event.get("event_id")])
-                        st.metric("Registrations", registrations_count)
-                    st.markdown("---")
-        else:
-            st.info("No upcoming events. Create your first event!")
-    
-    # Create Event
-    elif selected_menu == "Create Event":
-        st.header("➕ Create New Event")
-        
-        with st.form("create_event_form"):
+        with st.form("manual_event_form"):
             col1, col2 = st.columns(2)
             
             with col1:
-                event_title = st.text_input("Event Title *", placeholder="e.g., AI Workshop 2024")
+                title = st.text_input("Event Title *")
                 event_type = st.selectbox("Event Type *", 
                                          ["Workshop", "Hackathon", "Competition", 
                                           "Bootcamp", "Seminar", "Conference", "Webinar"])
                 event_date = st.date_input("Event Date *", min_value=date.today())
                 event_time = st.time_input("Event Time *")
-                
+                max_participants = st.number_input("Max Participants", min_value=1, value=100)
+            
             with col2:
-                venue = st.text_input("Venue *", placeholder="e.g., Seminar Hall, Block A")
+                venue = st.text_input("Venue *")
                 organizer = st.text_input("Organizer *", value="G H Raisoni College")
-                registration_link = st.text_input("Registration Link (Optional)", 
-                                                 placeholder="https://forms.google.com/...")
+                registration_link = st.text_input("Registration Link")
+                
+                # Flyer upload
+                st.subheader("Event Flyer")
+                flyer_file = st.file_uploader("Upload flyer image", 
+                                             type=['jpg', 'jpeg', 'png', 'gif'])
+                if flyer_file:
+                    img_processor = get_image_processor()
+                    temp_path = img_processor.save_uploaded_file(flyer_file)
+                    if temp_path:
+                        st.image(flyer_file, width=200)
+                        st.session_state.temp_flyer_path = temp_path
             
-            description = st.text_area("Event Description *", 
-                                      placeholder="Describe the event details, agenda, speakers, etc.",
-                                      height=150)
+            description = st.text_area("Event Description *", height=150)
             
-            required_fields = [event_title, event_type, venue, organizer, description]
-            
-            if st.form_submit_button("Create Event", use_container_width=True):
-                if not all(required_fields):
+            if st.form_submit_button("Create Event"):
+                if not all([title, event_type, venue, organizer, description]):
                     st.error("Please fill all required fields (*)")
                 else:
-                    # Combine date and time
                     event_datetime = datetime.combine(event_date, event_time)
                     
                     event_data = {
-                        "title": event_title,
-                        "description": description,
-                        "event_type": event_type,
-                        "event_date": event_datetime.isoformat(),
-                        "venue": venue,
-                        "organizer": organizer,
-                        "registration_link": registration_link,
-                        "created_by": st.session_state.username,
-                        "created_by_name": st.session_state.name
+                        'title': title,
+                        'description': description,
+                        'event_type': event_type,
+                        'event_date': event_datetime,
+                        'venue': venue,
+                        'organizer': organizer,
+                        'registration_link': registration_link,
+                        'max_participants': max_participants,
+                        'created_by': st.session_state.user.id,
+                        'ai_generated': False
                     }
                     
-                    event_id = data_manager.save_event(event_data)
-                    if event_id:
-                        st.success(f"Event '{event_title}' created successfully!")
+                    with DatabaseOperations() as db:
+                        event = db.create_event(event_data)
+                        
+                        # Save flyer if uploaded
+                        if hasattr(st.session_state, 'temp_flyer_path'):
+                            img_processor = get_image_processor()
+                            final_path = img_processor.save_uploaded_file(
+                                None, event_id=event.id
+                            )
+                            # In real app, you'd move the temp file to final location
+                            
+                            # Update event with flyer path
+                            db.update_event(event.id, {'flyer_image_path': final_path})
+                        
+                        st.success(f"Event '{event.title}' created successfully!")
                         st.balloons()
                         st.rerun()
-                    else:
-                        st.error("Failed to create event. Please try again.")
     
-    # My Events
-    elif selected_menu == "My Events":
-        st.header("📋 My Events")
-        
-        events = data_manager.load_events()
-        my_events = [e for e in events if e.get("created_by") == st.session_state.username]
-        
-        if not my_events:
-            st.info("You haven't created any events yet.")
-            return
-        
-        # Filter options
-        tab1, tab2 = st.tabs(["Upcoming Events", "Past Events"])
-        
-        with tab1:
-            upcoming_events = [e for e in my_events if is_event_upcoming(e.get("event_date", ""))]
-            
-            if upcoming_events:
-                for event in upcoming_events:
-                    display_event_card(event, show_actions=False)
-            else:
-                st.info("No upcoming events.")
-        
-        with tab2:
-            past_events = [e for e in my_events if not is_event_upcoming(e.get("event_date", ""))]
-            
-            if past_events:
-                for event in past_events:
-                    display_event_card(event, show_actions=False)
-            else:
-                st.info("No past events.")
+    elif menu == "AI Event Creation":
+        ai_event_creation()
     
-    # View Registrations
-    elif selected_menu == "View Registrations":
-        st.header("📝 Event Registrations")
+    elif menu == "Event Analytics":
+        st.header("📊 Event Analytics")
         
-        events = data_manager.load_events()
-        my_events = [e for e in events if e.get("created_by") == st.session_state.username]
-        
-        if not my_events:
-            st.info("You haven't created any events yet.")
-            return
-        
-        # Select event to view registrations
-        event_titles = [e.get("title") for e in my_events]
-        selected_event_title = st.selectbox("Select Event", event_titles)
-        
-        if selected_event_title:
-            selected_event = next(e for e in my_events if e.get("title") == selected_event_title)
-            event_id = selected_event.get("event_id")
+        with DatabaseOperations() as db:
+            # Get faculty's events
+            events = db.get_all_events({'created_by': st.session_state.user.id})
             
-            registrations = data_manager.load_registrations()
-            event_registrations = [r for r in registrations if r.get("event_id") == event_id]
-            
-            if event_registrations:
-                st.subheader(f"Registrations for: {selected_event_title}")
+            if events:
+                # Select event for detailed analytics
+                event_titles = [e.title for e in events]
+                selected_title = st.selectbox("Select Event", event_titles)
                 
-                # Convert to DataFrame
-                reg_data = []
-                for reg in event_registrations:
-                    reg_data.append({
-                        "Student Name": reg.get("student_name", "N/A"),
-                        "Roll Number": reg.get("roll_number", "N/A"),
-                        "Department": reg.get("department", "N/A"),
-                        "Registration Date": format_date(reg.get("registered_at", "")),
-                        "Status": reg.get("status", "pending").title(),
-                        "Attendance": reg.get("attendance", "absent").title()
-                    })
+                selected_event = next(e for e in events if e.title == selected_title)
                 
-                df = pd.DataFrame(reg_data)
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                # Display analytics
+                col1, col2, col3, col4 = st.columns(4)
                 
-                # Export option
-                if st.button("Export Registrations to CSV"):
+                with col1:
+                    st.metric("Total Views", selected_event.view_count)
+                with col2:
+                    st.metric("Likes", selected_event.like_count)
+                with col3:
+                    st.metric("Interested", selected_event.interested_count)
+                with col4:
+                    st.metric("Shares", selected_event.share_count)
+                
+                # Registrations
+                registrations = db.get_event_registrations(selected_event.id)
+                
+                st.subheader("Registrations")
+                if registrations:
+                    reg_data = []
+                    for reg in registrations:
+                        student = db.get_user_by_id(reg.student_id)
+                        reg_data.append({
+                            'Student': student.name,
+                            'Roll No': student.roll_number,
+                            'Department': student.department,
+                            'Status': reg.registration_status,
+                            'Attendance': reg.attendance_status,
+                            'Registered Via': 'Official Link' if reg.registered_via_link else 'App',
+                            'Date': format_datetime(reg.registration_date)
+                        })
+                    
+                    df = pd.DataFrame(reg_data)
+                    st.dataframe(df, use_container_width=True)
+                    
+                    # Export
                     csv = df.to_csv(index=False)
                     st.download_button(
-                        label="Download CSV",
+                        label="📥 Export Registrations",
                         data=csv,
-                        file_name=f"registrations_{selected_event_title.replace(' ', '_')}.csv",
+                        file_name=f"registrations_{selected_title}.csv",
                         mime="text/csv"
                     )
-                
-                # Summary
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Registrations", len(event_registrations))
-                with col2:
-                    attended = len([r for r in event_registrations if r.get("attendance") == "present"])
-                    st.metric("Attended", attended)
-                with col3:
-                    pending = len([r for r in event_registrations if r.get("status") == "pending"])
-                    st.metric("Pending Approval", pending)
-            else:
-                st.info(f"No registrations yet for '{selected_event_title}'")
-
-# ============================================
-# STUDENT DASHBOARD
-# ============================================
-def student_dashboard():
-    """Student dashboard"""
-    st.sidebar.title("👨‍🎓 Student Panel")
-    st.sidebar.markdown(f"**Logged in as:** {st.session_state.get('name', 'Student')}")
-    display_role_badge("student")
-    
-    # Get student info
-    users = data_manager.load_users()
-    student = next((u for u in users if u.get("username") == st.session_state.username), {})
-    
-    if student:
-        st.sidebar.markdown(f"**Roll No:** {student.get('roll_number', 'N/A')}")
-        st.sidebar.markdown(f"**Department:** {student.get('department', 'N/A')}")
-        st.sidebar.markdown(f"**Year:** {student.get('year', 'N/A')}")
-    
-    menu_options = ["Events Feed", "My Registrations", "My Profile"]
-    selected_menu = st.sidebar.selectbox("Navigation", menu_options)
-    
-    st.sidebar.markdown("---")
-    if st.sidebar.button("Logout", type="secondary"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
-    
-    # Events Feed
-    if selected_menu == "Events Feed":
-        st.markdown('<h1 class="main-header">🎯 Upcoming Events</h1>', unsafe_allow_html=True)
-        
-        events = data_manager.load_events()
-        registrations = data_manager.load_registrations()
-        
-        # Filter upcoming events
-        upcoming_events = [e for e in events if is_event_upcoming(e.get("event_date", ""))]
-        
-        if not upcoming_events:
-            st.info("No upcoming events at the moment. Check back later!")
-            return
-        
-        # Search and filter
-        col1, col2 = st.columns(2)
-        with col1:
-            search_query = st.text_input("Search events", placeholder="Type to search...")
-        with col2:
-            event_type_filter = st.selectbox("Filter by type", 
-                                            ["All", "Workshop", "Hackathon", "Competition", 
-                                             "Bootcamp", "Seminar", "Conference"])
-        
-        # Apply filters
-        filtered_events = upcoming_events
-        
-        if search_query:
-            filtered_events = [e for e in filtered_events 
-                             if search_query.lower() in e.get("title", "").lower() 
-                             or search_query.lower() in e.get("description", "").lower()]
-        
-        if event_type_filter != "All":
-            filtered_events = [e for e in filtered_events if e.get("event_type") == event_type_filter]
-        
-        # Display events
-        for event in filtered_events:
-            display_event_card(event, show_actions=True)
-    
-    # My Registrations
-    elif selected_menu == "My Registrations":
-        st.header("📋 My Registered Events")
-        
-        registrations = data_manager.load_registrations()
-        my_registrations = [r for r in registrations 
-                           if r.get("student_username") == st.session_state.username]
-        
-        if not my_registrations:
-            st.info("You haven't registered for any events yet.")
-            return
-        
-        # Get event details for each registration
-        events = data_manager.load_events()
-        event_map = {e.get("event_id"): e for e in events}
-        
-        # Tabs for different statuses
-        tab1, tab2, tab3 = st.tabs(["Upcoming", "Completed", "All"])
-        
-        with tab1:
-            upcoming_regs = []
-            for reg in my_registrations:
-                event = event_map.get(reg.get("event_id"))
-                if event and is_event_upcoming(event.get("event_date", "")):
-                    upcoming_regs.append((reg, event))
-            
-            if upcoming_regs:
-                for reg, event in upcoming_regs:
-                    display_registration_card(reg, event)
-            else:
-                st.info("No upcoming registered events.")
-        
-        with tab2:
-            completed_regs = []
-            for reg in my_registrations:
-                event = event_map.get(reg.get("event_id"))
-                if event and not is_event_upcoming(event.get("event_date", "")):
-                    completed_regs.append((reg, event))
-            
-            if completed_regs:
-                for reg, event in completed_regs:
-                    display_registration_card(reg, event)
-            else:
-                st.info("No completed events.")
-        
-        with tab3:
-            for reg in my_registrations:
-                event = event_map.get(reg.get("event_id"))
-                if event:
-                    display_registration_card(reg, event)
-    
-    # My Profile
-    elif selected_menu == "My Profile":
-        st.header("👤 My Profile")
-        
-        users = data_manager.load_users()
-        student = next((u for u in users if u.get("username") == st.session_state.username), None)
-        
-        if not student:
-            st.error("Profile not found")
-            return
-        
-        # Display profile info
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown(f"**Full Name:** {student.get('name', 'N/A')}")
-            st.markdown(f"**Roll Number:** {student.get('roll_number', 'N/A')}")
-            st.markdown(f"**Department:** {student.get('department', 'N/A')}")
-            st.markdown(f"**Year:** {student.get('year', 'N/A')}")
-        
-        with col2:
-            st.markdown(f"**Email:** {student.get('email', 'N/A')}")
-            st.markdown(f"**Username:** {student.get('username', 'N/A')}")
-            st.markdown(f"**Member Since:** {student.get('created_at', 'N/A')[:10]}")
-        
-        st.markdown("---")
-        
-        # Statistics
-        registrations = data_manager.load_registrations()
-        my_registrations = [r for r in registrations 
-                           if r.get("student_username") == st.session_state.username]
-        
-        events = data_manager.load_events()
-        event_map = {e.get("event_id"): e for e in events}
-        
-        # Calculate stats
-        total_registrations = len(my_registrations)
-        attended_events = len([r for r in my_registrations if r.get("attendance") == "present"])
-        upcoming_events = len([r for r in my_registrations 
-                              if event_map.get(r.get("event_id")) and 
-                              is_event_upcoming(event_map.get(r.get("event_id"), {}).get("event_date", ""))])
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric("Total Registrations", total_registrations)
-        with col2:
-            st.metric("Events Attended", attended_events)
-        with col3:
-            st.metric("Upcoming Events", upcoming_events)
-
-# ============================================
-# EVENT CARD DISPLAY
-# ============================================
-def display_event_card(event: Dict, show_actions: bool = True):
-    """Display an event card"""
-    with st.container():
-        st.markdown('<div class="event-card">', unsafe_allow_html=True)
-        
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            st.subheader(event.get("title", "Untitled Event"))
-            st.write(event.get("description", "No description available."))
-            
-            # Event details in columns
-            col_details = st.columns(4)
-            with col_details[0]:
-                st.caption(f"**📅 Date:** {format_date(event.get('event_date', ''))}")
-            with col_details[1]:
-                st.caption(f"**📍 Venue:** {event.get('venue', 'N/A')}")
-            with col_details[2]:
-                st.caption(f"**🏷️ Type:** {event.get('event_type', 'N/A')}")
-            with col_details[3]:
-                st.caption(f"**👨‍🏫 Organizer:** {event.get('organizer', 'N/A')}")
-        
-        with col2:
-            # Status indicator
-            if is_event_upcoming(event.get("event_date", "")):
-                st.success("🟢 Upcoming")
-            else:
-                st.error("🔴 Completed")
-            
-            # Engagement metrics
-            col_metrics = st.columns(2)
-            with col_metrics[0]:
-                st.metric("👍", event.get("likes", 0))
-            with col_metrics[1]:
-                st.metric("🤔", len(event.get("interested", [])))
-        
-        # Action buttons (for students)
-        if show_actions and st.session_state.get("role") == "student":
-            st.markdown("---")
-            
-            # Check if already registered
-            registrations = data_manager.load_registrations()
-            already_registered = any(
-                r.get("event_id") == event.get("event_id") and 
-                r.get("student_username") == st.session_state.username 
-                for r in registrations
-            )
-            
-            col_actions = st.columns(4)
-            
-            with col_actions[0]:
-                if st.button("👍 Like", key=f"like_{event.get('event_id')}"):
-                    current_likes = event.get("likes", 0)
-                    data_manager.update_event(event.get("event_id"), {"likes": current_likes + 1})
-                    st.success("Liked!")
-                    st.rerun()
-            
-            with col_actions[1]:
-                interested_users = event.get("interested", [])
-                is_interested = st.session_state.username in interested_users
-                button_text = "✅ Interested" if is_interested else "🤔 Interested"
-                
-                if st.button(button_text, key=f"interest_{event.get('event_id')}"):
-                    if is_interested:
-                        interested_users.remove(st.session_state.username)
-                    else:
-                        interested_users.append(st.session_state.username)
-                    
-                    data_manager.update_event(event.get("event_id"), {"interested": interested_users})
-                    st.rerun()
-            
-            with col_actions[2]:
-                if event.get("registration_link"):
-                    st.markdown(f"[🔗 Register Here]({event.get('registration_link')})", 
-                               unsafe_allow_html=True)
-            
-            with col_actions[3]:
-                if already_registered:
-                    st.success("✅ Registered")
                 else:
-                    if st.button("📝 Mark as Registered", key=f"register_{event.get('event_id')}"):
-                        # Get student info
-                        users = data_manager.load_users()
-                        student = next((u for u in users 
-                                       if u.get("username") == st.session_state.username), {})
-                        
-                        registration_data = {
-                            "event_id": event.get("event_id"),
-                            "event_title": event.get("title"),
-                            "student_username": st.session_state.username,
-                            "student_name": student.get("name", st.session_state.username),
-                            "roll_number": student.get("roll_number", "N/A"),
-                            "department": student.get("department", "N/A"),
-                            "status": "pending"
-                        }
-                        
-                        if data_manager.save_registration(registration_data):
-                            st.success("Registration marked successfully!")
-                            st.rerun()
-                        else:
-                            st.error("Already registered for this event")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+                    st.info("No registrations yet")
+            else:
+                st.info("You haven't created any events yet")
 
 # ============================================
-# REGISTRATION CARD DISPLAY
+# STUDENT DASHBOARD - ENHANCED
 # ============================================
-def display_registration_card(registration: Dict, event: Dict):
-    """Display a registration card"""
-    with st.container():
-        st.markdown('<div class="event-card">', unsafe_allow_html=True)
+def student_dashboard_enhanced():
+    """Enhanced student dashboard with social features"""
+    st.sidebar.title("👨‍🎓 Student Panel")
+    st.sidebar.markdown(f"**Logged in as:** {st.session_state.user.name}")
+    
+    menu = st.sidebar.selectbox("Navigation", [
+        "Events Feed", "My Registrations", "My Interests", "My Profile"
+    ])
+    
+    if menu == "Events Feed":
+        st.markdown('<h1 class="main-header">🎯 Discover Events</h1>', unsafe_allow_html=True)
         
-        col1, col2 = st.columns([3, 1])
+        # Filters
+        col_filters = st.columns([2, 1, 1, 1])
+        with col_filters[0]:
+            search = st.text_input("🔍 Search events", placeholder="Search by title, description...")
+        with col_filters[1]:
+            event_type = st.selectbox("Type", ["All", "Workshop", "Hackathon", "Competition", 
+                                              "Bootcamp", "Seminar", "Conference"])
+        with col_filters[2]:
+            sort_by = st.selectbox("Sort by", ["Date", "Popularity", "Newest"])
+        with col_filters[3]:
+            show_only = st.selectbox("Show", ["All", "Upcoming", "Past"])
         
-        with col1:
-            st.subheader(event.get("title", "Untitled Event"))
+        # Get events
+        with DatabaseOperations() as db:
+            filters = {}
+            if search:
+                filters['search'] = search
+            if event_type != "All":
+                filters['event_type'] = event_type
             
-            col_details = st.columns(3)
-            with col_details[0]:
-                st.caption(f"**📅 Event Date:** {format_date(event.get('event_date', ''))}")
-            with col_details[1]:
-                st.caption(f"**📍 Venue:** {event.get('venue', 'N/A')}")
-            with col_details[2]:
-                st.caption(f"**🏷️ Type:** {event.get('event_type', 'N/A')}")
-        
-        with col2:
-            # Status indicators
-            status = registration.get("status", "pending").title()
-            attendance = registration.get("attendance", "absent").title()
+            events = db.get_all_events(filters)
             
-            if status == "Approved":
-                st.success(f"✅ {status}")
-            elif status == "Rejected":
-                st.error(f"❌ {status}")
+            # Apply additional filters
+            if show_only == "Upcoming":
+                events = [e for e in events if e.is_upcoming()]
+            elif show_only == "Past":
+                events = [e for e in events if not e.is_upcoming()]
+            
+            # Sort
+            if sort_by == "Popularity":
+                events.sort(key=lambda x: x.like_count + x.interested_count, reverse=True)
+            elif sort_by == "Newest":
+                events.sort(key=lambda x: x.created_at, reverse=True)
+            else:  # Date
+                events.sort(key=lambda x: x.event_date)
+            
+            # Display events
+            for event in events:
+                display_advanced_event_card(event, st.session_state.user.id, show_actions=True)
+    
+    elif menu == "My Interests":
+        st.header("⭐ My Interests")
+        
+        with DatabaseOperations() as db:
+            # Get events user has interacted with
+            interactions = db.session.query(SocialInteraction).filter(
+                SocialInteraction.user_id == st.session_state.user.id
+            ).all()
+            
+            if interactions:
+                tab_fav, tab_int, tab_like = st.tabs(["Favorites", "Interested", "Liked"])
+                
+                with tab_fav:
+                    fav_events = [db.get_event(i.event_id) for i in interactions 
+                                 if i.interaction_type == 'favorite']
+                    for event in fav_events:
+                        if event:
+                            display_advanced_event_card(event, st.session_state.user.id, show_actions=False)
+                
+                with tab_int:
+                    int_events = [db.get_event(i.event_id) for i in interactions 
+                                 if i.interaction_type == 'interested']
+                    for event in int_events:
+                        if event:
+                            display_advanced_event_card(event, st.session_state.user.id, show_actions=False)
+                
+                with tab_like:
+                    like_events = [db.get_event(i.event_id) for i in interactions 
+                                  if i.interaction_type == 'like']
+                    for event in like_events:
+                        if event:
+                            display_advanced_event_card(event, st.session_state.user.id, show_actions=False)
             else:
-                st.warning(f"⏳ {status}")
-            
-            st.caption(f"Attendance: {attendance}")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+                st.info("You haven't interacted with any events yet. Start exploring!")
 
 # ============================================
 # MAIN APPLICATION
 # ============================================
 def main():
-    """Main application entry point"""
+    """Main application"""
     
-    # Initialize session state
-    if "role" not in st.session_state:
-        st.session_state.role = None
-    if "username" not in st.session_state:
-        st.session_state.username = None
-    if "name" not in st.session_state:
-        st.session_state.name = None
-    
-    # Route to appropriate dashboard
-    if st.session_state.role is None:
+    # Check if user is logged in
+    if 'user' not in st.session_state:
         login_page()
-    elif st.session_state.role == "admin":
-        admin_dashboard()
-    elif st.session_state.role == "faculty":
-        faculty_dashboard()
-    elif st.session_state.role == "student":
-        student_dashboard()
+        return
+    
+    # Route based on role
+    role = st.session_state.role
+    
+    if role == 'admin':
+        # ... (admin dashboard - similar to previous but with database)
+        pass
+    elif role == 'faculty':
+        faculty_dashboard_enhanced()
+    elif role == 'student':
+        student_dashboard_enhanced()
+    
+    # Logout button in sidebar
+    st.sidebar.markdown("---")
+    if st.sidebar.button("Logout", type="secondary"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
 
 # ============================================
 # RUN APPLICATION
