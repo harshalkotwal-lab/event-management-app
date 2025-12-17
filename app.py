@@ -1165,11 +1165,13 @@ def display_event_card_social(event, current_user=None):
             # LIKE button - FIXED: Dynamic text based on current state
             with col_social[0]:
                 # Determine button text based on current state
-                like_icon = "❤️" if user_liked else "🤍"
-                like_text = f"{like_icon} Unlike" if user_liked else f"{like_icon} Like"
+                # like_icon = "❤️" if user_liked else "🤍"
+                # like_text = f"{like_icon} Unlike" if user_liked else f"{like_icon} Like"
         
                 # Create button with appropriate text
-                if st.button(like_text, key=f"like_btn_{event_id}_{unique_suffix}", use_container_width=True):
+                if st.button(f"{'❤️' if user_liked else '🤍'} Like", 
+                     key=f"like_{event_id}_{current_user}_{unique_suffix}", 
+                     use_container_width=True):
                     with st.spinner("Updating..."):
                         # Toggle like status
                         new_like_status = not user_liked
