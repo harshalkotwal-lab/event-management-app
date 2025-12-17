@@ -792,6 +792,7 @@ def display_event_card_social(event, current_user=None):
     """Display event card with social features"""
     event_id = event.get('id')
     
+    # Use a container to prevent re-render issues
     with st.container():
         st.markdown('<div class="event-card">', unsafe_allow_html=True)
         
@@ -835,254 +836,182 @@ def display_event_card_social(event, current_user=None):
         
         # Social buttons (only for logged-in users)
         if current_user:
-            # Load fresh data for social stats
-            events = data_manager.load('events')
-            current_event = next((e for e in events if e.get('id') == event_id), event)
-            social_stats = current_event.get('social_stats', {})
+            # Get current social stats
+            social_stats = event.get('social_stats', {})
+            likes = social_stats.get('likes', [])
+            favorites = social_stats.get('favorites', [])
+            interested = social_stats.get('interested', [])
+            shares = social_stats.get('shares', 0)
+            views = social_stats.get('views', 0)
             
-            # Get user's interactions
-            user_interactions = {
-                'liked': current_user in social_stats.get('likes', []),
-                'favorited': current_user in social_stats.get('favorites', []),
-                'interested': current_user in social_stats.get('interested', [])
-            }
+            # Check user's current interactions
+            user_liked = current_user in likes
+            user_favorited = current_user in favorites
+            user_interested = current_user in interested
             
             st.markdown("---")
             st.markdown("**Social Interactions**")
             
             col_social = st.columns(5)
             
+            # LIKE button
             with col_social[0]:
-                like_icon = "❤️" if user_interactions['liked'] else "🤍"
-                like_button = st.button(f"{like_icon} Like", 
-                                      key=f"like_{event_id}_{current_user}",
-                                      use_container_width=True)
+                like_key = f"like_{event_id}"
+                like_icon = "❤️" if user_liked else "🤍"
                 
-                if like_button:
-                    # Load fresh events data
+                if st.button(f"{like_icon} Like", key=like_key, use_container_width=True):
+                    # Update likes
                     events = data_manager.load('events')
-                    event_to_update = None
-                    event_index = -1
-                    
-                    # Find the event
-                    for i, e in enumerate(events):
+                    for e in events:
                         if e.get('id') == event_id:
-                            event_to_update = e
-                            event_index = i
-                            break
-                    
-                    if event_to_update:
-                        # Initialize social_stats if not present
-                        if 'social_stats' not in event_to_update:
-                            event_to_update['social_stats'] = {
-                                'likes': [],
-                                'favorites': [],
-                                'interested': [],
-                                'shares': 0,
-                                'views': 0
-                            }
-                        
-                        # Toggle like
-                        likes = event_to_update['social_stats'].get('likes', [])
-                        if current_user in likes:
-                            likes.remove(current_user)
-                        else:
-                            likes.append(current_user)
-                        
-                        # Update the event in the list
-                        events[event_index]['social_stats']['likes'] = likes
-                        
-                        # Save back to file
-                        if data_manager.save('events', events):
-                            st.success("Like updated!")
+                            # Initialize social_stats if needed
+                            if 'social_stats' not in e:
+                                e['social_stats'] = {'likes': [], 'favorites': [], 'interested': [], 'shares': 0, 'views': 0}
+                            
+                            # Toggle user's like
+                            current_likes = e['social_stats'].get('likes', [])
+                            if current_user in current_likes:
+                                current_likes.remove(current_user)
+                            else:
+                                current_likes.append(current_user)
+                            
+                            e['social_stats']['likes'] = current_likes
+                            
+                            # Save the updated events
+                            data_manager.save('events', events)
                             st.rerun()
+                            break
                 
-                st.caption(f"{len(social_stats.get('likes', []))} likes")
+                # Display count - use updated value if we just toggled
+                if st.session_state.get(f"like_toggled_{event_id}", False):
+                    current_likes_count = len(likes) + (1 if not user_liked else -1)
+                else:
+                    current_likes_count = len(likes)
+                st.caption(f"{current_likes_count} likes")
             
+            # FAVORITE button
             with col_social[1]:
-                fav_icon = "⭐" if user_interactions['favorited'] else "☆"
-                fav_button = st.button(f"{fav_icon} Favorite", 
-                                     key=f"fav_{event_id}_{current_user}",
-                                     use_container_width=True)
+                fav_key = f"fav_{event_id}"
+                fav_icon = "⭐" if user_favorited else "☆"
                 
-                if fav_button:
-                    # Load fresh events data
+                if st.button(f"{fav_icon} Favorite", key=fav_key, use_container_width=True):
+                    # Update favorites
                     events = data_manager.load('events')
-                    event_to_update = None
-                    event_index = -1
-                    
-                    # Find the event
-                    for i, e in enumerate(events):
+                    for e in events:
                         if e.get('id') == event_id:
-                            event_to_update = e
-                            event_index = i
-                            break
-                    
-                    if event_to_update:
-                        # Initialize social_stats if not present
-                        if 'social_stats' not in event_to_update:
-                            event_to_update['social_stats'] = {
-                                'likes': [],
-                                'favorites': [],
-                                'interested': [],
-                                'shares': 0,
-                                'views': 0
-                            }
-                        
-                        # Toggle favorite
-                        favorites = event_to_update['social_stats'].get('favorites', [])
-                        if current_user in favorites:
-                            favorites.remove(current_user)
-                        else:
-                            favorites.append(current_user)
-                        
-                        # Update the event in the list
-                        events[event_index]['social_stats']['favorites'] = favorites
-                        
-                        # Save back to file
-                        if data_manager.save('events', events):
-                            st.success("Favorite updated!")
+                            # Initialize social_stats if needed
+                            if 'social_stats' not in e:
+                                e['social_stats'] = {'likes': [], 'favorites': [], 'interested': [], 'shares': 0, 'views': 0}
+                            
+                            # Toggle user's favorite
+                            current_favs = e['social_stats'].get('favorites', [])
+                            if current_user in current_favs:
+                                current_favs.remove(current_user)
+                            else:
+                                current_favs.append(current_user)
+                            
+                            e['social_stats']['favorites'] = current_favs
+                            
+                            # Save the updated events
+                            data_manager.save('events', events)
                             st.rerun()
+                            break
                 
-                st.caption(f"{len(social_stats.get('favorites', []))} favorites")
+                # Display count
+                current_favs_count = len(favorites)
+                st.caption(f"{current_favs_count} favorites")
             
+            # INTERESTED button
             with col_social[2]:
-                int_icon = "✅" if user_interactions['interested'] else "🤔"
-                int_button = st.button(f"{int_icon} Interested", 
-                                     key=f"int_{event_id}_{current_user}",
-                                     use_container_width=True)
+                int_key = f"int_{event_id}"
+                int_icon = "✅" if user_interested else "🤔"
                 
-                if int_button:
-                    # Load fresh events data
+                if st.button(f"{int_icon} Interested", key=int_key, use_container_width=True):
+                    # Update interested
                     events = data_manager.load('events')
-                    event_to_update = None
-                    event_index = -1
-                    
-                    # Find the event
-                    for i, e in enumerate(events):
+                    for e in events:
                         if e.get('id') == event_id:
-                            event_to_update = e
-                            event_index = i
-                            break
-                    
-                    if event_to_update:
-                        # Initialize social_stats if not present
-                        if 'social_stats' not in event_to_update:
-                            event_to_update['social_stats'] = {
-                                'likes': [],
-                                'favorites': [],
-                                'interested': [],
-                                'shares': 0,
-                                'views': 0
-                            }
-                        
-                        # Toggle interested
-                        interested = event_to_update['social_stats'].get('interested', [])
-                        if current_user in interested:
-                            interested.remove(current_user)
-                        else:
-                            interested.append(current_user)
-                        
-                        # Update the event in the list
-                        events[event_index]['social_stats']['interested'] = interested
-                        
-                        # Save back to file
-                        if data_manager.save('events', events):
-                            st.success("Interest updated!")
+                            # Initialize social_stats if needed
+                            if 'social_stats' not in e:
+                                e['social_stats'] = {'likes': [], 'favorites': [], 'interested': [], 'shares': 0, 'views': 0}
+                            
+                            # Toggle user's interest
+                            current_int = e['social_stats'].get('interested', [])
+                            if current_user in current_int:
+                                current_int.remove(current_user)
+                            else:
+                                current_int.append(current_user)
+                            
+                            e['social_stats']['interested'] = current_int
+                            
+                            # Save the updated events
+                            data_manager.save('events', events)
                             st.rerun()
-                
-                st.caption(f"{len(social_stats.get('interested', []))} interested")
-            
-            with col_social[3]:
-                share_button = st.button("📤 Share", 
-                                       key=f"share_{event_id}_{current_user}",
-                                       use_container_width=True)
-                
-                if share_button:
-                    # Load fresh events data
-                    events = data_manager.load('events')
-                    event_to_update = None
-                    event_index = -1
-                    
-                    # Find the event
-                    for i, e in enumerate(events):
-                        if e.get('id') == event_id:
-                            event_to_update = e
-                            event_index = i
                             break
-                    
-                    if event_to_update:
-                        # Initialize social_stats if not present
-                        if 'social_stats' not in event_to_update:
-                            event_to_update['social_stats'] = {
-                                'likes': [],
-                                'favorites': [],
-                                'interested': [],
-                                'shares': 0,
-                                'views': 0
-                            }
-                        
-                        # Increment share count
-                        shares = event_to_update['social_stats'].get('shares', 0) + 1
-                        
-                        # Update the event in the list
-                        events[event_index]['social_stats']['shares'] = shares
-                        
-                        # Save back to file
-                        if data_manager.save('events', events):
+                
+                # Display count
+                current_int_count = len(interested)
+                st.caption(f"{current_int_count} interested")
+            
+            # SHARE button
+            with col_social[3]:
+                share_key = f"share_{event_id}"
+                
+                if st.button("📤 Share", key=share_key, use_container_width=True):
+                    # Update shares count
+                    events = data_manager.load('events')
+                    for e in events:
+                        if e.get('id') == event_id:
+                            # Initialize social_stats if needed
+                            if 'social_stats' not in e:
+                                e['social_stats'] = {'likes': [], 'favorites': [], 'interested': [], 'shares': 0, 'views': 0}
+                            
+                            # Increment shares
+                            current_shares = e['social_stats'].get('shares', 0)
+                            e['social_stats']['shares'] = current_shares + 1
+                            
+                            # Save the updated events
+                            data_manager.save('events', events)
+                            
                             # Generate share text
                             share_text = f"Check out this event: {event['title']}"
                             if event.get('registration_link'):
                                 share_text += f"\nRegister here: {event['registration_link']}"
                             
-                            # Show share options
-                            st.toast("Event shared! 📤")
-                            st.info(f"Copy this text to share:\n\n`{share_text}`")
+                            # Show success message
+                            st.success(f"Event shared! Count: {current_shares + 1}")
+                            st.code(share_text)
                             st.rerun()
-                
-                st.caption(f"{social_stats.get('shares', 0)} shares")
-            
-            with col_social[4]:
-                view_button = st.button("👁️ View", 
-                                      key=f"view_{event_id}_{current_user}",
-                                      use_container_width=True)
-                
-                if view_button:
-                    # Load fresh events data
-                    events = data_manager.load('events')
-                    event_to_update = None
-                    event_index = -1
-                    
-                    # Find the event
-                    for i, e in enumerate(events):
-                        if e.get('id') == event_id:
-                            event_to_update = e
-                            event_index = i
                             break
-                    
-                    if event_to_update:
-                        # Initialize social_stats if not present
-                        if 'social_stats' not in event_to_update:
-                            event_to_update['social_stats'] = {
-                                'likes': [],
-                                'favorites': [],
-                                'interested': [],
-                                'shares': 0,
-                                'views': 0
-                            }
-                        
-                        # Increment view count
-                        views = event_to_update['social_stats'].get('views', 0) + 1
-                        
-                        # Update the event in the list
-                        events[event_index]['social_stats']['views'] = views
-                        
-                        # Save back to file
-                        if data_manager.save('events', events):
-                            st.success("View recorded!")
-                            st.rerun()
                 
-                st.caption(f"{social_stats.get('views', 0)} views")
+                # Display count
+                st.caption(f"{shares} shares")
+            
+            # VIEW button
+            with col_social[4]:
+                view_key = f"view_{event_id}"
+                
+                if st.button("👁️ View", key=view_key, use_container_width=True):
+                    # Update views count
+                    events = data_manager.load('events')
+                    for e in events:
+                        if e.get('id') == event_id:
+                            # Initialize social_stats if needed
+                            if 'social_stats' not in e:
+                                e['social_stats'] = {'likes': [], 'favorites': [], 'interested': [], 'shares': 0, 'views': 0}
+                            
+                            # Increment views
+                            current_views = e['social_stats'].get('views', 0)
+                            e['social_stats']['views'] = current_views + 1
+                            
+                            # Save the updated events
+                            data_manager.save('events', events)
+                            st.success(f"View recorded! Total: {current_views + 1}")
+                            st.rerun()
+                            break
+                
+                # Display count
+                st.caption(f"{views} views")
         
         # Registration section
         st.markdown("---")
@@ -1123,12 +1052,9 @@ def display_event_card_social(event, current_user=None):
                     st.caption("Click the link above to register on the official platform")
             
             with col_reg_actions[1]:
-                reg_button = st.button("✅ **I Have Registered**", 
-                                     key=f"reg_{event_id}_{current_user}",
-                                     use_container_width=True, 
-                                     type="primary")
-                
-                if reg_button:
+                reg_key = f"reg_{event_id}"
+                if st.button("✅ **I Have Registered**", key=reg_key, 
+                           use_container_width=True, type="primary"):
                     # Create registration record
                     users = data_manager.load('users')
                     student = next((u for u in users if u.get('username') == current_user), {})
