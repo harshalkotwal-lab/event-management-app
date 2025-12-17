@@ -93,3 +93,26 @@ class SocialFeatures:
                     share_links = self.get_share_links(event, base_url)
                     
                     platforms = {
+                        'Twitter': '🐦',
+                        'Facebook': '📘',
+                        'LinkedIn': '💼',
+                        'WhatsApp': '💚',
+                        'Telegram': '📡'
+                    }
+                    
+                    for platform, icon in platforms.items():
+                        platform_key = platform.lower()
+                        share_url = share_links.get(platform_key)
+                        if share_url:
+                            st.markdown(f"[{icon} {platform}]({share_url})")
+                
+                # Record share
+                self.handle_share(event.id, user_id, 'popup')
+                st.rerun()
+        
+        with col5:
+            if st.button("👁️", key=f"view_{event.id}"):
+                # Increment view count
+                event.view_count += 1
+                self.db.session.commit()
+                st.rerun()
