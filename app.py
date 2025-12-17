@@ -249,16 +249,28 @@ class JSONDataManager:
         """Save data to JSON file"""
         try:
             file_path = self.files[data_type]
-            with open(file_path, 'w') as f:
+        
+            # Ensure directory exists
+            file_path.parent.mkdir(exist_ok=True, parents=True)
+        
+            # Save to temporary file first
+            temp_file = file_path.with_suffix('.tmp')
+            with open(temp_file, 'w') as f:
                 json.dump(data, f, indent=2)
-            # Debug: Check if file was created
+        
+            # Move to actual file (atomic operation)
+            temp_file.replace(file_path)
+        
+            # Verify save
             if os.path.exists(file_path):
-                st.sidebar.info(f"Saved {data_type}: {len(data)} records")
+                # Debug info (optional)
+                # st.sidebar.success(f"✓ Saved {data_type} ({len(data)} items)")
+                return True
             else:
-                st.sidebar.error(f"Failed to save {data_type}")
-            return True
+                # st.sidebar.error(f"✗ Failed to save {data_type}")
+                return False
         except Exception as e:
-            st.sidebar.error(f"Save error for {data_type}: {str(e)}")
+            # st.sidebar.error(f"Save error: {e}")
             return False
     
     def add_item(self, data_type, item_data):
@@ -892,9 +904,13 @@ def display_event_card_social(event, current_user=None):
     """Display event card with social features"""
     event_id = event.get('id')
     
-    # Generate a unique key prefix for this event display
+    # Generate a unique display key
     import time
     display_key = f"{event_id}_{int(time.time() * 1000) % 10000}"
+    
+    # Reload fresh data to ensure we have latest stats
+    events = data_manager.load('events')
+    current_event = next((e for e in events if e.get('id') == event_id), event)
     
     # Use a container to prevent re-render issues
     with st.container():
@@ -903,19 +919,19 @@ def display_event_card_social(event, current_user=None):
         # Header with AI badge
         col_header = st.columns([4, 1])
         with col_header[0]:
-            st.subheader(event.get('title', 'Untitled Event'))
-            if event.get('ai_generated'):
+            st.subheader(current_event.get('title', 'Untitled Event'))
+            if current_event.get('ai_generated'):
                 st.markdown('<span class="ai-badge">🤖 AI Generated</span>', 
                            unsafe_allow_html=True)
         with col_header[1]:
-            if is_upcoming(event.get('event_date')):
+            if is_upcoming(current_event.get('event_date')):
                 st.success("🟢 Upcoming")
             else:
                 st.error("🔴 Completed")
         
         # Event flyer
-        if event.get('flyer_path'):
-            flyer_path = event.get('flyer_path')
+        if current_event.get('flyer_path'):
+            flyer_path = current_event.get('flyer_path')
             try:
                 # Check if it's a base64 data URL
                 if flyer_path.startswith('data:image/'):
@@ -927,10 +943,10 @@ def display_event_card_social(event, current_user=None):
                         image = Image.open(flyer_path)
                         st.image(image, width=300, caption="Event Flyer")
             except Exception as e:
-                st.warning(f"Could not display event flyer")
+                st.warning("Could not display event flyer")
         
         # Description
-        desc = event.get('description', 'No description')
+        desc = current_event.get('description', 'No description')
         if len(desc) > 300:
             desc = desc[:300] + "..."
         st.write(desc)
@@ -938,29 +954,29 @@ def display_event_card_social(event, current_user=None):
         # Details
         col_details = st.columns(4)
         with col_details[0]:
-            st.caption(f"**📅 Date:** {format_date(event.get('event_date'))}")
+            st.caption(f"**📅 Date:** {format_date(current_event.get('event_date'))}")
         with col_details[1]:
-            st.caption(f"**📍 Venue:** {event.get('venue', 'N/A')}")
+            st.caption(f"**📍 Venue:** {current_event.get('venue', 'N/A')}")
         with col_details[2]:
-            st.caption(f"**🏷️ Type:** {event.get('event_type', 'N/A')}")
+            st.caption(f"**🏷️ Type:** {current_event.get('event_type', 'N/A')}")
         with col_details[3]:
-            st.caption(f"**👨‍🏫 Organizer:** {event.get('organizer', 'N/A')}")
+            st.caption(f"**👨‍🏫 Organizer:** {current_event.get('organizer', 'N/A')}")
+        
+        # Get current social stats from the loaded event
+        social_stats = current_event.get('social_stats', {})
+        likes = social_stats.get('likes', [])
+        favorites = social_stats.get('favorites', [])
+        interested = social_stats.get('interested', [])
+        shares = social_stats.get('shares', 0)
+        views = social_stats.get('views', 0)
+        
+        # Check user's current interactions
+        user_liked = current_user in likes if current_user else False
+        user_favorited = current_user in favorites if current_user else False
+        user_interested = current_user in interested if current_user else False
         
         # Social buttons (only for logged-in users)
         if current_user and current_user != "None":
-            # Get current social stats
-            social_stats = event.get('social_stats', {})
-            likes = social_stats.get('likes', [])
-            favorites = social_stats.get('favorites', [])
-            interested = social_stats.get('interested', [])
-            shares = social_stats.get('shares', 0)
-            views = social_stats.get('views', 0)
-            
-            # Check user's current interactions
-            user_liked = current_user in likes
-            user_favorited = current_user in favorites
-            user_interested = current_user in interested
-            
             st.markdown("---")
             st.markdown("**Social Interactions**")
             
@@ -972,9 +988,9 @@ def display_event_card_social(event, current_user=None):
                 like_icon = "❤️" if user_liked else "🤍"
                 
                 if st.button(f"{like_icon} Like", key=like_key, use_container_width=True):
-                    # Update likes
-                    events = data_manager.load('events')
-                    for e in events:
+                    # Update likes in database
+                    all_events = data_manager.load('events')
+                    for e in all_events:
                         if e.get('id') == event_id:
                             # Initialize social_stats if needed
                             if 'social_stats' not in e:
@@ -990,9 +1006,9 @@ def display_event_card_social(event, current_user=None):
                             e['social_stats']['likes'] = current_likes
                             
                             # Save the updated events
-                            data_manager.save('events', events)
+                            data_manager.save('events', all_events)
+                            st.success(f"{'Removed like' if user_liked else 'Liked!'}")
                             st.rerun()
-                            break
                 
                 # Display count
                 current_likes_count = len(likes)
@@ -1004,9 +1020,9 @@ def display_event_card_social(event, current_user=None):
                 fav_icon = "⭐" if user_favorited else "☆"
                 
                 if st.button(f"{fav_icon} Favorite", key=fav_key, use_container_width=True):
-                    # Update favorites
-                    events = data_manager.load('events')
-                    for e in events:
+                    # Update favorites in database
+                    all_events = data_manager.load('events')
+                    for e in all_events:
                         if e.get('id') == event_id:
                             # Initialize social_stats if needed
                             if 'social_stats' not in e:
@@ -1022,9 +1038,9 @@ def display_event_card_social(event, current_user=None):
                             e['social_stats']['favorites'] = current_favs
                             
                             # Save the updated events
-                            data_manager.save('events', events)
+                            data_manager.save('events', all_events)
+                            st.success(f"{'Removed from favorites' if user_favorited else 'Added to favorites!'}")
                             st.rerun()
-                            break
                 
                 # Display count
                 current_favs_count = len(favorites)
@@ -1036,9 +1052,9 @@ def display_event_card_social(event, current_user=None):
                 int_icon = "✅" if user_interested else "🤔"
                 
                 if st.button(f"{int_icon} Interested", key=int_key, use_container_width=True):
-                    # Update interested
-                    events = data_manager.load('events')
-                    for e in events:
+                    # Update interested in database
+                    all_events = data_manager.load('events')
+                    for e in all_events:
                         if e.get('id') == event_id:
                             # Initialize social_stats if needed
                             if 'social_stats' not in e:
@@ -1054,9 +1070,9 @@ def display_event_card_social(event, current_user=None):
                             e['social_stats']['interested'] = current_int
                             
                             # Save the updated events
-                            data_manager.save('events', events)
+                            data_manager.save('events', all_events)
+                            st.success(f"{'Removed interest' if user_interested else 'Marked as interested!'}")
                             st.rerun()
-                            break
                 
                 # Display count
                 current_int_count = len(interested)
@@ -1067,9 +1083,9 @@ def display_event_card_social(event, current_user=None):
                 share_key = f"share_{display_key}_{current_user}"
                 
                 if st.button("📤 Share", key=share_key, use_container_width=True):
-                    # Update shares count
-                    events = data_manager.load('events')
-                    for e in events:
+                    # Update shares count in database
+                    all_events = data_manager.load('events')
+                    for e in all_events:
                         if e.get('id') == event_id:
                             # Initialize social_stats if needed
                             if 'social_stats' not in e:
@@ -1080,18 +1096,18 @@ def display_event_card_social(event, current_user=None):
                             e['social_stats']['shares'] = current_shares + 1
                             
                             # Save the updated events
-                            data_manager.save('events', events)
+                            data_manager.save('events', all_events)
                             
                             # Generate share text
-                            share_text = f"Check out this event: {event['title']}"
-                            if event.get('registration_link'):
-                                share_text += f"\nRegister here: {event['registration_link']}"
+                            share_text = f"Check out this event: {current_event['title']}"
+                            if current_event.get('registration_link'):
+                                share_text += f"\nRegister here: {current_event['registration_link']}"
                             
                             # Show success message
-                            st.success(f"Event shared! Count: {current_shares + 1}")
+                            st.success(f"Event shared! Total shares: {current_shares + 1}")
+                            # Show shareable text
                             st.code(share_text)
                             st.rerun()
-                            break
                 
                 # Display count
                 st.caption(f"{shares} shares")
@@ -1101,9 +1117,9 @@ def display_event_card_social(event, current_user=None):
                 view_key = f"view_{display_key}_{current_user}"
                 
                 if st.button("👁️ View", key=view_key, use_container_width=True):
-                    # Update views count
-                    events = data_manager.load('events')
-                    for e in events:
+                    # Update views count in database
+                    all_events = data_manager.load('events')
+                    for e in all_events:
                         if e.get('id') == event_id:
                             # Initialize social_stats if needed
                             if 'social_stats' not in e:
@@ -1114,22 +1130,15 @@ def display_event_card_social(event, current_user=None):
                             e['social_stats']['views'] = current_views + 1
                             
                             # Save the updated events
-                            data_manager.save('events', events)
-                            st.success(f"View recorded! Total: {current_views + 1}")
+                            data_manager.save('events', all_events)
+                            st.success(f"View recorded! Total views: {current_views + 1}")
                             st.rerun()
-                            break
                 
                 # Display count
                 st.caption(f"{views} views")
+        
         else:
             # Show social stats without interactive buttons
-            social_stats = event.get('social_stats', {})
-            likes = social_stats.get('likes', [])
-            favorites = social_stats.get('favorites', [])
-            interested = social_stats.get('interested', [])
-            shares = social_stats.get('shares', 0)
-            views = social_stats.get('views', 0)
-            
             st.markdown("---")
             st.markdown("**Social Stats**")
             
@@ -1161,26 +1170,27 @@ def display_event_card_social(event, current_user=None):
                 st.success("✅ You are registered for this event")
                 
                 # Show registration details
-                registration = next(r for r in registrations 
-                                  if r.get('event_id') == event_id and 
-                                  r.get('student_username') == current_user)
+                registration = next((r for r in registrations 
+                                   if r.get('event_id') == event_id and 
+                                   r.get('student_username') == current_user), None)
                 
-                col_reg = st.columns(3)
-                with col_reg[0]:
-                    st.info(f"Status: {registration.get('status', 'pending').title()}")
-                with col_reg[1]:
-                    st.info(f"Via: {'Official Link' if registration.get('via_link') else 'App'}")
-                with col_reg[2]:
-                    if registration.get('attendance') == 'present':
-                        st.success("Attended ✅")
-                    else:
-                        st.warning("Not Attended")
+                if registration:
+                    col_reg = st.columns(3)
+                    with col_reg[0]:
+                        st.info(f"Status: {registration.get('status', 'pending').title()}")
+                    with col_reg[1]:
+                        st.info(f"Via: {'Official Link' if registration.get('via_link') else 'App'}")
+                    with col_reg[2]:
+                        if registration.get('attendance') == 'present':
+                            st.success("Attended ✅")
+                        else:
+                            st.warning("Not Attended")
             else:
                 col_reg_actions = st.columns([2, 1])
                 
                 with col_reg_actions[0]:
-                    if event.get('registration_link'):
-                        st.markdown(f"[🔗 **Register via Official Link**]({event['registration_link']})", 
+                    if current_event.get('registration_link'):
+                        st.markdown(f"[🔗 **Register via Official Link**]({current_event['registration_link']})", 
                                    unsafe_allow_html=True)
                         st.caption("Click the link above to register on the official platform")
                 
@@ -1195,7 +1205,7 @@ def display_event_card_social(event, current_user=None):
                         reg_data = {
                             'id': str(uuid.uuid4()),
                             'event_id': event_id,
-                            'event_title': event.get('title', 'Untitled Event'),
+                            'event_title': current_event.get('title', 'Untitled Event'),
                             'student_username': current_user,
                             'student_name': student.get('name', current_user),
                             'student_roll': student.get('roll_no', 'N/A'),
