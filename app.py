@@ -1064,6 +1064,8 @@ def safe_get(data, key, default=None):
 # ENHANCED EVENT CARD WITH SOCIAL FEATURES - FIXED VERSION
 # ============================================
 def display_event_card_social(event, current_user=None):
+    import time
+    unique_suffix = str(int(time.time() * 1000))  # Millisecond timestamp
     """Display event card with social features - FIXED VERSION"""
     event_id = event.get('id')
     
@@ -1162,7 +1164,7 @@ def display_event_card_social(event, current_user=None):
                 like_text = f"{like_icon} Like"
                 
                 # Use a form submit button approach
-                if st.button(like_text, key=f"like_btn_{event_id}_{current_user}", use_container_width=True):
+                if st.button(like_text, key=f"like_btn_{event_id}_{current_user}_{unique_suffix}", use_container_width=True):
                     with st.spinner("Updating..."):
                         # Toggle like status
                         new_like_status = not user_liked
@@ -1193,7 +1195,7 @@ def display_event_card_social(event, current_user=None):
                 fav_icon = "⭐" if user_favorited else "☆"
                 fav_text = f"{fav_icon} Favorite"
                 
-                if st.button(fav_text, key=f"fav_btn_{event_id}_{current_user}", use_container_width=True):
+                if st.button(like_text, key=f"like_btn_{event_id}_{current_user}_{unique_suffix}", use_container_width=True):
                     with st.spinner("Updating..."):
                         # Toggle favorite status
                         new_fav_status = not user_favorited
@@ -1224,7 +1226,7 @@ def display_event_card_social(event, current_user=None):
                 int_icon = "✅" if user_interested else "🤔"
                 int_text = f"{int_icon} Interested"
                 
-                if st.button(int_text, key=f"int_btn_{event_id}_{current_user}", use_container_width=True):
+                if st.button(like_text, key=f"like_btn_{event_id}_{current_user}_{unique_suffix}", use_container_width=True):
                     with st.spinner("Updating..."):
                         # Toggle interested status
                         new_int_status = not user_interested
@@ -1254,7 +1256,7 @@ def display_event_card_social(event, current_user=None):
             with col_social[3]:
                 share_text = "📤 Share"
                 
-                if st.button(share_text, key=f"share_btn_{event_id}_{current_user}", use_container_width=True):
+                if st.button(like_text, key=f"like_btn_{event_id}_{current_user}_{unique_suffix}", use_container_width=True):
                     with st.spinner("Sharing..."):
                         success = db_manager.increment_event_shares(event_id, current_user)
                         
@@ -1286,7 +1288,7 @@ def display_event_card_social(event, current_user=None):
             with col_social[4]:
                 view_text = "👁️ View"
                 
-                if st.button(view_text, key=f"view_btn_{event_id}_{current_user}", use_container_width=True):
+                if st.button(like_text, key=f"like_btn_{event_id}_{current_user}_{unique_suffix}", use_container_width=True):
                     with st.spinner("Recording view..."):
                         success = db_manager.increment_event_views(event_id, current_user)
                         
