@@ -635,126 +635,156 @@ Organized by CSE Department.
 Register: https://forms.gle/example
 Prizes: ₹50,000""")
         
-        if st.button("Generate Event", use_container_width=True):
-            if event_text:
+        generate_button = st.button("Generate Event", use_container_width=True, key="generate_ai_event")
+        
+        # Store generated event data in session state
+        if 'ai_generated_data' not in st.session_state:
+            st.session_state.ai_generated_data = None
+        
+        if generate_button and event_text:
+            with st.spinner("Extracting event details..."):
+                event_data = ai_gen.extract_event_info(event_text)
+                st.session_state.ai_generated_data = event_data
+                st.session_state.ai_event_text = event_text
+                st.rerun()
+        
+        # Show form if we have generated data
+        if st.session_state.ai_generated_data:
+            event_data = st.session_state.ai_generated_data
+            event_text = st.session_state.get('ai_event_text', '')
+            
+            st.subheader("📋 Extracted Event")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.text_input("Title", value=event_data.get('title', ''), 
+                             key="ai_title", disabled=True)
+                st.text_area("Description", value=event_data.get('description', ''), 
+                            height=100, key="ai_desc", disabled=True)
+                st.text_input("Type", value=event_data.get('event_type', ''), 
+                             key="ai_type", disabled=True)
+            
+            with col2:
+                st.text_input("Date", value=event_data.get('event_date', ''), 
+                             key="ai_date", disabled=True)
+                st.text_input("Venue", value=event_data.get('venue', ''), 
+                             key="ai_venue", disabled=True)
+                st.text_input("Organizer", value=event_data.get('organizer', ''), 
+                             key="ai_org", disabled=True)
+                st.text_input("Registration Link", 
+                             value=event_data.get('registration_link', ''), 
+                             key="ai_link", disabled=True)
+            
+            # Allow editing
+            st.subheader("✏️ Edit & Finalize")
+            
+            with st.form("finalize_event_form"):
+                title = st.text_input("Event Title *", 
+                                     value=event_data.get('title', ''))
+                description = st.text_area("Description *", 
+                                          value=event_data.get('description', ''),
+                                          height=150)
+                
+                # Handle the case where event_type might not be in the list
+                extracted_type = event_data.get('event_type', 'Workshop')
+                event_type_options = ["Workshop", "Hackathon", "Competition", 
+                                     "Bootcamp", "Seminar", "Conference", "Webinar"]
+                
+                # Safely get index
+                try:
+                    default_index = event_type_options.index(extracted_type)
+                except ValueError:
+                    default_index = 0  # Default to Workshop if not found
+                
+                event_type = st.selectbox("Event Type *", 
+                                         event_type_options,
+                                         index=default_index)
+                
+                col_date, col_time = st.columns(2)
+                with col_date:
+                    try:
+                        # Try to parse the date
+                        date_str = event_data.get('event_date', date.today().isoformat())
+                        parsed_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                        event_date_input = st.date_input("Date *", value=parsed_date)
+                    except:
+                        event_date_input = st.date_input("Date *", min_value=date.today())
+                with col_time:
+                    event_time_input = st.time_input("Time *", value=datetime.now().time())
+                
+                venue = st.text_input("Venue *", value=event_data.get('venue', ''))
+                organizer = st.text_input("Organizer *", value=event_data.get('organizer', ''))
+                reg_link = st.text_input("Registration Link", 
+                                        value=event_data.get('registration_link', ''))
+                
+                # Flyer upload
+                st.subheader("📸 Event Flyer (Optional)")
+                flyer = st.file_uploader("Upload flyer image", 
+                                        type=['jpg', 'jpeg', 'png', 'gif'],
+                                        key="ai_flyer_uploader")
+                
+                submit_button = st.form_submit_button("Create Event", use_container_width=True)
+                
+                if submit_button:
+                    if not all([title, description, venue, organizer]):
+                        st.error("Please fill all required fields (*)")
+                    else:
+                        # Combine date and time
+                        event_datetime = datetime.combine(event_date_input, event_time_input)
+                        
+                        # Save flyer
+                        flyer_path = None
+                        if flyer:
+                            flyer_path = data_manager.save_image(flyer)
+                        
+                        event_to_save = {
+                            'id': str(uuid.uuid4()),
+                            'title': title,
+                            'description': description,
+                            'event_type': event_type,
+                            'event_date': event_datetime.isoformat(),
+                            'venue': venue,
+                            'organizer': organizer,
+                            'registration_link': reg_link,
+                            'flyer_path': flyer_path,
+                            'created_by': st.session_state.username,
+                            'created_by_name': st.session_state.name,
+                            'ai_generated': event_data.get('ai_generated', False),
+                            'ai_prompt': event_text if event_data.get('ai_generated') else None,
+                            'social_stats': {
+                                'likes': [],
+                                'favorites': [],
+                                'interested': [],
+                                'shares': 0,
+                                'views': 0
+                            }
+                        }
+                        
+                        if data_manager.add_item('events', event_to_save):
+                            st.success("Event created successfully! 🎉")
+                            st.balloons()
+                            # Clear session state
+                            st.session_state.ai_generated_data = None
+                            st.session_state.ai_event_text = None
+                            st.rerun()
+                        else:
+                            st.error("Failed to save event")
+    
+    with tab2:
+        st.subheader("Upload File")
+        uploaded_file = st.file_uploader("Upload text file", type=['txt'], key="ai_file_upload")
+        
+        if uploaded_file:
+            content = uploaded_file.read().decode('utf-8')
+            st.text_area("File Content", content, height=200, key="ai_file_content")
+            
+            if st.button("Extract from File", use_container_width=True, key="extract_from_file"):
                 with st.spinner("Extracting event details..."):
-                    event_data = ai_gen.extract_event_info(event_text)
-                    
-                    # Show extracted data
-                    st.subheader("📋 Extracted Event")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.text_input("Title", value=event_data.get('title', ''), 
-                                     key="ai_title", disabled=True)
-                        st.text_area("Description", value=event_data.get('description', ''), 
-                                    height=100, key="ai_desc", disabled=True)
-                        st.text_input("Type", value=event_data.get('event_type', ''), 
-                                     key="ai_type", disabled=True)
-                    
-                    with col2:
-                        st.text_input("Date", value=event_data.get('event_date', ''), 
-                                     key="ai_date", disabled=True)
-                        st.text_input("Venue", value=event_data.get('venue', ''), 
-                                     key="ai_venue", disabled=True)
-                        st.text_input("Organizer", value=event_data.get('organizer', ''), 
-                                     key="ai_org", disabled=True)
-                        st.text_input("Registration Link", 
-                                     value=event_data.get('registration_link', ''), 
-                                     key="ai_link", disabled=True)
-                    
-                    # Allow editing
-                    st.subheader("✏️ Edit & Finalize")
-                    
-                    with st.form("finalize_event"):
-                        title = st.text_input("Event Title *", 
-                                             value=event_data.get('title', ''))
-                        description = st.text_area("Description *", 
-                                                  value=event_data.get('description', ''),
-                                                  height=150)
-                        
-                        # FIXED LINE: Handle the case where event_type might not be in the list
-                        extracted_type = event_data.get('event_type', 'Workshop')
-                        event_type_options = ["Workshop", "Hackathon", "Competition", 
-                                             "Bootcamp", "Seminar", "Conference", "Webinar"]
-                        
-                        # Safely get index
-                        try:
-                            default_index = event_type_options.index(extracted_type)
-                        except ValueError:
-                            default_index = 0  # Default to Workshop if not found
-                        
-                        event_type = st.selectbox("Event Type *", 
-                                                 event_type_options,
-                                                 index=default_index)
-                        
-                        col_date, col_time = st.columns(2)
-                        with col_date:
-                            try:
-                                event_date = st.date_input("Date *", 
-                                                          value=datetime.strptime(event_data.get('event_date', 
-                                                                                               date.today().isoformat()), 
-                                                                                '%Y-%m-%d').date())
-                            except:
-                                event_date = st.date_input("Date *", min_value=date.today())
-                        with col_time:
-                            event_time = st.time_input("Time *", value=datetime.now().time())
-                        
-                        venue = st.text_input("Venue *", value=event_data.get('venue', ''))
-                        organizer = st.text_input("Organizer *", value=event_data.get('organizer', ''))
-                        reg_link = st.text_input("Registration Link", 
-                                                value=event_data.get('registration_link', ''))
-                        
-                        # Flyer upload
-                        st.subheader("📸 Event Flyer (Optional)")
-                        flyer = st.file_uploader("Upload flyer image", 
-                                                type=['jpg', 'jpeg', 'png', 'gif'])
-                        
-                        # FIX: Add submit button to the form
-                        submit_button = st.form_submit_button("Create Event", use_container_width=True)
-                        
-                        if submit_button:
-                            if not all([title, description, venue, organizer]):
-                                st.error("Please fill required fields")
-                            else:
-                                # Combine date and time
-                                event_datetime = datetime.combine(event_date, event_time)
-                                
-                                # Save flyer
-                                flyer_path = None
-                                if flyer:
-                                    flyer_path = data_manager.save_image(flyer)
-                                
-                                event_to_save = {
-                                    'title': title,
-                                    'description': description,
-                                    'event_type': event_type,
-                                    'event_date': event_datetime.isoformat(),
-                                    'venue': venue,
-                                    'organizer': organizer,
-                                    'registration_link': reg_link,
-                                    'flyer_path': flyer_path,
-                                    'created_by': st.session_state.username,
-                                    'created_by_name': st.session_state.name,
-                                    'ai_generated': event_data.get('ai_generated', False),
-                                    'ai_prompt': event_text if event_data.get('ai_generated') else None,
-                                    'social_stats': {
-                                        'likes': [],
-                                        'favorites': [],
-                                        'interested': [],
-                                        'shares': 0,
-                                        'views': 0
-                                    }
-                                }
-                                
-                                if data_manager.add_item('events', event_to_save):
-                                    st.success("Event created successfully! 🎉")
-                                    st.balloons()
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to save event")
-
-
+                    event_data = ai_gen.extract_event_info(content)
+                    # Store in session state
+                    st.session_state.ai_generated_data = event_data
+                    st.session_state.ai_event_text = content
+                    st.rerun()
 # ============================================
 # EVENT CARD WITH SOCIAL FEATURES
 # ============================================
@@ -1019,33 +1049,35 @@ def faculty_dashboard():
     
     elif selected == "Create Event":
         st.header("➕ Create New Event")
-        
+    
         with st.form("create_event_form"):
             col1, col2 = st.columns(2)
-            
+        
             with col1:
                 title = st.text_input("Event Title *")
                 event_type = st.selectbox("Event Type *", 
-                                         ["Workshop", "Hackathon", "Competition", 
-                                          "Bootcamp", "Seminar", "Conference", "Webinar"])
+                                     ["Workshop", "Hackathon", "Competition", 
+                                      "Bootcamp", "Seminar", "Conference", "Webinar"])
                 event_date = st.date_input("Event Date *", min_value=date.today())
                 event_time = st.time_input("Event Time *")
                 max_participants = st.number_input("Max Participants", min_value=1, value=100)
-            
+        
             with col2:
                 venue = st.text_input("Venue *")
                 organizer = st.text_input("Organizer *", value="G H Raisoni College")
                 registration_link = st.text_input("Registration Link")
-                
+            
                 # Flyer upload
                 st.subheader("Event Flyer (Optional)")
                 flyer = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif'])
                 if flyer:
                     st.image(flyer, width=200)
-            
+        
             description = st.text_area("Event Description *", height=150)
-            
-            if st.form_submit_button("Create Event", use_container_width=True):
+        
+            submit_button = st.form_submit_button("Create Event", use_container_width=True)
+        
+            if submit_button:
                 if not all([title, event_type, venue, organizer, description]):
                     st.error("Please fill all required fields (*)")
                 else:
@@ -1053,11 +1085,12 @@ def faculty_dashboard():
                     flyer_path = None
                     if flyer:
                         flyer_path = data_manager.save_image(flyer)
-                    
+                
                     # Combine date and time
                     event_datetime = datetime.combine(event_date, event_time)
-                    
+                
                     event_data = {
+                        'id': str(uuid.uuid4()),
                         'title': title,
                         'description': description,
                         'event_type': event_type,
@@ -1078,7 +1111,7 @@ def faculty_dashboard():
                             'views': 0
                         }
                     }
-                    
+                
                     if data_manager.add_item('events', event_data):
                         st.success(f"Event '{title}' created successfully! 🎉")
                         st.balloons()
