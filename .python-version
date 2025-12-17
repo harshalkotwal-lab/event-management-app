@@ -1,0 +1,3 @@
+# Remove runtime.txt if it exists
+# Then create .python-version
+echo "3.10.0" > .python-version
