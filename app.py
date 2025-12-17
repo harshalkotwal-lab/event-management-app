@@ -1198,10 +1198,12 @@ def display_event_card_social(event, current_user=None):
             # FAVORITE button - FIXED: Dynamic text based on current state
             with col_social[1]:
                 # Determine button text based on current state
-                fav_icon = "⭐" if user_favorited else "☆"
-                fav_text = f"{fav_icon} Unfavorite" if user_favorited else f"{fav_icon} Favorite"
+                # fav_icon = "⭐" if user_favorited else "☆"
+                # fav_text = f"{fav_icon} Unfavorite" if user_favorited else f"{fav_icon} Favorite"
         
-                if st.button(fav_text, key=f"fav_btn_{event_id}_{unique_suffix}", use_container_width=True):
+                if st.button(f"{'⭐' if user_favorited else '☆'} Favorite", 
+                 key=f"fav_{event_id}_{current_user}_{unique_suffix}", 
+                 use_container_width=True):
                     with st.spinner("Updating..."):
                         # Toggle favorite status
                         new_fav_status = not user_favorited
