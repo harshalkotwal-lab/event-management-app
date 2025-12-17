@@ -23,6 +23,7 @@ import traceback
 import logging
 from functools import lru_cache
 import bcrypt
+import time
 
 # ============================================
 # CONFIGURATION
@@ -1064,13 +1065,11 @@ def safe_get(data, key, default=None):
 # ENHANCED EVENT CARD WITH SOCIAL FEATURES - FIXED VERSION
 # ============================================
 def display_event_card_social(event, current_user=None):
-    import time
     unique_suffix = str(int(time.time() * 1000))  # Millisecond timestamp
     """Display event card with social features - FIXED VERSION"""
     event_id = event.get('id')
     
     # Generate a unique key for this card instance
-    import time
     card_key = f"event_card_{event_id}_{int(time.time())}"
     
     # Use session state to track interactions for this specific card
