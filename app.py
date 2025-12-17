@@ -302,7 +302,6 @@ class JSONDataManager:
             image_bytes = uploaded_file.getvalue()
         
             # Convert to base64
-            import base64
             image_base64 = base64.b64encode(image_bytes).decode('utf-8')
         
             # Get file extension
@@ -801,42 +800,7 @@ Prizes: ₹50,000""")
 # ============================================
 # EVENT CARD WITH SOCIAL FEATURES
 # ============================================
-def save_image_simple(self, uploaded_file):
-    """Simple method to save image as base64 string"""
-    if uploaded_file is None:
-        return None
-    
-    try:
-        # Read the uploaded file
-        image_bytes = uploaded_file.getvalue()
-        
-        # Check file size (limit to 2MB for safety)
-        if len(image_bytes) > 2 * 1024 * 1024:  # 2MB
-            st.warning("Image is too large. Please upload an image under 2MB.")
-            return None
-        
-        # Convert to base64
-        import base64
-        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-        
-        # Get file extension
-        file_ext = os.path.splitext(uploaded_file.name)[1].lower()
-        
-        # Create a data URL
-        if file_ext in ['.jpg', '.jpeg']:
-            mime_type = 'image/jpeg'
-        elif file_ext == '.png':
-            mime_type = 'image/png'
-        elif file_ext == '.gif':
-            mime_type = 'image/gif'
-        else:
-            mime_type = 'image/jpeg'
-            
-        return f"data:{mime_type};base64,{image_base64}"
-        
-    except Exception as e:
-        st.error(f"Error saving image")
-        return None
+
 
 def display_event_card_social(event, current_user=None):
     """Display event card with social features"""
