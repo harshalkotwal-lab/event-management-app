@@ -672,12 +672,21 @@ Prizes: ₹50,000""")
                         description = st.text_area("Description *", 
                                                   value=event_data.get('description', ''),
                                                   height=150)
+                        
+                        # FIXED LINE: Handle the case where event_type might not be in the list
+                        extracted_type = event_data.get('event_type', 'Workshop')
+                        event_type_options = ["Workshop", "Hackathon", "Competition", 
+                                             "Bootcamp", "Seminar", "Conference", "Webinar"]
+                        
+                        # Safely get index
+                        try:
+                            default_index = event_type_options.index(extracted_type)
+                        except ValueError:
+                            default_index = 0  # Default to Workshop if not found
+                        
                         event_type = st.selectbox("Event Type *", 
-                                                 ["Workshop", "Hackathon", "Competition", 
-                                                  "Bootcamp", "Seminar", "Conference", "Webinar"],
-                                                 index=["Workshop", "Hackathon", "Competition", 
-                                                        "Bootcamp", "Seminar", "Conference", "Webinar"]
-                                                 .index(event_data.get('event_type', 'Workshop')))
+                                                 event_type_options,
+                                                 index=default_index)
                         
                         col_date, col_time = st.columns(2)
                         with col_date:
@@ -701,7 +710,10 @@ Prizes: ₹50,000""")
                         flyer = st.file_uploader("Upload flyer image", 
                                                 type=['jpg', 'jpeg', 'png', 'gif'])
                         
-                        if st.form_submit_button("Create Event", use_container_width=True):
+                        # FIX: Add submit button to the form
+                        submit_button = st.form_submit_button("Create Event", use_container_width=True)
+                        
+                        if submit_button:
                             if not all([title, description, venue, organizer]):
                                 st.error("Please fill required fields")
                             else:
@@ -741,18 +753,7 @@ Prizes: ₹50,000""")
                                     st.rerun()
                                 else:
                                     st.error("Failed to save event")
-    
-    with tab2:
-        st.subheader("Upload File")
-        uploaded_file = st.file_uploader("Upload text file", type=['txt'])
-        
-        if uploaded_file:
-            content = uploaded_file.read().decode('utf-8')
-            st.text_area("File Content", content, height=200)
-            
-            if st.button("Extract from File", use_container_width=True):
-                event_data = ai_gen.extract_event_info(content)
-                st.json(event_data)
+
 
 # ============================================
 # EVENT CARD WITH SOCIAL FEATURES
