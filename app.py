@@ -15,10 +15,12 @@ import pandas as pd
 from PIL import Image
 import io
 import re
-import requests
+import sqlite3
 from streamlit_option_menu import option_menu
 import base64
 import tempfile
+import traceback
+
 # ============================================
 # PAGE CONFIGURATION
 # ============================================
@@ -183,29 +185,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================
-# DATA MANAGER (JSON Storage)
+# SQLite DATABASE MANAGER
 # ============================================
-class JSONDataManager:
-    """Manage all data using JSON files"""
+class DatabaseManager:
+    """Manage all data using SQLite database"""
     
-    def __init__(self):
-        self.data_dir = Path("data")
-        self.data_dir.mkdir(exist_ok=True)
-        
-        # Uploads directory for event flyers
-        self.uploads_dir = Path("uploads")
-        self.uploads_dir.mkdir(exist_ok=True)
-        
-        self.files = {
-            'users': self.data_dir / "users.json",
-            'events': self.data_dir / "events.json",
-            'registrations': self.data_dir / "registrations.json",
-            'social': self.data_dir / "social_interactions.json",
-            'analytics': self.data_dir / "analytics.json"
-        }
-        
-        # Initialize files
-        self._init_files()
+    def __init__(self, db_path="event_management.db"):
+        self.db_path = db_path
+        self.conn = None
+        self.connect()
+        self.create_tables()
         
         # Default credentials
         self.default_creds = {
@@ -213,12 +202,131 @@ class JSONDataManager:
             'faculty': {'username': 'faculty@raisoni', 'password': 'faculty123'}
         }
     
-    def _init_files(self):
-        """Initialize JSON files if they don't exist"""
-        for file_path in self.files.values():
-            if not file_path.exists():
-                with open(file_path, 'w') as f:
-                    json.dump([], f, indent=2)
+    def connect(self):
+        """Connect to SQLite database"""
+        try:
+            self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self.conn.row_factory = sqlite3.Row
+        except Exception as e:
+            st.error(f"Database connection error: {e}")
+    
+    def create_tables(self):
+        """Create all necessary tables if they don't exist"""
+        try:
+            cursor = self.conn.cursor()
+            
+            # Users table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    roll_no TEXT,
+                    department TEXT,
+                    year TEXT,
+                    email TEXT,
+                    username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Events table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS events (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    event_type TEXT,
+                    event_date TIMESTAMP,
+                    venue TEXT,
+                    organizer TEXT,
+                    registration_link TEXT,
+                    max_participants INTEGER DEFAULT 100,
+                    flyer_path TEXT,
+                    created_by TEXT,
+                    created_by_name TEXT,
+                    ai_generated BOOLEAN DEFAULT 0,
+                    ai_prompt TEXT,
+                    likes TEXT DEFAULT '[]',
+                    favorites TEXT DEFAULT '[]',
+                    interested TEXT DEFAULT '[]',
+                    shares INTEGER DEFAULT 0,
+                    views INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            
+            # Registrations table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS registrations (
+                    id TEXT PRIMARY KEY,
+                    event_id TEXT NOT NULL,
+                    event_title TEXT NOT NULL,
+                    student_username TEXT NOT NULL,
+                    student_name TEXT NOT NULL,
+                    student_roll TEXT,
+                    student_dept TEXT,
+                    via_link BOOLEAN DEFAULT 0,
+                    via_app BOOLEAN DEFAULT 1,
+                    status TEXT DEFAULT 'pending',
+                    attendance TEXT DEFAULT 'absent',
+                    registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (event_id) REFERENCES events (id),
+                    FOREIGN KEY (student_username) REFERENCES users (username)
+                )
+            ''')
+            
+            # Social interactions table (for tracking)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS social_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (event_id) REFERENCES events (id),
+                    FOREIGN KEY (username) REFERENCES users (username)
+                )
+            ''')
+            
+            self.conn.commit()
+            
+            # Add default admin and faculty if not exists
+            self._add_default_users()
+            
+        except Exception as e:
+            st.error(f"Error creating tables: {e}")
+    
+    def _add_default_users(self):
+        """Add default admin and faculty users"""
+        try:
+            cursor = self.conn.cursor()
+            
+            # Check if admin exists
+            cursor.execute("SELECT COUNT(*) FROM users WHERE username = ?", ('admin@raisoni',))
+            if cursor.fetchone()[0] == 0:
+                admin_id = str(uuid.uuid4())
+                hashed_pass = hashlib.sha256('admin123'.encode()).hexdigest()
+                cursor.execute('''
+                    INSERT INTO users (id, name, username, password, role, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (admin_id, 'Administrator', 'admin@raisoni', hashed_pass, 'admin', datetime.now().isoformat()))
+            
+            # Check if faculty exists
+            cursor.execute("SELECT COUNT(*) FROM users WHERE username = ?", ('faculty@raisoni',))
+            if cursor.fetchone()[0] == 0:
+                faculty_id = str(uuid.uuid4())
+                hashed_pass = hashlib.sha256('faculty123'.encode()).hexdigest()
+                cursor.execute('''
+                    INSERT INTO users (id, name, username, password, role, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (faculty_id, 'Faculty Coordinator', 'faculty@raisoni', hashed_pass, 'faculty', datetime.now().isoformat()))
+            
+            self.conn.commit()
+        except Exception as e:
+            st.error(f"Error adding default users: {e}")
     
     def _hash_password(self, password):
         """Hash password using SHA-256"""
@@ -226,209 +334,256 @@ class JSONDataManager:
     
     def verify_credentials(self, username, password, role):
         """Verify user credentials"""
-        if role in ['admin', 'faculty']:
-            creds = self.default_creds[role]
-            return (username == creds['username'] and 
-                    self._hash_password(password) == self._hash_password(creds['password']))
-        else:
-            users = self.load('users')
-            for user in users:
-                if user.get('username') == username and user.get('password') == self._hash_password(password):
-                    return True
-            return False
-    
-    def load(self, data_type):
-        """Load data from JSON file"""
         try:
-            with open(self.files[data_type], 'r') as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
-    
-    def save(self, data_type, data):
-        """Save data to JSON file"""
-        try:
-            file_path = self.files[data_type]
-        
-            # Ensure directory exists
-            file_path.parent.mkdir(exist_ok=True, parents=True)
-        
-            # Save to temporary file first
-            temp_file = file_path.with_suffix('.tmp')
-            with open(temp_file, 'w') as f:
-                json.dump(data, f, indent=2)
-        
-            # Move to actual file (atomic operation)
-            temp_file.replace(file_path)
-        
-            # Verify save
-            if os.path.exists(file_path):
-                # Debug info (optional)
-                # st.sidebar.success(f"✓ Saved {data_type} ({len(data)} items)")
-                return True
+            if role in ['admin', 'faculty']:
+                creds = self.default_creds[role]
+                return (username == creds['username'] and 
+                        self._hash_password(password) == self._hash_password(creds['password']))
             else:
-                # st.sidebar.error(f"✗ Failed to save {data_type}")
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    "SELECT password FROM users WHERE username = ? AND role = 'student'",
+                    (username,)
+                )
+                result = cursor.fetchone()
+                if result:
+                    stored_hash = result[0]
+                    return stored_hash == self._hash_password(password)
                 return False
         except Exception as e:
-            # st.sidebar.error(f"Save error: {e}")
+            st.error(f"Login error: {e}")
             return False
     
-    def add_item(self, data_type, item_data):
-        """Add new item to data"""
-        data = self.load(data_type)
-        
-        # Generate unique ID
-        if 'id' not in item_data:
-            item_data['id'] = str(uuid.uuid4())
-        
-        # Add timestamps
-        item_data['created_at'] = datetime.now().isoformat()
-        item_data['updated_at'] = datetime.now().isoformat()
-        
-        data.append(item_data)
-        return self.save(data_type, data)
+    def execute_query(self, query, params=(), fetch_one=False, fetch_all=False):
+        """Execute SQL query with error handling"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(query, params)
+            
+            if fetch_one:
+                result = cursor.fetchone()
+                return dict(result) if result else None
+            elif fetch_all:
+                results = cursor.fetchall()
+                return [dict(row) for row in results]
+            else:
+                self.conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            st.error(f"Database error: {e}")
+            return None
     
-    def update_item(self, data_type, item_id, updates):
-        """Update existing item"""
-        data = self.load(data_type)
-        for i, item in enumerate(data):
-            if item.get('id') == item_id:
-                updates['updated_at'] = datetime.now().isoformat()
-                data[i].update(updates)
-                return self.save(data_type, data)
-        return False
+    # ========== USERS ==========
+    def add_user(self, user_data):
+        """Add new user"""
+        query = '''
+            INSERT INTO users (id, name, roll_no, department, year, email, username, password, role, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        params = (
+            user_data.get('id'),
+            user_data.get('name'),
+            user_data.get('roll_no'),
+            user_data.get('department'),
+            user_data.get('year'),
+            user_data.get('email'),
+            user_data.get('username'),
+            user_data.get('password'),
+            user_data.get('role', 'student'),
+            user_data.get('created_at', datetime.now().isoformat())
+        )
+        return self.execute_query(query, params)
     
-    def get_item(self, data_type, item_id):
-        """Get item by ID"""
-        data = self.load(data_type)
-        for item in data:
-            if item.get('id') == item_id:
-                return item
-        return None
+    def get_user(self, username):
+        """Get user by username"""
+        query = "SELECT * FROM users WHERE username = ?"
+        return self.execute_query(query, (username,), fetch_one=True)
     
-    def get_items_by_field(self, data_type, field, value):
-        """Get items by field value"""
-        data = self.load(data_type)
-        return [item for item in data if item.get(field) == value]
-
+    def get_all_users(self):
+        """Get all users"""
+        query = "SELECT * FROM users ORDER BY created_at DESC"
+        return self.execute_query(query, fetch_all=True)
+    
+    # ========== EVENTS ==========
+    def add_event(self, event_data):
+        """Add new event"""
+        query = '''
+            INSERT INTO events (
+                id, title, description, event_type, event_date, venue, organizer,
+                registration_link, max_participants, flyer_path, created_by,
+                created_by_name, ai_generated, ai_prompt, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        params = (
+            event_data.get('id'),
+            event_data.get('title'),
+            event_data.get('description'),
+            event_data.get('event_type'),
+            event_data.get('event_date'),
+            event_data.get('venue'),
+            event_data.get('organizer'),
+            event_data.get('registration_link', ''),
+            event_data.get('max_participants', 100),
+            event_data.get('flyer_path'),
+            event_data.get('created_by'),
+            event_data.get('created_by_name'),
+            event_data.get('ai_generated', False),
+            event_data.get('ai_prompt'),
+            event_data.get('created_at', datetime.now().isoformat()),
+            event_data.get('updated_at', datetime.now().isoformat())
+        )
+        return self.execute_query(query, params)
+    
+    def get_event(self, event_id):
+        """Get event by ID"""
+        query = "SELECT * FROM events WHERE id = ?"
+        return self.execute_query(query, (event_id,), fetch_one=True)
+    
+    def get_all_events(self):
+        """Get all events"""
+        query = "SELECT * FROM events ORDER BY event_date DESC"
+        return self.execute_query(query, fetch_all=True)
+    
+    def get_events_by_creator(self, username):
+        """Get events created by specific user"""
+        query = "SELECT * FROM events WHERE created_by = ? ORDER BY event_date DESC"
+        return self.execute_query(query, (username,), fetch_all=True)
+    
+    def update_event_social(self, event_id, likes=None, favorites=None, interested=None, shares=None, views=None):
+        """Update event social stats"""
+        updates = []
+        params = []
+        
+        if likes is not None:
+            updates.append("likes = ?")
+            params.append(json.dumps(likes))
+        
+        if favorites is not None:
+            updates.append("favorites = ?")
+            params.append(json.dumps(favorites))
+        
+        if interested is not None:
+            updates.append("interested = ?")
+            params.append(json.dumps(interested))
+        
+        if shares is not None:
+            updates.append("shares = ?")
+            params.append(shares)
+        
+        if views is not None:
+            updates.append("views = ?")
+            params.append(views)
+        
+        if updates:
+            updates.append("updated_at = ?")
+            params.append(datetime.now().isoformat())
+            
+            query = f"UPDATE events SET {', '.join(updates)} WHERE id = ?"
+            params.append(event_id)
+            
+            return self.execute_query(query, tuple(params))
+        
+        return 0
+    
+    # ========== REGISTRATIONS ==========
+    def add_registration(self, reg_data):
+        """Add new registration"""
+        query = '''
+            INSERT INTO registrations (
+                id, event_id, event_title, student_username, student_name,
+                student_roll, student_dept, via_link, via_app, status,
+                attendance, registered_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        '''
+        params = (
+            reg_data.get('id'),
+            reg_data.get('event_id'),
+            reg_data.get('event_title'),
+            reg_data.get('student_username'),
+            reg_data.get('student_name'),
+            reg_data.get('student_roll'),
+            reg_data.get('student_dept'),
+            reg_data.get('via_link', False),
+            reg_data.get('via_app', True),
+            reg_data.get('status', 'pending'),
+            reg_data.get('attendance', 'absent'),
+            reg_data.get('registered_at', datetime.now().isoformat())
+        )
+        return self.execute_query(query, params)
+    
+    def get_registrations_by_event(self, event_id):
+        """Get all registrations for an event"""
+        query = "SELECT * FROM registrations WHERE event_id = ? ORDER BY registered_at DESC"
+        return self.execute_query(query, (event_id,), fetch_all=True)
+    
+    def get_registrations_by_student(self, username):
+        """Get all registrations for a student"""
+        query = "SELECT * FROM registrations WHERE student_username = ? ORDER BY registered_at DESC"
+        return self.execute_query(query, (username,), fetch_all=True)
+    
+    def update_registration_status(self, reg_id, status, attendance):
+        """Update registration status"""
+        query = "UPDATE registrations SET status = ?, attendance = ? WHERE id = ?"
+        return self.execute_query(query, (status, attendance, reg_id))
+    
+    # ========== SOCIAL INTERACTIONS ==========
+    def log_social_action(self, event_id, username, action):
+        """Log social interaction"""
+        query = '''
+            INSERT INTO social_logs (event_id, username, action, timestamp)
+            VALUES (?, ?, ?, ?)
+        '''
+        return self.execute_query(query, (event_id, username, action, datetime.now().isoformat()))
+    
     def save_image_simple(self, uploaded_file):
         """Simple method to save image as base64 string - SAFE VERSION"""
         if uploaded_file is None:
             return None
-    
+        
         try:
             # Get file info first
             file_size = len(uploaded_file.getvalue())
-        
+            
             # Limit file size to prevent memory issues
             MAX_SIZE = 5 * 1024 * 1024  # 5MB
             if file_size > MAX_SIZE:
                 st.warning(f"Image is too large ({file_size/1024/1024:.1f}MB). Max size is 5MB.")
                 return None
-        
+            
             # Check file type
             file_ext = os.path.splitext(uploaded_file.name)[1].lower()
             allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif']
-        
+            
             if file_ext not in allowed_extensions:
                 st.warning(f"Unsupported file type: {file_ext}. Use: {', '.join(allowed_extensions)}")
                 return None
-        
-            # Read and convert to base64
+            
+            # Simple base64 conversion without PIL processing
             try:
-                # Try to load with PIL first to validate it's a valid image
-                from PIL import Image
-                import io
-            
-                # Reset file pointer
                 uploaded_file.seek(0)
-            
-                # Open image with PIL to validate
-                image = Image.open(io.BytesIO(uploaded_file.getvalue()))
-            
-                # Convert to RGB if necessary (removes alpha channel)
-                if image.mode in ('RGBA', 'LA', 'P'):
-                    image = image.convert('RGB')
-            
-                # Resize if too large (max 1200px width)
-                max_width = 1200
-                if image.width > max_width:
-                    ratio = max_width / image.width
-                    new_height = int(image.height * ratio)
-                    image = image.resize((max_width, new_height), Image.Resampling.LANCZOS)
-            
-                # Save optimized image to bytes
-                output_buffer = io.BytesIO()
-                if file_ext in ['.jpg', '.jpeg']:
-                    image.save(output_buffer, format='JPEG', quality=85, optimize=True)
-                    mime_type = 'image/jpeg'
-                elif file_ext == '.png':
-                    image.save(output_buffer, format='PNG', optimize=True)
-                    mime_type = 'image/png'
-                elif file_ext == '.gif':
-                    # For GIFs, keep original (resizing animated GIFs is complex)
-                    uploaded_file.seek(0)
-                    output_buffer = io.BytesIO(uploaded_file.getvalue())
-                    mime_type = 'image/gif'
-            
-                # Convert to base64
-                image_bytes = output_buffer.getvalue()
+                image_bytes = uploaded_file.getvalue()
                 image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-            
-                # Create data URL
-                data_url = f"data:{mime_type};base64,{image_base64}"
-            
-                # Close image to free memory
-                image.close()
-            
-                return data_url
-            
-            except Exception as img_error:
-                st.error(f"Error processing image: {str(img_error)}")
-                # Fallback: try simple base64 conversion
-                try:
-                    uploaded_file.seek(0)
-                    image_bytes = uploaded_file.getvalue()
-                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
                 
-                    # Determine mime type
-                    mime_types = {
-                        '.jpg': 'image/jpeg',
-                        '.jpeg': 'image/jpeg',
-                        '.png': 'image/png',
-                        '.gif': 'image/gif'
-                    }
-                    mime_type = mime_types.get(file_ext, 'image/jpeg')
+                # Determine mime type
+                mime_types = {
+                    '.jpg': 'image/jpeg',
+                    '.jpeg': 'image/jpeg',
+                    '.png': 'image/png',
+                    '.gif': 'image/gif'
+                }
+                mime_type = mime_types.get(file_ext, 'image/jpeg')
                 
-                    return f"data:{mime_type};base64,{image_base64}"
-                except:
-                    return None
+                return f"data:{mime_type};base64,{image_base64}"
+            except Exception as e:
+                st.error(f"Error converting image: {e}")
+                return None
                 
         except Exception as e:
             st.error(f"Error saving image: {str(e)}")
             return None
-    
-    def _optimize_image(self, image_path, max_size=(800, 800)):
-        """Optimize image size - safer version"""
-        try:
-            with Image.open(image_path) as img:
-                # Convert to RGB if necessary
-                if img.mode in ('RGBA', 'LA', 'P'):
-                    img = img.convert('RGB')
-            
-                # Resize if too large
-                if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
-                    img.thumbnail(max_size, Image.Resampling.LANCZOS)
-            
-                # Save optimized image with reduced quality
-                img.save(image_path, 'JPEG', optimize=True, quality=85)
-            
-        except Exception as e:
-            # Don't warn if optimization fails, just use original
-            pass
-            
-# Initialize data manager
-data_manager = JSONDataManager()
+
+# Initialize database manager
+db_manager = DatabaseManager()
 
 # ============================================
 # AI EVENT GENERATOR
@@ -450,56 +605,60 @@ class AIEventGenerator:
         if self.api_key:
             try:
                 return self._extract_with_ai(text)
-            except:
-                pass
+            except Exception as e:
+                st.warning(f"AI extraction failed: {e}. Using regex fallback.")
         
         # Fallback to regex extraction
         return self._extract_with_regex(text)
     
     def _extract_with_ai(self, text):
         """Use OpenAI API to extract event info"""
-        import openai
-        
-        client = openai.OpenAI(api_key=self.api_key)
-        
-        prompt = f"""
-        Extract event information from this message and return as JSON:
-        
-        {text}
-        
-        Return JSON with these fields:
-        - title: Event title
-        - description: Event description
-        - event_type: workshop/hackathon/competition/bootcamp/seminar/conference/webinar
-        - event_date: YYYY-MM-DD (extract from text or use reasonable future date)
-        - venue: Event location
-        - organizer: Who is organizing
-        - registration_link: URL if mentioned
-        
-        Return ONLY JSON, no other text.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You extract event information and return JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            max_tokens=500
-        )
-        
-        result = response.choices[0].message.content.strip()
-        
-        # Clean response
-        result = result.replace('```json', '').replace('```', '').strip()
-        
         try:
-            event_data = json.loads(result)
-            event_data['ai_generated'] = True
-            event_data['ai_prompt'] = text
-            return event_data
-        except:
+            import openai
+            
+            client = openai.OpenAI(api_key=self.api_key)
+            
+            prompt = f"""
+            Extract event information from this message and return as valid JSON:
+            
+            {text}
+            
+            Return ONLY a JSON object with these exact field names (no other text):
+            - title: Event title (string)
+            - description: Event description (string)
+            - event_type: workshop/hackathon/competition/bootcamp/seminar/conference/webinar (string)
+            - event_date: YYYY-MM-DD format (string)
+            - venue: Event location (string)
+            - organizer: Who is organizing (string)
+            - registration_link: URL if mentioned (string)
+            """
+            
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You extract event information and return ONLY JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                max_tokens=500
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            # Clean response
+            result = result.replace('```json', '').replace('```', '').strip()
+            
+            try:
+                event_data = json.loads(result)
+                event_data['ai_generated'] = True
+                event_data['ai_prompt'] = text
+                return event_data
+            except json.JSONDecodeError:
+                st.warning("AI returned invalid JSON. Using regex fallback.")
+                return self._extract_with_regex(text)
+                
+        except Exception as e:
+            st.warning(f"OpenAI API error: {e}. Using regex fallback.")
             return self._extract_with_regex(text)
     
     def _extract_with_regex(self, text):
@@ -524,7 +683,6 @@ class AIEventGenerator:
         date_patterns = [
             r'(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})',
             r'(\d{2,4}[-/]\d{1,2}[-/]\d{1,2})',
-            r'(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})',
         ]
         
         for pattern in date_patterns:
@@ -597,6 +755,293 @@ def is_upcoming(event_date):
     except:
         return True
 
+def parse_json_list(json_str):
+    """Parse JSON string to list, return empty list if invalid"""
+    try:
+        return json.loads(json_str) if json_str else []
+    except:
+        return []
+
+# ============================================
+# EVENT CARD WITH SOCIAL FEATURES
+# ============================================
+def display_event_card_social(event, current_user=None):
+    """Display event card with social features"""
+    event_id = event.get('id')
+    
+    # Generate a unique display key
+    import time
+    display_key = f"{event_id}_{int(time.time() * 1000) % 10000}"
+    
+    # Parse social stats
+    likes = parse_json_list(event.get('likes', '[]'))
+    favorites = parse_json_list(event.get('favorites', '[]'))
+    interested = parse_json_list(event.get('interested', '[]'))
+    shares = event.get('shares', 0) or 0
+    views = event.get('views', 0) or 0
+    
+    # Check user's current interactions
+    user_liked = current_user in likes if current_user else False
+    user_favorited = current_user in favorites if current_user else False
+    user_interested = current_user in interested if current_user else False
+    
+    # Use a container to prevent re-render issues
+    with st.container():
+        st.markdown('<div class="event-card">', unsafe_allow_html=True)
+        
+        # Header with AI badge
+        col_header = st.columns([4, 1])
+        with col_header[0]:
+            st.subheader(event.get('title', 'Untitled Event'))
+            if event.get('ai_generated'):
+                st.markdown('<span class="ai-badge">🤖 AI Generated</span>', 
+                           unsafe_allow_html=True)
+        with col_header[1]:
+            if is_upcoming(event.get('event_date')):
+                st.success("🟢 Upcoming")
+            else:
+                st.error("🔴 Completed")
+        
+        # Event flyer
+        if event.get('flyer_path'):
+            flyer_path = event.get('flyer_path')
+            try:
+                # Check if it's a base64 data URL
+                if flyer_path.startswith('data:image/'):
+                    # Display base64 image
+                    st.image(flyer_path, width=300, caption="Event Flyer")
+                else:
+                    # Try to load as file path
+                    if os.path.exists(flyer_path):
+                        image = Image.open(flyer_path)
+                        st.image(image, width=300, caption="Event Flyer")
+            except Exception as e:
+                st.warning("Could not display event flyer")
+        
+        # Description
+        desc = event.get('description', 'No description')
+        if len(desc) > 300:
+            desc = desc[:300] + "..."
+        st.write(desc)
+        
+        # Details
+        col_details = st.columns(4)
+        with col_details[0]:
+            st.caption(f"**📅 Date:** {format_date(event.get('event_date'))}")
+        with col_details[1]:
+            st.caption(f"**📍 Venue:** {event.get('venue', 'N/A')}")
+        with col_details[2]:
+            st.caption(f"**🏷️ Type:** {event.get('event_type', 'N/A')}")
+        with col_details[3]:
+            st.caption(f"**👨‍🏫 Organizer:** {event.get('organizer', 'N/A')}")
+        
+        # Social buttons (only for logged-in users)
+        if current_user and current_user != "None":
+            st.markdown("---")
+            st.markdown("**Social Interactions**")
+            
+            col_social = st.columns(5)
+            
+            # LIKE button
+            with col_social[0]:
+                like_key = f"like_{display_key}_{current_user}"
+                like_icon = "❤️" if user_liked else "🤍"
+                
+                if st.button(f"{like_icon} Like", key=like_key, use_container_width=True):
+                    # Toggle user's like
+                    new_likes = likes.copy()
+                    if current_user in new_likes:
+                        new_likes.remove(current_user)
+                        action_msg = "Removed like"
+                    else:
+                        new_likes.append(current_user)
+                        action_msg = "Liked!"
+                    
+                    # Update in database
+                    db_manager.update_event_social(event_id, likes=new_likes)
+                    db_manager.log_social_action(event_id, current_user, 'like')
+                    st.success(action_msg)
+                    st.rerun()
+                
+                # Display count
+                st.caption(f"{len(likes)} likes")
+            
+            # FAVORITE button
+            with col_social[1]:
+                fav_key = f"fav_{display_key}_{current_user}"
+                fav_icon = "⭐" if user_favorited else "☆"
+                
+                if st.button(f"{fav_icon} Favorite", key=fav_key, use_container_width=True):
+                    # Toggle user's favorite
+                    new_favorites = favorites.copy()
+                    if current_user in new_favorites:
+                        new_favorites.remove(current_user)
+                        action_msg = "Removed from favorites"
+                    else:
+                        new_favorites.append(current_user)
+                        action_msg = "Added to favorites!"
+                    
+                    # Update in database
+                    db_manager.update_event_social(event_id, favorites=new_favorites)
+                    db_manager.log_social_action(event_id, current_user, 'favorite')
+                    st.success(action_msg)
+                    st.rerun()
+                
+                # Display count
+                st.caption(f"{len(favorites)} favorites")
+            
+            # INTERESTED button
+            with col_social[2]:
+                int_key = f"int_{display_key}_{current_user}"
+                int_icon = "✅" if user_interested else "🤔"
+                
+                if st.button(f"{int_icon} Interested", key=int_key, use_container_width=True):
+                    # Toggle user's interest
+                    new_interested = interested.copy()
+                    if current_user in new_interested:
+                        new_interested.remove(current_user)
+                        action_msg = "Removed interest"
+                    else:
+                        new_interested.append(current_user)
+                        action_msg = "Marked as interested!"
+                    
+                    # Update in database
+                    db_manager.update_event_social(event_id, interested=new_interested)
+                    db_manager.log_social_action(event_id, current_user, 'interested')
+                    st.success(action_msg)
+                    st.rerun()
+                
+                # Display count
+                st.caption(f"{len(interested)} interested")
+            
+            # SHARE button
+            with col_social[3]:
+                share_key = f"share_{display_key}_{current_user}"
+                
+                if st.button("📤 Share", key=share_key, use_container_width=True):
+                    # Increment shares
+                    new_shares = shares + 1
+                    
+                    # Update in database
+                    db_manager.update_event_social(event_id, shares=new_shares)
+                    db_manager.log_social_action(event_id, current_user, 'share')
+                    
+                    # Generate share text
+                    share_text = f"Check out this event: {event['title']}"
+                    if event.get('registration_link'):
+                        share_text += f"\nRegister here: {event['registration_link']}"
+                    
+                    # Show success message
+                    st.success(f"Event shared! Total shares: {new_shares}")
+                    # Show shareable text
+                    st.code(share_text)
+                    st.rerun()
+                
+                # Display count
+                st.caption(f"{shares} shares")
+            
+            # VIEW button
+            with col_social[4]:
+                view_key = f"view_{display_key}_{current_user}"
+                
+                if st.button("👁️ View", key=view_key, use_container_width=True):
+                    # Increment views
+                    new_views = views + 1
+                    
+                    # Update in database
+                    db_manager.update_event_social(event_id, views=new_views)
+                    db_manager.log_social_action(event_id, current_user, 'view')
+                    
+                    st.success(f"View recorded! Total views: {new_views}")
+                    st.rerun()
+                
+                # Display count
+                st.caption(f"{views} views")
+        
+        else:
+            # Show social stats without interactive buttons
+            st.markdown("---")
+            st.markdown("**Social Stats**")
+            
+            col_social = st.columns(5)
+            with col_social[0]:
+                st.caption(f"❤️ {len(likes)} likes")
+            with col_social[1]:
+                st.caption(f"⭐ {len(favorites)} favorites")
+            with col_social[2]:
+                st.caption(f"🤔 {len(interested)} interested")
+            with col_social[3]:
+                st.caption(f"📤 {shares} shares")
+            with col_social[4]:
+                st.caption(f"👁️ {views} views")
+        
+        # Registration section - only show for logged-in users
+        if current_user and current_user != "None":
+            st.markdown("---")
+            st.markdown('<div class="registration-section">', unsafe_allow_html=True)
+            st.subheader("📝 Registration")
+            
+            # Check if user is registered
+            registrations = db_manager.get_registrations_by_student(current_user)
+            is_registered = any(r.get('event_id') == event_id for r in registrations)
+            
+            if is_registered:
+                st.success("✅ You are registered for this event")
+                
+                # Show registration details
+                registration = next((r for r in registrations if r.get('event_id') == event_id), None)
+                
+                if registration:
+                    col_reg = st.columns(3)
+                    with col_reg[0]:
+                        st.info(f"Status: {registration.get('status', 'pending').title()}")
+                    with col_reg[1]:
+                        st.info(f"Via: {'Official Link' if registration.get('via_link') else 'App'}")
+                    with col_reg[2]:
+                        if registration.get('attendance') == 'present':
+                            st.success("Attended ✅")
+                        else:
+                            st.warning("Not Attended")
+            else:
+                col_reg_actions = st.columns([2, 1])
+                
+                with col_reg_actions[0]:
+                    if event.get('registration_link'):
+                        st.markdown(f"[🔗 **Register via Official Link**]({event['registration_link']})", 
+                                   unsafe_allow_html=True)
+                        st.caption("Click the link above to register on the official platform")
+                
+                with col_reg_actions[1]:
+                    reg_key = f"reg_{display_key}_{current_user}"
+                    if st.button("✅ **I Have Registered**", key=reg_key, 
+                               use_container_width=True, type="primary"):
+                        # Create registration record
+                        student = db_manager.get_user(current_user)
+                        
+                        reg_data = {
+                            'id': str(uuid.uuid4()),
+                            'event_id': event_id,
+                            'event_title': event.get('title', 'Untitled Event'),
+                            'student_username': current_user,
+                            'student_name': student.get('name', current_user) if student else current_user,
+                            'student_roll': student.get('roll_no', 'N/A') if student else 'N/A',
+                            'student_dept': student.get('department', 'N/A') if student else 'N/A',
+                            'via_link': False,
+                            'via_app': True,
+                            'status': 'pending',
+                            'attendance': 'absent'
+                        }
+                        
+                        if db_manager.add_registration(reg_data):
+                            st.success("Registration recorded! Waiting for verification.")
+                            st.rerun()
+                        else:
+                            st.error("Failed to record registration")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+
 # ============================================
 # LOGIN PAGE
 # ============================================
@@ -613,7 +1058,7 @@ def login_page():
         admin_pass = st.text_input("Password", type="password", key="admin_pass")
         
         if st.button("Admin Login", use_container_width=True):
-            if data_manager.verify_credentials(admin_user, admin_pass, 'admin'):
+            if db_manager.verify_credentials(admin_user, admin_pass, 'admin'):
                 st.session_state.role = 'admin'
                 st.session_state.username = admin_user
                 st.session_state.name = "Administrator"
@@ -628,7 +1073,7 @@ def login_page():
         faculty_pass = st.text_input("Password", type="password", key="faculty_pass")
         
         if st.button("Faculty Login", use_container_width=True):
-            if data_manager.verify_credentials(faculty_user, faculty_pass, 'faculty'):
+            if db_manager.verify_credentials(faculty_user, faculty_pass, 'faculty'):
                 st.session_state.role = 'faculty'
                 st.session_state.username = faculty_user
                 st.session_state.name = "Faculty Coordinator"
@@ -646,10 +1091,9 @@ def login_page():
             student_pass = st.text_input("Password", type="password", key="student_pass_login")
             
             if st.button("Student Login", use_container_width=True):
-                if data_manager.verify_credentials(student_user, student_pass, 'student'):
+                if db_manager.verify_credentials(student_user, student_pass, 'student'):
                     # Get student info
-                    users = data_manager.load('users')
-                    student = next((u for u in users if u.get('username') == student_user), None)
+                    student = db_manager.get_user(student_user)
                     
                     if student:
                         st.session_state.role = 'student'
@@ -666,30 +1110,26 @@ def login_page():
         with tab2:
             with st.form("student_registration"):
                 st.markdown("**Create Student Account**")
-        
+                
                 name = st.text_input("Full Name *")
                 roll_no = st.text_input("Roll Number *")
                 department = st.selectbox("Department *", 
-                                 ["CSE", "AIML", "ECE", "EEE", "MECH", "CIVIL", "IT", "DS"])
+                                         ["CSE", "AIML", "ECE", "EEE", "MECH", "CIVIL", "IT", "DS"])
                 year = st.selectbox("Year *", ["I", "II", "III", "IV"])
                 email = st.text_input("Email *")
                 username = st.text_input("Username *")
                 password = st.text_input("Password *", type="password")
                 confirm_pass = st.text_input("Confirm Password *", type="password")
-        
+                
                 if st.form_submit_button("Register", use_container_width=True):
                     if password != confirm_pass:
                         st.error("Passwords don't match")
                     elif not all([name, roll_no, email, username, password]):
                         st.error("Please fill all required fields")
                     else:
-                        users = data_manager.load('users')
-                
-                        # Debug: Show current users
-                        st.sidebar.info(f"Current users in DB: {len(users)}")
-                
                         # Check if username exists
-                        if any(u.get('username') == username for u in users):
+                        existing_user = db_manager.get_user(username)
+                        if existing_user:
                             st.error("Username already exists")
                         else:
                             user_data = {
@@ -700,28 +1140,16 @@ def login_page():
                                 'year': year,
                                 'email': email,
                                 'username': username,
-                                'password': data_manager._hash_password(password),
+                                'password': db_manager._hash_password(password),
                                 'role': 'student',
                                 'created_at': datetime.now().isoformat()
                             }
-                    
-                            # Add to users list
-                            users.append(user_data)
-                    
-                            # Save to JSON file
-                            if data_manager.save('users', users):
+                            
+                            if db_manager.add_user(user_data):
                                 st.success("Registration successful! Please login.")
-                        
-                                # Auto-login after registration
-                                st.session_state.role = 'student'
-                                st.session_state.username = username
-                                st.session_state.name = name
-                                st.session_state.user_id = user_data['id']
-                        
-                                # Force rerun
                                 st.rerun()
                             else:
-                                st.error("Registration failed. Could not save to database.")
+                                st.error("Registration failed")
 
 # ============================================
 # AI EVENT CREATION
@@ -845,7 +1273,7 @@ Prizes: ₹50,000""")
                         # Save flyer
                         flyer_path = None
                         if flyer:
-                            flyer_path = data_manager.save_image_simple(flyer)
+                            flyer_path = db_manager.save_image_simple(flyer)
                         
                         event_to_save = {
                             'id': str(uuid.uuid4()),
@@ -860,17 +1288,10 @@ Prizes: ₹50,000""")
                             'created_by': st.session_state.username,
                             'created_by_name': st.session_state.name,
                             'ai_generated': event_data.get('ai_generated', False),
-                            'ai_prompt': event_text if event_data.get('ai_generated') else None,
-                            'social_stats': {
-                                'likes': [],
-                                'favorites': [],
-                                'interested': [],
-                                'shares': 0,
-                                'views': 0
-                            }
+                            'ai_prompt': event_text if event_data.get('ai_generated') else None
                         }
                         
-                        if data_manager.add_item('events', event_to_save):
+                        if db_manager.add_event(event_to_save):
                             st.success("Event created successfully! 🎉")
                             st.balloons()
                             # Clear session state
@@ -895,337 +1316,6 @@ Prizes: ₹50,000""")
                     st.session_state.ai_generated_data = event_data
                     st.session_state.ai_event_text = content
                     st.rerun()
-# ============================================
-# EVENT CARD WITH SOCIAL FEATURES
-# ============================================
-
-
-def display_event_card_social(event, current_user=None):
-    """Display event card with social features"""
-    event_id = event.get('id')
-    
-    # Generate a unique display key
-    import time
-    display_key = f"{event_id}_{int(time.time() * 1000) % 10000}"
-    
-    # Reload fresh data to ensure we have latest stats
-    events = data_manager.load('events')
-    current_event = next((e for e in events if e.get('id') == event_id), event)
-    
-    # Use a container to prevent re-render issues
-    with st.container():
-        st.markdown('<div class="event-card">', unsafe_allow_html=True)
-        
-        # Header with AI badge
-        col_header = st.columns([4, 1])
-        with col_header[0]:
-            st.subheader(current_event.get('title', 'Untitled Event'))
-            if current_event.get('ai_generated'):
-                st.markdown('<span class="ai-badge">🤖 AI Generated</span>', 
-                           unsafe_allow_html=True)
-        with col_header[1]:
-            if is_upcoming(current_event.get('event_date')):
-                st.success("🟢 Upcoming")
-            else:
-                st.error("🔴 Completed")
-        
-        # Event flyer
-        if current_event.get('flyer_path'):
-            flyer_path = current_event.get('flyer_path')
-            try:
-                # Check if it's a base64 data URL
-                if flyer_path.startswith('data:image/'):
-                    # Display base64 image
-                    st.image(flyer_path, width=300, caption="Event Flyer")
-                else:
-                    # Try to load as file path
-                    if os.path.exists(flyer_path):
-                        image = Image.open(flyer_path)
-                        st.image(image, width=300, caption="Event Flyer")
-            except Exception as e:
-                st.warning("Could not display event flyer")
-        
-        # Description
-        desc = current_event.get('description', 'No description')
-        if len(desc) > 300:
-            desc = desc[:300] + "..."
-        st.write(desc)
-        
-        # Details
-        col_details = st.columns(4)
-        with col_details[0]:
-            st.caption(f"**📅 Date:** {format_date(current_event.get('event_date'))}")
-        with col_details[1]:
-            st.caption(f"**📍 Venue:** {current_event.get('venue', 'N/A')}")
-        with col_details[2]:
-            st.caption(f"**🏷️ Type:** {current_event.get('event_type', 'N/A')}")
-        with col_details[3]:
-            st.caption(f"**👨‍🏫 Organizer:** {current_event.get('organizer', 'N/A')}")
-        
-        # Get current social stats from the loaded event
-        social_stats = current_event.get('social_stats', {})
-        likes = social_stats.get('likes', [])
-        favorites = social_stats.get('favorites', [])
-        interested = social_stats.get('interested', [])
-        shares = social_stats.get('shares', 0)
-        views = social_stats.get('views', 0)
-        
-        # Check user's current interactions
-        user_liked = current_user in likes if current_user else False
-        user_favorited = current_user in favorites if current_user else False
-        user_interested = current_user in interested if current_user else False
-        
-        # Social buttons (only for logged-in users)
-        if current_user and current_user != "None":
-            st.markdown("---")
-            st.markdown("**Social Interactions**")
-            
-            col_social = st.columns(5)
-            
-            # LIKE button
-            with col_social[0]:
-                like_key = f"like_{display_key}_{current_user}"
-                like_icon = "❤️" if user_liked else "🤍"
-                
-                if st.button(f"{like_icon} Like", key=like_key, use_container_width=True):
-                    # Update likes in database
-                    all_events = data_manager.load('events')
-                    for e in all_events:
-                        if e.get('id') == event_id:
-                            # Initialize social_stats if needed
-                            if 'social_stats' not in e:
-                                e['social_stats'] = {'likes': [], 'favorites': [], 'interested': [], 'shares': 0, 'views': 0}
-                            
-                            # Toggle user's like
-                            current_likes = e['social_stats'].get('likes', [])
-                            if current_user in current_likes:
-                                current_likes.remove(current_user)
-                            else:
-                                current_likes.append(current_user)
-                            
-                            e['social_stats']['likes'] = current_likes
-                            
-                            # Save the updated events
-                            data_manager.save('events', all_events)
-                            st.success(f"{'Removed like' if user_liked else 'Liked!'}")
-                            st.rerun()
-                
-                # Display count
-                current_likes_count = len(likes)
-                st.caption(f"{current_likes_count} likes")
-            
-            # FAVORITE button
-            with col_social[1]:
-                fav_key = f"fav_{display_key}_{current_user}"
-                fav_icon = "⭐" if user_favorited else "☆"
-                
-                if st.button(f"{fav_icon} Favorite", key=fav_key, use_container_width=True):
-                    # Update favorites in database
-                    all_events = data_manager.load('events')
-                    for e in all_events:
-                        if e.get('id') == event_id:
-                            # Initialize social_stats if needed
-                            if 'social_stats' not in e:
-                                e['social_stats'] = {'likes': [], 'favorites': [], 'interested': [], 'shares': 0, 'views': 0}
-                            
-                            # Toggle user's favorite
-                            current_favs = e['social_stats'].get('favorites', [])
-                            if current_user in current_favs:
-                                current_favs.remove(current_user)
-                            else:
-                                current_favs.append(current_user)
-                            
-                            e['social_stats']['favorites'] = current_favs
-                            
-                            # Save the updated events
-                            data_manager.save('events', all_events)
-                            st.success(f"{'Removed from favorites' if user_favorited else 'Added to favorites!'}")
-                            st.rerun()
-                
-                # Display count
-                current_favs_count = len(favorites)
-                st.caption(f"{current_favs_count} favorites")
-            
-            # INTERESTED button
-            with col_social[2]:
-                int_key = f"int_{display_key}_{current_user}"
-                int_icon = "✅" if user_interested else "🤔"
-                
-                if st.button(f"{int_icon} Interested", key=int_key, use_container_width=True):
-                    # Update interested in database
-                    all_events = data_manager.load('events')
-                    for e in all_events:
-                        if e.get('id') == event_id:
-                            # Initialize social_stats if needed
-                            if 'social_stats' not in e:
-                                e['social_stats'] = {'likes': [], 'favorites': [], 'interested': [], 'shares': 0, 'views': 0}
-                            
-                            # Toggle user's interest
-                            current_int = e['social_stats'].get('interested', [])
-                            if current_user in current_int:
-                                current_int.remove(current_user)
-                            else:
-                                current_int.append(current_user)
-                            
-                            e['social_stats']['interested'] = current_int
-                            
-                            # Save the updated events
-                            data_manager.save('events', all_events)
-                            st.success(f"{'Removed interest' if user_interested else 'Marked as interested!'}")
-                            st.rerun()
-                
-                # Display count
-                current_int_count = len(interested)
-                st.caption(f"{current_int_count} interested")
-            
-            # SHARE button
-            with col_social[3]:
-                share_key = f"share_{display_key}_{current_user}"
-                
-                if st.button("📤 Share", key=share_key, use_container_width=True):
-                    # Update shares count in database
-                    all_events = data_manager.load('events')
-                    for e in all_events:
-                        if e.get('id') == event_id:
-                            # Initialize social_stats if needed
-                            if 'social_stats' not in e:
-                                e['social_stats'] = {'likes': [], 'favorites': [], 'interested': [], 'shares': 0, 'views': 0}
-                            
-                            # Increment shares
-                            current_shares = e['social_stats'].get('shares', 0)
-                            e['social_stats']['shares'] = current_shares + 1
-                            
-                            # Save the updated events
-                            data_manager.save('events', all_events)
-                            
-                            # Generate share text
-                            share_text = f"Check out this event: {current_event['title']}"
-                            if current_event.get('registration_link'):
-                                share_text += f"\nRegister here: {current_event['registration_link']}"
-                            
-                            # Show success message
-                            st.success(f"Event shared! Total shares: {current_shares + 1}")
-                            # Show shareable text
-                            st.code(share_text)
-                            st.rerun()
-                
-                # Display count
-                st.caption(f"{shares} shares")
-            
-            # VIEW button
-            with col_social[4]:
-                view_key = f"view_{display_key}_{current_user}"
-                
-                if st.button("👁️ View", key=view_key, use_container_width=True):
-                    # Update views count in database
-                    all_events = data_manager.load('events')
-                    for e in all_events:
-                        if e.get('id') == event_id:
-                            # Initialize social_stats if needed
-                            if 'social_stats' not in e:
-                                e['social_stats'] = {'likes': [], 'favorites': [], 'interested': [], 'shares': 0, 'views': 0}
-                            
-                            # Increment views
-                            current_views = e['social_stats'].get('views', 0)
-                            e['social_stats']['views'] = current_views + 1
-                            
-                            # Save the updated events
-                            data_manager.save('events', all_events)
-                            st.success(f"View recorded! Total views: {current_views + 1}")
-                            st.rerun()
-                
-                # Display count
-                st.caption(f"{views} views")
-        
-        else:
-            # Show social stats without interactive buttons
-            st.markdown("---")
-            st.markdown("**Social Stats**")
-            
-            col_social = st.columns(5)
-            with col_social[0]:
-                st.caption(f"❤️ {len(likes)} likes")
-            with col_social[1]:
-                st.caption(f"⭐ {len(favorites)} favorites")
-            with col_social[2]:
-                st.caption(f"🤔 {len(interested)} interested")
-            with col_social[3]:
-                st.caption(f"📤 {shares} shares")
-            with col_social[4]:
-                st.caption(f"👁️ {views} views")
-        
-        # Registration section - only show for logged-in users
-        if current_user and current_user != "None":
-            st.markdown("---")
-            st.markdown('<div class="registration-section">', unsafe_allow_html=True)
-            st.subheader("📝 Registration")
-            
-            # Check if user is registered
-            registrations = data_manager.load('registrations')
-            is_registered = any(r.get('event_id') == event_id and 
-                               r.get('student_username') == current_user 
-                               for r in registrations)
-            
-            if is_registered:
-                st.success("✅ You are registered for this event")
-                
-                # Show registration details
-                registration = next((r for r in registrations 
-                                   if r.get('event_id') == event_id and 
-                                   r.get('student_username') == current_user), None)
-                
-                if registration:
-                    col_reg = st.columns(3)
-                    with col_reg[0]:
-                        st.info(f"Status: {registration.get('status', 'pending').title()}")
-                    with col_reg[1]:
-                        st.info(f"Via: {'Official Link' if registration.get('via_link') else 'App'}")
-                    with col_reg[2]:
-                        if registration.get('attendance') == 'present':
-                            st.success("Attended ✅")
-                        else:
-                            st.warning("Not Attended")
-            else:
-                col_reg_actions = st.columns([2, 1])
-                
-                with col_reg_actions[0]:
-                    if current_event.get('registration_link'):
-                        st.markdown(f"[🔗 **Register via Official Link**]({current_event['registration_link']})", 
-                                   unsafe_allow_html=True)
-                        st.caption("Click the link above to register on the official platform")
-                
-                with col_reg_actions[1]:
-                    reg_key = f"reg_{display_key}_{current_user}"
-                    if st.button("✅ **I Have Registered**", key=reg_key, 
-                               use_container_width=True, type="primary"):
-                        # Create registration record
-                        users = data_manager.load('users')
-                        student = next((u for u in users if u.get('username') == current_user), {})
-                        
-                        reg_data = {
-                            'id': str(uuid.uuid4()),
-                            'event_id': event_id,
-                            'event_title': current_event.get('title', 'Untitled Event'),
-                            'student_username': current_user,
-                            'student_name': student.get('name', current_user),
-                            'student_roll': student.get('roll_no', 'N/A'),
-                            'student_dept': student.get('department', 'N/A'),
-                            'via_link': False,
-                            'via_app': True,
-                            'status': 'pending',
-                            'attendance': 'absent',
-                            'registered_at': datetime.now().isoformat()
-                        }
-                        
-                        if data_manager.add_item('registrations', reg_data):
-                            st.success("Registration recorded! Waiting for verification.")
-                            st.rerun()
-                        else:
-                            st.error("Failed to record registration")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================
 # FACULTY DASHBOARD
@@ -1250,65 +1340,62 @@ def faculty_dashboard():
         st.markdown('<h1 class="main-header">Faculty Dashboard</h1>', unsafe_allow_html=True)
         
         # Statistics
-        events = data_manager.load('events')
-        my_events = [e for e in events if e.get('created_by') == st.session_state.username]
-        registrations = data_manager.load('registrations')
+        events = db_manager.get_events_by_creator(st.session_state.username)
+        all_registrations = db_manager.execute_query("SELECT * FROM registrations", fetch_all=True) or []
         
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("My Events", len(my_events))
+            st.metric("My Events", len(events))
         with col2:
-            upcoming = len([e for e in my_events if is_upcoming(e.get('event_date'))])
+            upcoming = len([e for e in events if is_upcoming(e.get('event_date'))])
             st.metric("Upcoming", upcoming)
         with col3:
-            total_reg = len([r for r in registrations 
-                           if any(e.get('id') == r.get('event_id') for e in my_events)])
+            event_ids = [e['id'] for e in events]
+            total_reg = len([r for r in all_registrations if r['event_id'] in event_ids])
             st.metric("Total Registrations", total_reg)
         with col4:
-            attended = len([r for r in registrations 
-                          if r.get('attendance') == 'present' and 
-                          any(e.get('id') == r.get('event_id') for e in my_events)])
+            attended = len([r for r in all_registrations if r['event_id'] in event_ids and r['attendance'] == 'present'])
             st.metric("Attended", attended)
         
         # Recent events
         st.subheader("📅 My Recent Events")
-        if my_events:
-            for event in my_events[-3:]:  # Last 3 events
+        if events:
+            for event in events[-3:]:  # Last 3 events
                 display_event_card_social(event, None)
         else:
             st.info("No events created yet. Create your first event!")
     
     elif selected == "Create Event":
         st.header("➕ Create New Event")
-    
+        
         with st.form("create_event_form"):
             col1, col2 = st.columns(2)
-        
+            
             with col1:
                 title = st.text_input("Event Title *")
                 event_type = st.selectbox("Event Type *", 
-                                     ["Workshop", "Hackathon", "Competition", 
-                                      "Bootcamp", "Seminar", "Conference", "Webinar"])
+                                        ["Workshop", "Hackathon", "Competition", 
+                                         "Bootcamp", "Seminar", "Conference", "Webinar"])
                 event_date = st.date_input("Event Date *", min_value=date.today())
                 event_time = st.time_input("Event Time *")
                 max_participants = st.number_input("Max Participants", min_value=1, value=100)
-        
+            
             with col2:
                 venue = st.text_input("Venue *")
                 organizer = st.text_input("Organizer *", value="G H Raisoni College")
                 registration_link = st.text_input("Registration Link")
-            
+                
                 # Flyer upload
                 st.subheader("Event Flyer (Optional)")
                 flyer = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif'])
                 if flyer:
                     st.image(flyer, width=200)
-        
+            
             description = st.text_area("Event Description *", height=150)
-        
+            
             submit_button = st.form_submit_button("Create Event", use_container_width=True)
-        
+            
             if submit_button:
                 if not all([title, event_type, venue, organizer, description]):
                     st.error("Please fill all required fields (*)")
@@ -1316,11 +1403,11 @@ def faculty_dashboard():
                     # Save flyer
                     flyer_path = None
                     if flyer:
-                        flyer_path = data_manager.save_image_simple(flyer)
-                
+                        flyer_path = db_manager.save_image_simple(flyer)
+                    
                     # Combine date and time
                     event_datetime = datetime.combine(event_date, event_time)
-                
+                    
                     event_data = {
                         'id': str(uuid.uuid4()),
                         'title': title,
@@ -1334,17 +1421,10 @@ def faculty_dashboard():
                         'flyer_path': flyer_path,
                         'created_by': st.session_state.username,
                         'created_by_name': st.session_state.name,
-                        'ai_generated': False,
-                        'social_stats': {
-                            'likes': [],
-                            'favorites': [],
-                            'interested': [],
-                            'shares': 0,
-                            'views': 0
-                        }
+                        'ai_generated': False
                     }
-                
-                    if data_manager.add_item('events', event_data):
+                    
+                    if db_manager.add_event(event_data):
                         st.success(f"Event '{title}' created successfully! 🎉")
                         st.balloons()
                         st.rerun()
@@ -1357,10 +1437,9 @@ def faculty_dashboard():
     elif selected == "My Events":
         st.header("📋 My Events")
         
-        events = data_manager.load('events')
-        my_events = [e for e in events if e.get('created_by') == st.session_state.username]
+        events = db_manager.get_events_by_creator(st.session_state.username)
         
-        if not my_events:
+        if not events:
             st.info("You haven't created any events yet.")
             return
         
@@ -1368,7 +1447,7 @@ def faculty_dashboard():
         tab1, tab2 = st.tabs(["Upcoming Events", "Past Events"])
         
         with tab1:
-            upcoming = [e for e in my_events if is_upcoming(e.get('event_date'))]
+            upcoming = [e for e in events if is_upcoming(e.get('event_date'))]
             if upcoming:
                 for event in upcoming:
                     display_event_card_social(event, None)
@@ -1376,7 +1455,7 @@ def faculty_dashboard():
                 st.info("No upcoming events.")
         
         with tab2:
-            past = [e for e in my_events if not is_upcoming(e.get('event_date'))]
+            past = [e for e in events if not is_upcoming(e.get('event_date'))]
             if past:
                 for event in past:
                     display_event_card_social(event, None)
@@ -1386,23 +1465,21 @@ def faculty_dashboard():
     elif selected == "Registrations":
         st.header("📝 Event Registrations")
         
-        events = data_manager.load('events')
-        my_events = [e for e in events if e.get('created_by') == st.session_state.username]
+        events = db_manager.get_events_by_creator(st.session_state.username)
         
-        if not my_events:
+        if not events:
             st.info("You haven't created any events yet.")
             return
         
         # Select event
-        event_titles = [e['title'] for e in my_events]
+        event_titles = [e['title'] for e in events]
         selected_title = st.selectbox("Select Event", event_titles)
         
         if selected_title:
-            selected_event = next(e for e in my_events if e['title'] == selected_title)
+            selected_event = next(e for e in events if e['title'] == selected_title)
             event_id = selected_event['id']
             
-            registrations = data_manager.load('registrations')
-            event_regs = [r for r in registrations if r.get('event_id') == event_id]
+            event_regs = db_manager.get_registrations_by_event(event_id)
             
             if event_regs:
                 # Convert to DataFrame
@@ -1444,7 +1521,7 @@ def faculty_dashboard():
                 # Update status
                 st.subheader("Update Registration Status")
                 selected_student = st.selectbox("Select Student", 
-                                               [r['student_name'] for r in event_regs])
+                                              [r['student_name'] for r in event_regs])
                 
                 if selected_student:
                     reg = next(r for r in event_regs if r['student_name'] == selected_student)
@@ -1462,39 +1539,31 @@ def faculty_dashboard():
                                               .index(reg.get('attendance', 'absent')))
                     
                     if st.button("Update Status"):
-                        # Find and update registration
-                        all_regs = data_manager.load('registrations')
-                        for i, r in enumerate(all_regs):
-                            if (r.get('event_id') == event_id and 
-                                r.get('student_name') == selected_student):
-                                all_regs[i]['status'] = new_status
-                                all_regs[i]['attendance'] = new_att
-                                break
-                        
-                        data_manager.save('registrations', all_regs)
-                        st.success("Status updated!")
-                        st.rerun()
+                        if db_manager.update_registration_status(reg['id'], new_status, new_att):
+                            st.success("Status updated!")
+                            st.rerun()
+                        else:
+                            st.error("Failed to update status")
             else:
                 st.info(f"No registrations for '{selected_title}' yet.")
     
     elif selected == "Analytics":
         st.header("📊 Event Analytics")
         
-        events = data_manager.load('events')
-        my_events = [e for e in events if e.get('created_by') == st.session_state.username]
+        events = db_manager.get_events_by_creator(st.session_state.username)
         
-        if not my_events:
+        if not events:
             st.info("No events to analyze.")
             return
         
         # Overall statistics
         st.subheader("Overall Statistics")
         
-        total_likes = sum(len(e.get('social_stats', {}).get('likes', [])) for e in my_events)
-        total_favs = sum(len(e.get('social_stats', {}).get('favorites', [])) for e in my_events)
-        total_int = sum(len(e.get('social_stats', {}).get('interested', [])) for e in my_events)
-        total_views = sum(e.get('social_stats', {}).get('views', 0) for e in my_events)
-        total_shares = sum(e.get('social_stats', {}).get('shares', 0) for e in my_events)
+        total_likes = sum(len(parse_json_list(e.get('likes', '[]'))) for e in events)
+        total_favs = sum(len(parse_json_list(e.get('favorites', '[]'))) for e in events)
+        total_int = sum(len(parse_json_list(e.get('interested', '[]'))) for e in events)
+        total_views = sum(e.get('views', 0) or 0 for e in events)
+        total_shares = sum(e.get('shares', 0) or 0 for e in events)
         
         col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
@@ -1512,15 +1581,20 @@ def faculty_dashboard():
         st.subheader("Event-wise Analytics")
         
         analytics_data = []
-        for event in my_events:
-            social = event.get('social_stats', {})
+        for event in events:
+            likes = len(parse_json_list(event.get('likes', '[]')))
+            favorites = len(parse_json_list(event.get('favorites', '[]')))
+            interested = len(parse_json_list(event.get('interested', '[]')))
+            views = event.get('views', 0) or 0
+            shares = event.get('shares', 0) or 0
+            
             analytics_data.append({
                 'Event': event['title'],
-                'Likes': len(social.get('likes', [])),
-                'Favorites': len(social.get('favorites', [])),
-                'Interested': len(social.get('interested', [])),
-                'Views': social.get('views', 0),
-                'Shares': social.get('shares', 0),
+                'Likes': likes,
+                'Favorites': favorites,
+                'Interested': interested,
+                'Views': views,
+                'Shares': shares,
                 'Status': 'Upcoming' if is_upcoming(event.get('event_date')) else 'Past'
             })
         
@@ -1529,35 +1603,20 @@ def faculty_dashboard():
         
         # Chart
         st.subheader("Engagement Chart")
-        chart_df = df.set_index('Event')[['Likes', 'Favorites', 'Interested']].head(5)
-        st.bar_chart(chart_df)
+        if len(df) > 0:
+            chart_df = df.set_index('Event')[['Likes', 'Favorites', 'Interested']].head(5)
+            st.bar_chart(chart_df)
 
 # ============================================
 # STUDENT DASHBOARD
 # ============================================
 def student_dashboard():
     """Student dashboard"""
-
-    # Debug: Check database
-    if st.sidebar.checkbox("Debug DB", False):
-        users = data_manager.load('users')
-        events = data_manager.load('events')
-        registrations = data_manager.load('registrations')
-        
-        st.sidebar.write(f"Users: {len(users)}")
-        st.sidebar.write(f"Events: {len(events)}")
-        st.sidebar.write(f"Registrations: {len(registrations)}")
-        
-        # Show current user
-        current_user = [u for u in users if u.get('username') == st.session_state.username]
-        if current_user:
-            st.sidebar.json(current_user[0])
     st.sidebar.title("👨‍🎓 Student Panel")
     st.sidebar.markdown(f"**User:** {st.session_state.name}")
     
     # Get student info
-    users = data_manager.load('users')
-    student = next((u for u in users if u.get('username') == st.session_state.username), {})
+    student = db_manager.get_user(st.session_state.username)
     
     if student:
         st.sidebar.markdown(f"**Roll No:** {student.get('roll_no', 'N/A')}")
@@ -1589,7 +1648,7 @@ def student_dashboard():
             show_only = st.selectbox("Show", ["All", "Upcoming", "Past"])
         
         # Get events
-        events = data_manager.load('events')
+        events = db_manager.get_all_events()
         
         # Apply filters
         filtered_events = events
@@ -1620,24 +1679,22 @@ def student_dashboard():
     elif selected == "My Registrations":
         st.header("📋 My Registrations")
         
-        registrations = data_manager.load('registrations')
-        my_regs = [r for r in registrations 
-                  if r.get('student_username') == st.session_state.username]
+        registrations = db_manager.get_registrations_by_student(st.session_state.username)
         
-        if not my_regs:
+        if not registrations:
             st.info("You haven't registered for any events yet.")
             return
         
         # Get event details
-        events = data_manager.load('events')
-        event_map = {e['id']: e for e in events}
+        all_events = db_manager.get_all_events()
+        event_map = {e['id']: e for e in all_events}
         
         # Tabs for different statuses
         tab1, tab2, tab3 = st.tabs(["Upcoming", "Completed", "All"])
         
         with tab1:
             upcoming_regs = []
-            for reg in my_regs:
+            for reg in registrations:
                 event = event_map.get(reg.get('event_id'))
                 if event and is_upcoming(event.get('event_date')):
                     upcoming_regs.append((reg, event))
@@ -1660,7 +1717,7 @@ def student_dashboard():
         
         with tab2:
             completed_regs = []
-            for reg in my_regs:
+            for reg in registrations:
                 event = event_map.get(reg.get('event_id'))
                 if event and not is_upcoming(event.get('event_date')):
                     completed_regs.append((reg, event))
@@ -1683,7 +1740,7 @@ def student_dashboard():
                 st.info("No completed events.")
         
         with tab3:
-            for reg in my_regs:
+            for reg in registrations:
                 event = event_map.get(reg.get('event_id'))
                 if event:
                     with st.container():
@@ -1704,7 +1761,7 @@ def student_dashboard():
     elif selected == "My Interests":
         st.header("⭐ My Interests")
         
-        events = data_manager.load('events')
+        events = db_manager.get_all_events()
         
         # Get events user has interacted with
         liked_events = []
@@ -1712,12 +1769,15 @@ def student_dashboard():
         int_events = []
         
         for event in events:
-            social = event.get('social_stats', {})
-            if st.session_state.username in social.get('likes', []):
+            likes = parse_json_list(event.get('likes', '[]'))
+            favorites = parse_json_list(event.get('favorites', '[]'))
+            interested = parse_json_list(event.get('interested', '[]'))
+            
+            if st.session_state.username in likes:
                 liked_events.append(event)
-            if st.session_state.username in social.get('favorites', []):
+            if st.session_state.username in favorites:
                 fav_events.append(event)
-            if st.session_state.username in social.get('interested', []):
+            if st.session_state.username in interested:
                 int_events.append(event)
         
         # Tabs
@@ -1749,8 +1809,7 @@ def student_dashboard():
     elif selected == "Profile":
         st.header("👤 My Profile")
         
-        users = data_manager.load('users')
-        student = next((u for u in users if u.get('username') == st.session_state.username), None)
+        student = db_manager.get_user(st.session_state.username)
         
         if student:
             col1, col2 = st.columns(2)
@@ -1764,23 +1823,19 @@ def student_dashboard():
             with col2:
                 st.markdown(f"**Email:** {student.get('email', 'N/A')}")
                 st.markdown(f"**Username:** {student.get('username', 'N/A')}")
-                st.markdown(f"**Member Since:** {student.get('created_at', 'N/A')[:10]}")
+                st.markdown(f"**Member Since:** {format_date(student.get('created_at'))}")
             
             # Statistics
             st.markdown("---")
             st.subheader("📊 My Statistics")
             
-            registrations = data_manager.load('registrations')
-            my_regs = [r for r in registrations 
-                      if r.get('student_username') == st.session_state.username]
+            registrations = db_manager.get_registrations_by_student(st.session_state.username)
+            my_regs = registrations if registrations else []
             
-            events = data_manager.load('events')
-            total_likes = sum(1 for e in events 
-                            if st.session_state.username in e.get('social_stats', {}).get('likes', []))
-            total_favs = sum(1 for e in events 
-                           if st.session_state.username in e.get('social_stats', {}).get('favorites', []))
-            total_int = sum(1 for e in events 
-                          if st.session_state.username in e.get('social_stats', {}).get('interested', []))
+            events = db_manager.get_all_events()
+            total_likes = sum(1 for e in events if st.session_state.username in parse_json_list(e.get('likes', '[]')))
+            total_favs = sum(1 for e in events if st.session_state.username in parse_json_list(e.get('favorites', '[]')))
+            total_int = sum(1 for e in events if st.session_state.username in parse_json_list(e.get('interested', '[]')))
             
             col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
             with col_stat1:
@@ -1808,12 +1863,6 @@ def main():
         st.session_state.name = None
     if 'user_id' not in st.session_state:
         st.session_state.user_id = None
-
-    # Initialize data manager - ensure it persists
-    if 'data_manager' not in st.session_state:
-        st.session_state.data_manager = JSONDataManager()
-    
-    data_manager = st.session_state.data_manager
     
     # Route based on login status
     if st.session_state.role is None:
@@ -1827,9 +1876,9 @@ def main():
         st.markdown('<h1 class="main-header">Admin Dashboard</h1>', unsafe_allow_html=True)
         
         # Quick stats
-        events = data_manager.load('events')
-        users = data_manager.load('users')
-        registrations = data_manager.load('registrations')
+        events = db_manager.get_all_events()
+        users = db_manager.get_all_users()
+        registrations = db_manager.execute_query("SELECT * FROM registrations", fetch_all=True) or []
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -1841,6 +1890,22 @@ def main():
         with col4:
             upcoming = len([e for e in events if is_upcoming(e.get('event_date'))])
             st.metric("Upcoming Events", upcoming)
+        
+        # Database management
+        st.markdown("---")
+        st.subheader("Database Management")
+        
+        col_db1, col_db2 = st.columns(2)
+        
+        with col_db1:
+            if st.button("View All Users", use_container_width=True):
+                users_df = pd.DataFrame(users)
+                st.dataframe(users_df[['name', 'username', 'role', 'department', 'created_at']])
+        
+        with col_db2:
+            if st.button("View All Events", use_container_width=True):
+                events_df = pd.DataFrame(events)
+                st.dataframe(events_df[['title', 'event_type', 'event_date', 'venue', 'created_by_name']])
         
         # Logout button
         st.sidebar.markdown("---")
