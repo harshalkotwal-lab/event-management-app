@@ -18,7 +18,7 @@ import re
 import requests
 from streamlit_option_menu import option_menu
 import base64
-
+import tempfile
 # ============================================
 # PAGE CONFIGURATION
 # ============================================
@@ -292,45 +292,51 @@ class JSONDataManager:
         data = self.load(data_type)
         return [item for item in data if item.get(field) == value]
     
-    def save_image(self, uploaded_file, event_id=None):
-        """Save uploaded image and return path"""
-        if uploaded_file is None:
-            return None
-        
-        # Generate filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        file_ext = os.path.splitext(uploaded_file.name)[1].lower()
-        
-        if event_id:
-            filename = f"event_{event_id}_{timestamp}{file_ext}"
-        else:
-            filename = f"{timestamp}{file_ext}"
-        
-        file_path = self.uploads_dir / filename
-        
+    def save_image_safe(self, uploaded_file):
+        """Safe method to save image that works both locally and on cloud"""
         try:
-            # Save file
-            with open(file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
+            # Try base64 method first (works on cloud)
+            return self.save_image_safe(uploaded_file)
+        except:
+            try:
+                # Fallback to local file saving
+                if uploaded_file is None:
+                    return None
             
-            # Optimize image
-            self._optimize_image(file_path)
+                # Generate filename
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+                filename = f"{timestamp}{file_ext}"
+                file_path = self.uploads_dir / filename
             
-            return str(file_path)
-        except Exception as e:
-            st.error(f"Error saving image: {e}")
-            return None
+                # Save file
+                with open(file_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+            
+                # Optimize image
+                self._optimize_image(file_path)
+            
+                return str(file_path)
+            except Exception as e:
+                st.error(f"Error saving image: {e}")
+                return None
     
-    def _optimize_image(self, image_path, max_size=(1200, 1200)):
+    def _optimize_image(self, image_path, max_size=(800, 800)):
         """Optimize image size"""
         try:
             with Image.open(image_path) as img:
+                # Convert to RGB if necessary
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    img = img.convert('RGB')
+            
                 # Resize if too large
                 if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
                     img.thumbnail(max_size, Image.Resampling.LANCZOS)
-                    img.save(image_path, optimize=True, quality=85)
-        except:
-            pass
+            
+                # Save optimized image
+                img.save(image_path, 'JPEG', optimize=True, quality=85)
+        except Exception as e:
+            st.warning(f"Could not optimize image: {e}")
 
 # Initialize data manager
 data_manager = JSONDataManager()
@@ -735,7 +741,7 @@ Prizes: ₹50,000""")
                         # Save flyer
                         flyer_path = None
                         if flyer:
-                            flyer_path = data_manager.save_image(flyer)
+                            flyer_path = data_manager.save_image_safe(flyer)
                         
                         event_to_save = {
                             'id': str(uuid.uuid4()),
@@ -809,13 +815,21 @@ def display_event_card_social(event, current_user=None):
             else:
                 st.error("🔴 Completed")
         
+        # In display_event_card_social function, update the flyer display section:
         # Event flyer
-        if event.get('flyer_path') and os.path.exists(event.get('flyer_path')):
+        if event.get('flyer_path'):
+            flyer_path = event.get('flyer_path')
             try:
-                image = Image.open(event.get('flyer_path'))
-                st.image(image, width=300, caption="Event Flyer")
-            except:
-                pass
+                # Check if it's a base64 data URL
+                if flyer_path.startswith('data:image/'):
+                    # Display base64 image
+                    st.image(flyer_path, width=300, caption="Event Flyer")
+                elif os.path.exists(flyer_path):
+                    # Display file path image
+                    image = Image.open(flyer_path)
+                    st.image(image, width=300, caption="Event Flyer")
+            except Exception as e:
+                st.warning(f"Could not display event flyer: {e}")
         
         # Description
         desc = event.get('description', 'No description')
@@ -1173,7 +1187,7 @@ def faculty_dashboard():
                     # Save flyer
                     flyer_path = None
                     if flyer:
-                        flyer_path = data_manager.save_image(flyer)
+                        flyer_path = data_manager.save_image_safe(flyer)
                 
                     # Combine date and time
                     event_datetime = datetime.combine(event_date, event_time)
