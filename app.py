@@ -806,6 +806,10 @@ def display_event_card_social(event, current_user=None):
     """Display event card with social features"""
     event_id = event.get('id')
     
+    # Generate a unique key prefix for this event display
+    import time
+    display_key = f"{event_id}_{int(time.time() * 1000) % 10000}"
+    
     # Use a container to prevent re-render issues
     with st.container():
         st.markdown('<div class="event-card">', unsafe_allow_html=True)
@@ -857,7 +861,7 @@ def display_event_card_social(event, current_user=None):
             st.caption(f"**👨‍🏫 Organizer:** {event.get('organizer', 'N/A')}")
         
         # Social buttons (only for logged-in users)
-        if current_user:
+        if current_user and current_user != "None":
             # Get current social stats
             social_stats = event.get('social_stats', {})
             likes = social_stats.get('likes', [])
@@ -878,7 +882,7 @@ def display_event_card_social(event, current_user=None):
             
             # LIKE button
             with col_social[0]:
-                like_key = f"like_{event_id}_{current_user}"
+                like_key = f"like_{display_key}_{current_user}"
                 like_icon = "❤️" if user_liked else "🤍"
                 
                 if st.button(f"{like_icon} Like", key=like_key, use_container_width=True):
@@ -910,7 +914,7 @@ def display_event_card_social(event, current_user=None):
             
             # FAVORITE button
             with col_social[1]:
-                fav_key = f"fav_{event_id}_{current_user}"
+                fav_key = f"fav_{display_key}_{current_user}"
                 fav_icon = "⭐" if user_favorited else "☆"
                 
                 if st.button(f"{fav_icon} Favorite", key=fav_key, use_container_width=True):
@@ -942,7 +946,7 @@ def display_event_card_social(event, current_user=None):
             
             # INTERESTED button
             with col_social[2]:
-                int_key = f"int_{event_id}_{current_user}"
+                int_key = f"int_{display_key}_{current_user}"
                 int_icon = "✅" if user_interested else "🤔"
                 
                 if st.button(f"{int_icon} Interested", key=int_key, use_container_width=True):
@@ -974,7 +978,7 @@ def display_event_card_social(event, current_user=None):
             
             # SHARE button
             with col_social[3]:
-                share_key = f"share_{event_id}_{current_user}"
+                share_key = f"share_{display_key}_{current_user}"
                 
                 if st.button("📤 Share", key=share_key, use_container_width=True):
                     # Update shares count
@@ -1008,7 +1012,7 @@ def display_event_card_social(event, current_user=None):
             
             # VIEW button
             with col_social[4]:
-                view_key = f"view_{event_id}_{current_user}"
+                view_key = f"view_{display_key}_{current_user}"
                 
                 if st.button("👁️ View", key=view_key, use_container_width=True):
                     # Update views count
@@ -1056,7 +1060,7 @@ def display_event_card_social(event, current_user=None):
                 st.caption(f"👁️ {views} views")
         
         # Registration section - only show for logged-in users
-        if current_user:
+        if current_user and current_user != "None":
             st.markdown("---")
             st.markdown('<div class="registration-section">', unsafe_allow_html=True)
             st.subheader("📝 Registration")
@@ -1095,7 +1099,7 @@ def display_event_card_social(event, current_user=None):
                         st.caption("Click the link above to register on the official platform")
                 
                 with col_reg_actions[1]:
-                    reg_key = f"reg_{event_id}_{current_user}"
+                    reg_key = f"reg_{display_key}_{current_user}"
                     if st.button("✅ **I Have Registered**", key=reg_key, 
                                use_container_width=True, type="primary"):
                         # Create registration record
