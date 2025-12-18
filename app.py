@@ -985,9 +985,9 @@ def display_event_card_social(event, current_user=None):
                 st.markdown('<span class="ai-badge">🤖 AI</span>', unsafe_allow_html=True)
         with col_header[1]:
             if is_upcoming(event.get('event_date')):
-                st.success("🟢", help="Upcoming Event")
+                st.success("🟢")
             else:
-                st.error("🔴", help="Past Event")
+                st.error("🔴")
         
         # Compact details
         col_details = st.columns(2)
