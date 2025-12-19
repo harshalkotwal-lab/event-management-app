@@ -819,7 +819,10 @@ class EnhancedDatabaseManager:
             reg_data.get('attendance', 'absent'),
             reg_data.get('registered_at', datetime.now().isoformat())
         )
-        return self.execute_query(query, params)
+        # Execute and return the registration ID
+        if self.execute_query(query, params):
+            return reg_data['id']
+        return None
     
     def get_registrations_by_event(self, event_id, limit=100):
         """Get all registrations for an event"""
@@ -1126,7 +1129,10 @@ def display_event_card_social(event, current_user=None):
         if current_user and current_user != "None":
             st.markdown("---")
             st.markdown('<div class="registration-section">', unsafe_allow_html=True)
-            
+    
+            # Check if already registered
+            is_registered = db_manager.is_student_registered(event_id, current_user)
+    
             if is_registered:
                 st.success("✅ You are registered for this event")
                 # Get registration details
@@ -1142,22 +1148,22 @@ def display_event_card_social(event, current_user=None):
                             break
             else:
                 col_reg_actions = st.columns([2, 1])
-                
+        
                 with col_reg_actions[0]:
                     if event.get('registration_link'):
                         st.markdown(f"[🔗 **Register via Official Link**]({event['registration_link']})", 
-                                   unsafe_allow_html=True)
-                
+                           unsafe_allow_html=True)
+        
                 with col_reg_actions[1]:
                     reg_key = f"reg_{event_id}_{current_user}_{unique_suffix}"
                     if st.button("✅ **Registered**", 
-                               key=reg_key,
-                               use_container_width=True, 
-                               type="primary"):
+                       key=reg_key,
+                       use_container_width=True, 
+                       type="primary"):
                         with st.spinner("Recording registration..."):
                             # Create registration record
                             student = db_manager.get_user(current_user)
-                            
+                    
                             reg_data = {
                                 'id': str(uuid.uuid4()),
                                 'event_id': event_id,
@@ -1171,18 +1177,16 @@ def display_event_card_social(event, current_user=None):
                                 'status': 'pending',
                                 'attendance': 'absent'
                             }
-                            
+                    
                             result = db_manager.add_registration(reg_data)
-                            if result:
+                            if result is not None:
                                 st.success("✅ Registration recorded! Check 'My Registrations'.")
+                                st.balloons()
                                 st.rerun()
                             else:
                                 st.error("Already registered or failed to record.")
-            
+    
             st.markdown('</div>', unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-
 # ============================================
 # LOGIN PAGE
 # ============================================
