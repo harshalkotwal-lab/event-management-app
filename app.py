@@ -89,13 +89,6 @@ st.markdown("""
         border-color: #2563EB;
     }
     
-    .event-card-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        margin-bottom: 0.75rem;
-    }
-    
     .role-badge {
         display: inline-block;
         padding: 0.25rem 0.75rem;
@@ -286,11 +279,19 @@ st.markdown("""
         line-height: 1.5;
         margin: 0.75rem 0;
     }
+    
+    .filter-row {
+        background: #f8fafc;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+        border: 1px solid #e2e8f0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================
-# ENHANCED SQLite DATABASE MANAGER
+# ENHANCED SQLite DATABASE MANAGER - FIXED VERSION
 # ============================================
 class EnhancedDatabaseManager:
     """Manage all data using SQLite database with enhanced features"""
@@ -316,7 +317,6 @@ class EnhancedDatabaseManager:
             self.conn.execute("PRAGMA foreign_keys = ON")
             logger.info("Database connected successfully")
         except Exception as e:
-            st.error(f"Database connection error: {e}")
             logger.error(f"Database connection error: {e}")
     
     def create_tables(self):
@@ -463,7 +463,6 @@ class EnhancedDatabaseManager:
             self._add_default_users()
             
         except Exception as e:
-            st.error(f"Error creating tables: {e}")
             logger.error(f"Error creating tables: {e}")
             traceback.print_exc()
     
@@ -601,7 +600,6 @@ class EnhancedDatabaseManager:
         """Add new user"""
         is_valid, message = self.validate_user_data(user_data)
         if not is_valid:
-            st.error(f"Validation error: {message}")
             return None
         
         query = '''
@@ -668,7 +666,6 @@ class EnhancedDatabaseManager:
         """Add new event"""
         is_valid, message = self.validate_event_data(event_data)
         if not is_valid:
-            st.error(f"Validation error: {message}")
             return None
         
         # Determine event status based on date
@@ -911,34 +908,34 @@ class EnhancedDatabaseManager:
             return False
     
     def get_user_likes(self, username):
-        """Get events liked by user"""
+        """Get events liked by user - FIXED"""
         query = '''
             SELECT e.* FROM events e
             JOIN event_likes l ON e.id = l.event_id
             WHERE l.username = ?
             ORDER BY l.timestamp DESC
         '''
-        return self.execute_query(query, (username,), fetch_all=True)
+        return self.execute_query(query, (username,), fetch_all=True) or []
     
     def get_user_favorites(self, username):
-        """Get events favorited by user"""
+        """Get events favorited by user - FIXED"""
         query = '''
             SELECT e.* FROM events e
             JOIN event_favorites f ON e.id = f.event_id
             WHERE f.username = ?
             ORDER BY f.timestamp DESC
         '''
-        return self.execute_query(query, (username,), fetch_all=True)
+        return self.execute_query(query, (username,), fetch_all=True) or []
     
     def get_user_interested(self, username):
-        """Get events user is interested in"""
+        """Get events user is interested in - FIXED"""
         query = '''
             SELECT e.* FROM events e
             JOIN event_interested i ON e.id = i.event_id
             WHERE i.username = ?
             ORDER BY i.timestamp DESC
         '''
-        return self.execute_query(query, (username,), fetch_all=True)
+        return self.execute_query(query, (username,), fetch_all=True) or []
     
     def check_user_like(self, event_id, username):
         """Check if user liked event"""
@@ -966,7 +963,7 @@ class EnhancedDatabaseManager:
     
     # ========== REGISTRATIONS ==========
     def add_registration(self, reg_data):
-        """Add new registration"""
+        """Add new registration - FIXED"""
         # Check if already registered
         existing = self.execute_query(
             "SELECT id FROM registrations WHERE event_id = ? AND student_username = ?",
@@ -977,7 +974,7 @@ class EnhancedDatabaseManager:
         if existing:
             return None  # Already registered
         
-        # Check if event exists and get details
+        # Get event details
         event = self.get_event(reg_data['event_id'])
         if not event:
             return None
@@ -1017,12 +1014,18 @@ class EnhancedDatabaseManager:
     def get_registrations_by_event(self, event_id, limit=100):
         """Get all registrations for an event"""
         query = "SELECT * FROM registrations WHERE event_id = ? ORDER BY registered_at DESC LIMIT ?"
-        return self.execute_query(query, (event_id, limit), fetch_all=True)
+        return self.execute_query(query, (event_id, limit), fetch_all=True) or []
     
-    def get_registrations_by_student(self, username, limit=100):
-        """Get all registrations for a student"""
-        query = "SELECT * FROM registrations WHERE student_username = ? ORDER BY registered_at DESC LIMIT ?"
-        return self.execute_query(query, (username, limit), fetch_all=True)
+    def get_registrations_by_student(self, username):
+        """Get all registrations for a student - FIXED"""
+        query = """
+            SELECT r.*, e.event_date, e.venue, e.status as event_status 
+            FROM registrations r
+            LEFT JOIN events e ON r.event_id = e.id
+            WHERE r.student_username = ?
+            ORDER BY r.registered_at DESC
+        """
+        return self.execute_query(query, (username,), fetch_all=True) or []
     
     def update_registration_status(self, reg_id, status, attendance):
         """Update registration status"""
@@ -1066,7 +1069,6 @@ class EnhancedDatabaseManager:
             # Limit file size to prevent memory issues
             MAX_SIZE = 5 * 1024 * 1024  # 5MB
             if file_size > MAX_SIZE:
-                st.warning(f"Image is too large ({file_size/1024/1024:.1f}MB). Max size is 5MB.")
                 return None
             
             # Check file type
@@ -1074,7 +1076,6 @@ class EnhancedDatabaseManager:
             allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
             
             if file_ext not in allowed_extensions:
-                st.warning(f"Unsupported file type: {file_ext}. Use: {', '.join(allowed_extensions)}")
                 return None
             
             # Simple base64 conversion without PIL processing
@@ -1147,9 +1148,9 @@ def get_event_status(event_date):
     """Get event status badge"""
     try:
         if isinstance(event_date, str):
-            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
         else:
-            dt = date_str
+            dt = event_date
         
         if dt > datetime.now():
             return '<span class="status-badge status-upcoming">🟢 Upcoming</span>'
@@ -1160,286 +1161,259 @@ def get_event_status(event_date):
     except:
         return '<span class="status-badge">Unknown</span>'
 
-def safe_get(data, key, default=None):
-    """Safely get value from dictionary"""
-    return data.get(key, default) if data else default
-
 # ============================================
-# ENHANCED EVENT CARD WITH SOCIAL FEATURES
+# WORKING EVENT CARD WITH SOCIAL FEATURES
 # ============================================
-def display_event_card_social(event, current_user=None):
-    """Display enhanced event card with social features"""
+def display_event_card(event, current_user=None):
+    """Display event card with WORKING social features"""
+    if not event or not event.get('id'):
+        return
+    
     event_id = event.get('id')
+    unique_key = f"{event_id}_{int(time.time() * 1000)}"
     
-    # Generate unique keys
-    unique_suffix = f"{event_id}_{int(time.time() * 1000)}"
+    # Check user interactions
+    user_liked = False
+    user_favorited = False
+    user_interested = False
     
-    # Get user interaction status
-    user_liked = db_manager.check_user_like(event_id, current_user) if current_user else False
-    user_favorited = db_manager.check_user_favorite(event_id, current_user) if current_user else False
-    user_interested = db_manager.check_user_interested(event_id, current_user) if current_user else False
+    if current_user:
+        user_liked = db_manager.check_user_like(event_id, current_user)
+        user_favorited = db_manager.check_user_favorite(event_id, current_user)
+        user_interested = db_manager.check_user_interested(event_id, current_user)
     
-    # Check if registered
-    is_registered = db_manager.is_student_registered(event_id, current_user) if current_user else False
+    # Check registration
+    is_registered = False
+    if current_user:
+        is_registered = db_manager.is_student_registered(event_id, current_user)
     
     # Get counts
-    likes_count = event.get('likes_count', 0) or 0
-    favorites_count = event.get('favorites_count', 0) or 0
-    interested_count = event.get('interested_count', 0) or 0
-    shares_count = event.get('shares_count', 0) or 0
-    views_count = event.get('views_count', 0) or 0
+    likes = event.get('likes_count', 0) or 0
+    favorites = event.get('favorites_count', 0) or 0
+    interested = event.get('interested_count', 0) or 0
+    shares = event.get('shares_count', 0) or 0
+    views = event.get('views_count', 0) or 0
     
-    # Enhanced card
     with st.container():
         st.markdown('<div class="event-card">', unsafe_allow_html=True)
         
-        # Header with status and AI badge
-        col_header = st.columns([3, 1])
-        with col_header[0]:
-            st.markdown(f'<div class="card-title">{event.get("title", "Untitled Event")}</div>', unsafe_allow_html=True)
-        with col_header[1]:
+        # Header
+        col_title, col_badge = st.columns([3, 1])
+        with col_title:
+            title = event.get('title', 'Untitled Event')
+            st.markdown(f'<div class="card-title">{title}</div>', unsafe_allow_html=True)
+        with col_badge:
             if event.get('ai_generated'):
                 st.markdown('<span class="ai-badge">🤖 AI Generated</span>', unsafe_allow_html=True)
         
-        # Status
-        st.markdown(get_event_status(event.get('event_date')), unsafe_allow_html=True)
+        # Status and date
+        event_date = event.get('event_date')
+        st.markdown(get_event_status(event_date), unsafe_allow_html=True)
         
-        # Compact details
-        st.markdown('<div class="compact-details">', unsafe_allow_html=True)
-        
-        col_details = st.columns(4)
-        with col_details[0]:
-            st.markdown(f'<div class="detail-item">📅 {format_date(event.get("event_date"))}</div>', unsafe_allow_html=True)
-        with col_details[1]:
-            st.markdown(f'<div class="detail-item">📍 {event.get("venue", "N/A")[:25]}</div>', unsafe_allow_html=True)
-        with col_details[2]:
-            st.markdown(f'<div class="detail-item">🏷️ {event.get("event_type", "N/A")}</div>', unsafe_allow_html=True)
-        with col_details[3]:
-            st.markdown(f'<div class="detail-item">👨‍🏫 {event.get("organizer", "N/A")[:20]}</div>', unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+        # Details
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.caption(f"📅 {format_date(event_date)}")
+        with col2:
+            st.caption(f"📍 {event.get('venue', 'N/A')}")
+        with col3:
+            st.caption(f"🏷️ {event.get('event_type', 'N/A')}")
+        with col4:
+            st.caption(f"👨‍🏫 {event.get('organizer', 'N/A')}")
         
         # Description
-        desc = event.get('description', 'No description')
-        st.markdown(f'<div class="card-description">{desc[:150]}...</div>' if len(desc) > 150 else 
-                   f'<div class="card-description">{desc}</div>', unsafe_allow_html=True)
+        desc = event.get('description', '')
+        if desc:
+            if len(desc) > 150:
+                with st.expander("📝 Description"):
+                    st.write(desc)
+                st.caption(f"{desc[:150]}...")
+            else:
+                st.caption(desc)
         
-        # Event flyer
-        if event.get('flyer_path'):
+        # Flyer
+        flyer = event.get('flyer_path')
+        if flyer:
             try:
-                if event['flyer_path'].startswith('data:image/'):
-                    st.image(event['flyer_path'], width=250, caption="Event Flyer", use_column_width=True)
+                if flyer.startswith('data:image'):
+                    st.image(flyer, width=200, use_column_width=True)
             except:
                 pass
         
-        # Social interactions
+        # SOCIAL INTERACTIONS - WORKING VERSION
         st.markdown('<div class="social-container">', unsafe_allow_html=True)
         
-        col_social = st.columns(5)
+        # Like button
+        col_like, col_fav, col_int, col_share, col_view = st.columns(5)
         
-        # LIKE button
-        with col_social[0]:
-            like_key = f"like_{unique_suffix}"
-            like_text = "❤️ Liked" if user_liked else "🤍 Like"
-            if st.button(like_text, key=like_key, use_container_width=True, type="primary" if user_liked else "secondary"):
-                if current_user:
-                    with st.spinner():
-                        success = db_manager.update_event_like(
-                            event_id, 
-                            current_user, 
-                            add=not user_liked
-                        )
-                        if success:
-                            st.rerun()
-                else:
-                    st.warning("Please login to like events")
-            st.markdown(f'<div class="social-count">{likes_count}</div>', unsafe_allow_html=True)
-        
-        # FAVORITE button
-        with col_social[1]:
-            fav_key = f"fav_{unique_suffix}"
-            fav_text = "⭐ Favorited" if user_favorited else "☆ Favorite"
-            if st.button(fav_text, key=fav_key, use_container_width=True, type="primary" if user_favorited else "secondary"):
-                if current_user:
-                    with st.spinner():
-                        success = db_manager.update_event_favorite(
-                            event_id, 
-                            current_user, 
-                            add=not user_favorited
-                        )
-                        if success:
-                            st.rerun()
-                else:
-                    st.warning("Please login to favorite events")
-            st.markdown(f'<div class="social-count">{favorites_count}</div>', unsafe_allow_html=True)
-        
-        # INTERESTED button
-        with col_social[2]:
-            int_key = f"int_{unique_suffix}"
-            int_text = "✓ Interested" if user_interested else "? Interested"
-            if st.button(int_text, key=int_key, use_container_width=True, type="primary" if user_interested else "secondary"):
-                if current_user:
-                    with st.spinner():
-                        success = db_manager.update_event_interested(
-                            event_id, 
-                            current_user, 
-                            add=not user_interested
-                        )
-                        if success:
-                            st.rerun()
-                else:
-                    st.warning("Please login to mark interest")
-            st.markdown(f'<div class="social-count">{interested_count}</div>', unsafe_allow_html=True)
-        
-        # SHARE button
-        with col_social[3]:
-            share_key = f"share_{unique_suffix}"
-            if st.button("📤 Share", key=share_key, use_container_width=True):
-                if current_user:
-                    with st.spinner("Sharing..."):
-                        success = db_manager.increment_event_shares(event_id, current_user)
-                        if success:
-                            # Create shareable link
-                            event_title = event.get('title', 'Event')
-                            share_text = f"Check out this event: {event_title}\n"
-                            if event.get('registration_link'):
-                                share_text += f"Register here: {event.get('registration_link')}"
-                            
-                            st.success(f"Shared! Total shares: {shares_count + 1}")
-                            st.code(share_text, language=None)
-                            st.rerun()
-                else:
-                    st.warning("Please login to share")
-            st.markdown(f'<div class="social-count">{shares_count}</div>', unsafe_allow_html=True)
-        
-        # VIEW button
-        with col_social[4]:
-            view_key = f"view_{unique_suffix}"
-            if st.button("👁️ View", key=view_key, use_container_width=True):
-                if current_user:
-                    db_manager.increment_event_views(event_id, current_user)
+        with col_like:
+            like_btn = st.button(
+                f"{'❤️' if user_liked else '🤍'}",
+                key=f"like_{unique_key}",
+                help="Like this event",
+                use_container_width=True
+            )
+            if like_btn and current_user:
+                success = db_manager.update_event_like(
+                    event_id, 
+                    current_user, 
+                    add=not user_liked
+                )
+                if success:
                     st.rerun()
-            st.markdown(f'<div class="social-count">{views_count}</div>', unsafe_allow_html=True)
+            st.caption(f"{likes}")
+        
+        with col_fav:
+            fav_btn = st.button(
+                f"{'⭐' if user_favorited else '☆'}",
+                key=f"fav_{unique_key}",
+                help="Favorite this event",
+                use_container_width=True
+            )
+            if fav_btn and current_user:
+                success = db_manager.update_event_favorite(
+                    event_id, 
+                    current_user, 
+                    add=not user_favorited
+                )
+                if success:
+                    st.rerun()
+            st.caption(f"{favorites}")
+        
+        with col_int:
+            int_btn = st.button(
+                f"{'✓' if user_interested else '?'}",
+                key=f"int_{unique_key}",
+                help="Mark as interested",
+                use_container_width=True
+            )
+            if int_btn and current_user:
+                success = db_manager.update_event_interested(
+                    event_id, 
+                    current_user, 
+                    add=not user_interested
+                )
+                if success:
+                    st.rerun()
+            st.caption(f"{interested}")
+        
+        with col_share:
+            share_btn = st.button(
+                "📤",
+                key=f"share_{unique_key}",
+                help="Share this event",
+                use_container_width=True
+            )
+            if share_btn and current_user:
+                success = db_manager.increment_event_shares(event_id, current_user)
+                if success:
+                    st.success("Event shared!")
+                    st.rerun()
+            st.caption(f"{shares}")
+        
+        with col_view:
+            view_btn = st.button(
+                "👁️",
+                key=f"view_{unique_key}",
+                help="View event",
+                use_container_width=True
+            )
+            if view_btn and current_user:
+                db_manager.increment_event_views(event_id, current_user)
+                st.rerun()
+            st.caption(f"{views}")
         
         st.markdown('</div>', unsafe_allow_html=True)
         
-        # Registration section
+        # REGISTRATION SECTION - WORKING
         if current_user:
             st.markdown('<div class="registration-section">', unsafe_allow_html=True)
             
             if is_registered:
                 st.success("✅ You are registered for this event")
                 
-                # Show registration details
+                # Get registration details
                 reg = db_manager.get_registration_details(event_id, current_user)
                 if reg:
-                    col_reg = st.columns(3)
-                    with col_reg[0]:
+                    col_status, col_via = st.columns(2)
+                    with col_status:
                         st.info(f"**Status:** {reg.get('status', 'pending').title()}")
-                    with col_reg[1]:
-                        st.info(f"**Via:** {'Official Link' if reg.get('via_link') else 'App'}")
-                    with col_reg[2]:
-                        st.info(f"**Registered:** {format_date(reg.get('registered_at'))}")
+                    with col_via:
+                        via = "Official Link" if reg.get('via_link') else "App"
+                        st.info(f"**Via:** {via}")
             else:
-                st.markdown("### Register for this Event")
+                # Registration options
+                reg_link = event.get('registration_link', '')
                 
-                # Option 1: Official Registration Link
-                if event.get('registration_link'):
+                if reg_link:
+                    # Two registration methods available
                     col_link, col_app = st.columns(2)
                     
                     with col_link:
-                        st.markdown(f"**[🔗 Register via Official Link]({event['registration_link']})**")
-                        st.caption("Click to register on the official platform")
+                        st.markdown(f"[🔗 **Register via Official Link**]({reg_link})", 
+                                  unsafe_allow_html=True)
+                        st.caption("Click to register on external platform")
                         
-                        if st.button("✅ I've Registered via Link", key=f"reg_link_{unique_suffix}", 
-                                    use_container_width=True, type="secondary"):
-                            with st.spinner("Recording your registration..."):
-                                student = db_manager.get_user(current_user)
-                                
-                                reg_data = {
-                                    'id': str(uuid.uuid4()),
-                                    'event_id': event_id,
-                                    'student_username': current_user,
-                                    'student_name': student.get('name', current_user) if student else current_user,
-                                    'student_roll': student.get('roll_no', 'N/A') if student else 'N/A',
-                                    'student_dept': student.get('department', 'N/A') if student else 'N/A',
-                                    'via_link': True,
-                                    'via_app': False,
-                                    'status': 'confirmed',
-                                    'attendance': 'absent'
-                                }
-                                
-                                result = db_manager.add_registration(reg_data)
-                                if result is not None:
-                                    st.success("✅ Registration recorded! You can now mark attendance.")
-                                    st.balloons()
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to record registration or already registered")
+                        if st.button("✅ I've Registered via Link", 
+                                   key=f"link_reg_{unique_key}",
+                                   use_container_width=True):
+                            record_registration(event_id, current_user, via_link=True)
                     
                     with col_app:
                         st.markdown("**Register via App**")
-                        st.caption("Register directly without external link")
+                        st.caption("Register directly in our system")
                         
-                        if st.button("📱 Register via App", key=f"reg_app_{unique_suffix}", 
-                                    use_container_width=True, type="primary"):
-                            with st.spinner("Processing your registration..."):
-                                student = db_manager.get_user(current_user)
-                                
-                                reg_data = {
-                                    'id': str(uuid.uuid4()),
-                                    'event_id': event_id,
-                                    'student_username': current_user,
-                                    'student_name': student.get('name', current_user) if student else current_user,
-                                    'student_roll': student.get('roll_no', 'N/A') if student else 'N/A',
-                                    'student_dept': student.get('department', 'N/A') if student else 'N/A',
-                                    'via_link': False,
-                                    'via_app': True,
-                                    'status': 'pending',
-                                    'attendance': 'absent'
-                                }
-                                
-                                result = db_manager.add_registration(reg_data)
-                                if result is not None:
-                                    st.success("✅ Registration successful! Status: Pending")
-                                    st.balloons()
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to register or already registered")
+                        if st.button("📱 Register via App", 
+                                   key=f"app_reg_{unique_key}",
+                                   use_container_width=True,
+                                   type="primary"):
+                            record_registration(event_id, current_user, via_link=False)
                 else:
-                    # Only app registration option
-                    if st.button("📱 Register for Event", key=f"reg_{unique_suffix}", 
-                                use_container_width=True, type="primary"):
-                        with st.spinner("Processing your registration..."):
-                            student = db_manager.get_user(current_user)
-                            
-                            reg_data = {
-                                'id': str(uuid.uuid4()),
-                                'event_id': event_id,
-                                'student_username': current_user,
-                                'student_name': student.get('name', current_user) if student else current_user,
-                                'student_roll': student.get('roll_no', 'N/A') if student else 'N/A',
-                                'student_dept': student.get('department', 'N/A') if student else 'N/A',
-                                'via_link': False,
-                                'via_app': True,
-                                'status': 'pending',
-                                'attendance': 'absent'
-                            }
-                            
-                            result = db_manager.add_registration(reg_data)
-                            if result is not None:
-                                st.success("✅ Registration successful! Status: Pending")
-                                st.balloons()
-                                st.rerun()
-                            else:
-                                st.error("Failed to register or already registered")
+                    # Only app registration
+                    st.markdown("**Register via App**")
+                    st.caption("Register directly in our system")
+                    
+                    if st.button("📱 Register for Event", 
+                               key=f"reg_{unique_key}",
+                               use_container_width=True,
+                               type="primary"):
+                        record_registration(event_id, current_user, via_link=False)
             
             st.markdown('</div>', unsafe_allow_html=True)
         
         # Creator info
-        st.caption(f"Created by: {event.get('created_by_name', 'Unknown')}")
+        created_by = event.get('created_by_name', 'Unknown')
+        st.caption(f"Created by: {created_by}")
         
         st.markdown('</div>', unsafe_allow_html=True)
+
+def record_registration(event_id, username, via_link=False):
+    """Helper function to record registration"""
+    student = db_manager.get_user(username)
+    
+    if not student:
+        st.error("Student information not found!")
+        return
+    
+    reg_data = {
+        'id': str(uuid.uuid4()),
+        'event_id': event_id,
+        'student_username': username,
+        'student_name': student.get('name', username),
+        'student_roll': student.get('roll_no', 'N/A'),
+        'student_dept': student.get('department', 'N/A'),
+        'via_link': via_link,
+        'via_app': not via_link,
+        'status': 'confirmed' if via_link else 'pending',
+        'attendance': 'absent'
+    }
+    
+    result = db_manager.add_registration(reg_data)
+    if result is not None:
+        st.success("✅ Registration recorded successfully!")
+        st.rerun()
+    else:
+        st.error("Already registered or failed to record")
 
 # ============================================
 # LOGIN PAGE
@@ -1457,15 +1431,14 @@ def login_page():
         admin_pass = st.text_input("Password", type="password", value="admin123", key="admin_pass")
         
         if st.button("Admin Login", use_container_width=True, type="primary"):
-            with st.spinner("Verifying..."):
-                if db_manager.verify_credentials(admin_user, admin_pass, 'admin'):
-                    st.session_state.role = 'admin'
-                    st.session_state.username = admin_user
-                    st.session_state.name = "Administrator"
-                    st.success("Login successful!")
-                    st.rerun()
-                else:
-                    st.error("Invalid credentials")
+            if db_manager.verify_credentials(admin_user, admin_pass, 'admin'):
+                st.session_state.role = 'admin'
+                st.session_state.username = admin_user
+                st.session_state.name = "Administrator"
+                st.success("Login successful!")
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
     
     with col2:
         st.subheader("👨‍🏫 Faculty Login")
@@ -1473,15 +1446,14 @@ def login_page():
         faculty_pass = st.text_input("Password", type="password", value="faculty123", key="faculty_pass")
         
         if st.button("Faculty Login", use_container_width=True, type="primary"):
-            with st.spinner("Verifying..."):
-                if db_manager.verify_credentials(faculty_user, faculty_pass, 'faculty'):
-                    st.session_state.role = 'faculty'
-                    st.session_state.username = faculty_user
-                    st.session_state.name = "Faculty Coordinator"
-                    st.success("Login successful!")
-                    st.rerun()
-                else:
-                    st.error("Invalid credentials")
+            if db_manager.verify_credentials(faculty_user, faculty_pass, 'faculty'):
+                st.session_state.role = 'faculty'
+                st.session_state.username = faculty_user
+                st.session_state.name = "Faculty Coordinator"
+                st.success("Login successful!")
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
     
     with col3:
         st.subheader("👨‍🎓 Student Portal")
@@ -1492,22 +1464,21 @@ def login_page():
             student_pass = st.text_input("Password", type="password", key="student_pass_login")
             
             if st.button("Student Login", use_container_width=True, type="primary"):
-                with st.spinner("Verifying..."):
-                    if db_manager.verify_credentials(student_user, student_pass, 'student'):
-                        # Get student info
-                        student = db_manager.get_user(student_user)
-                        
-                        if student:
-                            st.session_state.role = 'student'
-                            st.session_state.username = student_user
-                            st.session_state.name = student.get('name', student_user)
-                            st.session_state.user_id = student.get('id')
-                            st.success("Login successful!")
-                            st.rerun()
-                        else:
-                            st.error("User not found")
+                if db_manager.verify_credentials(student_user, student_pass, 'student'):
+                    # Get student info
+                    student = db_manager.get_user(student_user)
+                    
+                    if student:
+                        st.session_state.role = 'student'
+                        st.session_state.username = student_user
+                        st.session_state.name = student.get('name', student_user)
+                        st.session_state.user_id = student.get('id')
+                        st.success("Login successful!")
+                        st.rerun()
                     else:
-                        st.error("Invalid credentials")
+                        st.error("User not found")
+                else:
+                    st.error("Invalid credentials")
         
         with tab2:
             with st.form("student_registration"):
@@ -1524,36 +1495,385 @@ def login_page():
                 confirm_pass = st.text_input("Confirm Password *", type="password")
                 
                 if st.form_submit_button("Register", use_container_width=True, type="primary"):
-                    with st.spinner("Creating account..."):
-                        if password != confirm_pass:
-                            st.error("Passwords don't match")
-                        elif not all([name, roll_no, email, username, password]):
-                            st.error("Please fill all required fields (*)")
+                    if password != confirm_pass:
+                        st.error("Passwords don't match")
+                    elif not all([name, roll_no, email, username, password]):
+                        st.error("Please fill all required fields (*)")
+                    else:
+                        # Check if username exists
+                        existing_user = db_manager.get_user(username)
+                        if existing_user:
+                            st.error("Username already exists")
                         else:
-                            # Check if username exists
-                            existing_user = db_manager.get_user(username)
-                            if existing_user:
-                                st.error("Username already exists")
+                            user_data = {
+                                'id': str(uuid.uuid4()),
+                                'name': name,
+                                'roll_no': roll_no,
+                                'department': department,
+                                'year': year,
+                                'email': email,
+                                'username': username,
+                                'password': password,
+                                'role': 'student',
+                                'created_at': datetime.now().isoformat()
+                            }
+                            
+                            if db_manager.add_user(user_data):
+                                st.success("✅ Registration successful! Please login.")
+                                st.rerun()
                             else:
-                                user_data = {
-                                    'id': str(uuid.uuid4()),
-                                    'name': name,
-                                    'roll_no': roll_no,
-                                    'department': department,
-                                    'year': year,
-                                    'email': email,
-                                    'username': username,
-                                    'password': password,
-                                    'role': 'student',
-                                    'created_at': datetime.now().isoformat()
-                                }
+                                st.error("Registration failed")
+
+# ============================================
+# STUDENT DASHBOARD - WORKING VERSION
+# ============================================
+def student_dashboard():
+    """Student dashboard - WORKING VERSION"""
+    
+    st.sidebar.title("👨‍🎓 Student Panel")
+    st.sidebar.markdown(f"**User:** {st.session_state.name}")
+    
+    # Get student info
+    student = db_manager.get_user(st.session_state.username)
+    
+    if student:
+        st.sidebar.markdown(f"**Roll No:** {student.get('roll_no', 'N/A')}")
+        st.sidebar.markdown(f"**Department:** {student.get('department', 'N/A')}")
+        st.sidebar.markdown(f"**Year:** {student.get('year', 'N/A')}")
+    
+    display_role_badge('student')
+    
+    # Navigation
+    with st.sidebar:
+        selected = option_menu(
+            menu_title=None,
+            options=["Events Feed", "My Registrations", "My Interests", "Profile"],
+            icons=["compass", "list-check", "heart", "person"],
+            default_index=0
+        )
+    
+    if selected == "Events Feed":
+        st.markdown('<h1 class="main-header">🎯 Discover Events</h1>', unsafe_allow_html=True)
+        
+        # Update event status
+        db_manager.update_event_status()
+        
+        # Filters
+        col_filters = st.columns([2, 1, 1])
+        with col_filters[0]:
+            search = st.text_input("🔍 Search events", placeholder="Search by title, description...")
+        with col_filters[1]:
+            event_type = st.selectbox("Type", ["All", "Workshop", "Hackathon", "Competition", 
+                                              "Bootcamp", "Seminar", "Conference", "Webinar"])
+        with col_filters[2]:
+            show_only = st.selectbox("Show", ["All", "Upcoming", "Ongoing", "Past"])
+        
+        # Get events
+        events = db_manager.get_all_events(limit=100)
+        
+        # Apply filters
+        filtered_events = events
+        
+        if search:
+            search_lower = search.lower()
+            filtered_events = [e for e in filtered_events 
+                             if search_lower in e.get('title', '').lower() or 
+                             search_lower in e.get('description', '').lower()]
+        
+        if event_type != "All":
+            filtered_events = [e for e in filtered_events if e.get('event_type') == event_type]
+        
+        if show_only == "Upcoming":
+            filtered_events = [e for e in filtered_events if e.get('status') == 'upcoming']
+        elif show_only == "Ongoing":
+            filtered_events = [e for e in filtered_events if e.get('status') == 'ongoing']
+        elif show_only == "Past":
+            filtered_events = [e for e in filtered_events if e.get('status') == 'past']
+        
+        # Sort by date
+        filtered_events.sort(key=lambda x: x.get('event_date', ''), reverse=True)
+        
+        # Display events count
+        st.caption(f"Found {len(filtered_events)} events")
+        
+        # Display events
+        if filtered_events:
+            for event in filtered_events:
+                display_event_card(event, st.session_state.username)
+        else:
+            st.info("No events found matching your criteria.")
+    
+    elif selected == "My Registrations":
+        st.header("📋 My Registrations")
+        
+        registrations = db_manager.get_registrations_by_student(st.session_state.username)
+        
+        if not registrations:
+            st.info("You haven't registered for any events yet.")
+            # Show a link to events feed
+            if st.button("Browse Events", use_container_width=True, type="primary"):
+                st.rerun()
+            return
+        
+        # Calculate statistics
+        total = len(registrations)
+        upcoming = len([r for r in registrations if r.get('event_status') == 'upcoming'])
+        ongoing = len([r for r in registrations if r.get('event_status') == 'ongoing'])
+        completed = len([r for r in registrations if r.get('event_status') == 'past'])
+        
+        # Display stats
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total", total)
+        with col2:
+            st.metric("Upcoming", upcoming)
+        with col3:
+            st.metric("Ongoing", ongoing)
+        with col4:
+            st.metric("Completed", completed)
+        
+        # Create tabs
+        tab_upcoming, tab_ongoing, tab_completed, tab_all = st.tabs([
+            f"Upcoming ({upcoming})", 
+            f"Ongoing ({ongoing})", 
+            f"Completed ({completed})",
+            f"All ({total})"
+        ])
+        
+        with tab_upcoming:
+            if upcoming > 0:
+                for reg in registrations:
+                    if reg.get('event_status') == 'upcoming':
+                        with st.container():
+                            st.markdown('<div class="event-card">', unsafe_allow_html=True)
+                            
+                            col1, col2 = st.columns([3, 1])
+                            
+                            with col1:
+                                event_title = reg.get('event_title', 'Unknown Event')
+                                st.markdown(f'<div class="card-title">{event_title}</div>', unsafe_allow_html=True)
                                 
-                                if db_manager.add_user(user_data):
-                                    st.success("✅ Registration successful! Please login.")
-                                    st.balloons()
-                                    st.rerun()
-                                else:
-                                    st.error("Registration failed")
+                                # Event details
+                                event_date = reg.get('event_date')
+                                if event_date:
+                                    st.caption(f"📅 {format_date(event_date)}")
+                                
+                                venue = reg.get('venue', 'N/A')
+                                st.caption(f"📍 {venue}")
+                                
+                                # Registration details
+                                reg_status = reg.get('status', 'pending').title()
+                                reg_via = "Official Link" if reg.get('via_link') else "App"
+                                st.caption(f"📝 Status: {reg_status} | Via: {reg_via}")
+                            
+                            with col2:
+                                st.success("🟢 Upcoming")
+                                
+                                # Quick view
+                                if st.button("View", key=f"view_up_{reg['id']}", use_container_width=True):
+                                    # Get event and display
+                                    event = db_manager.get_event(reg['event_id'])
+                                    if event:
+                                        display_event_card(event, st.session_state.username)
+                            
+                            st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.info("No upcoming registered events.")
+        
+        with tab_ongoing:
+            if ongoing > 0:
+                for reg in registrations:
+                    if reg.get('event_status') == 'ongoing':
+                        with st.container():
+                            st.markdown('<div class="event-card">', unsafe_allow_html=True)
+                            
+                            col1, col2 = st.columns([3, 1])
+                            
+                            with col1:
+                                event_title = reg.get('event_title', 'Unknown Event')
+                                st.markdown(f'<div class="card-title">{event_title}</div>', unsafe_allow_html=True)
+                                
+                                # Event details
+                                event_date = reg.get('event_date')
+                                if event_date:
+                                    st.caption(f"📅 {format_date(event_date)}")
+                                
+                                venue = reg.get('venue', 'N/A')
+                                st.caption(f"📍 {venue}")
+                                
+                                # Registration details
+                                reg_status = reg.get('status', 'pending').title()
+                                reg_via = "Official Link" if reg.get('via_link') else "App"
+                                st.caption(f"📝 Status: {reg_status} | Via: {reg_via}")
+                            
+                            with col2:
+                                st.warning("🟡 Ongoing")
+                            
+                            st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.info("No ongoing registered events.")
+        
+        with tab_completed:
+            if completed > 0:
+                for reg in registrations:
+                    if reg.get('event_status') == 'past':
+                        with st.container():
+                            st.markdown('<div class="event-card">', unsafe_allow_html=True)
+                            
+                            col1, col2 = st.columns([3, 1])
+                            
+                            with col1:
+                                event_title = reg.get('event_title', 'Unknown Event')
+                                st.markdown(f'<div class="card-title">{event_title}</div>', unsafe_allow_html=True)
+                                
+                                # Event details
+                                event_date = reg.get('event_date')
+                                if event_date:
+                                    st.caption(f"📅 {format_date(event_date)}")
+                                
+                                venue = reg.get('venue', 'N/A')
+                                st.caption(f"📍 {venue}")
+                                
+                                # Registration details
+                                reg_status = reg.get('status', 'pending').title()
+                                reg_via = "Official Link" if reg.get('via_link') else "App"
+                                attendance = reg.get('attendance', 'absent')
+                                attendance_text = "✅ Present" if attendance == 'present' else "❌ Absent"
+                                st.caption(f"📝 Status: {reg_status} | Via: {reg_via} | {attendance_text}")
+                            
+                            with col2:
+                                st.error("🔴 Completed")
+                            
+                            st.markdown('</div>', unsafe_allow_html=True)
+            else:
+                st.info("No completed events.")
+        
+        with tab_all:
+            for reg in registrations:
+                with st.container():
+                    st.markdown('<div class="event-card">', unsafe_allow_html=True)
+                    
+                    col1, col2 = st.columns([3, 1])
+                    
+                    with col1:
+                        event_title = reg.get('event_title', 'Unknown Event')
+                        st.markdown(f'<div class="card-title">{event_title}</div>', unsafe_allow_html=True)
+                        
+                        # Event details
+                        event_date = reg.get('event_date')
+                        if event_date:
+                            st.caption(f"📅 {format_date(event_date)}")
+                        
+                        venue = reg.get('venue', 'N/A')
+                        st.caption(f"📍 {venue}")
+                        
+                        # Registration info
+                        reg_status = reg.get('status', 'pending').title()
+                        reg_via = "Official Link" if reg.get('via_link') else "App"
+                        st.caption(f"📝 Status: {reg_status} | Via: {reg_via}")
+                    
+                    with col2:
+                        # Event status
+                        event_status = reg.get('event_status', 'unknown')
+                        if event_status == 'upcoming':
+                            st.success("🟢 Upcoming")
+                        elif event_status == 'ongoing':
+                            st.warning("🟡 Ongoing")
+                        else:
+                            st.error("🔴 Completed")
+                    
+                    st.markdown('</div>', unsafe_allow_html=True)
+    
+    elif selected == "My Interests":
+        st.header("⭐ My Interests")
+        
+        # Get events user has interacted with
+        liked_events = db_manager.get_user_likes(st.session_state.username)
+        fav_events = db_manager.get_user_favorites(st.session_state.username)
+        int_events = db_manager.get_user_interested(st.session_state.username)
+        
+        # Create tabs with counts
+        tab_liked, tab_favorites, tab_interested = st.tabs([
+            f"❤️ Liked ({len(liked_events)})",
+            f"⭐ Favorites ({len(fav_events)})",
+            f"🤔 Interested ({len(int_events)})"
+        ])
+        
+        with tab_liked:
+            if liked_events:
+                for event in liked_events:
+                    display_event_card(event, st.session_state.username)
+            else:
+                st.info("You haven't liked any events yet.")
+                st.caption("Like events by clicking the ❤️ button on event cards")
+        
+        with tab_favorites:
+            if fav_events:
+                for event in fav_events:
+                    display_event_card(event, st.session_state.username)
+            else:
+                st.info("You haven't favorited any events yet.")
+                st.caption("Favorite events by clicking the ⭐ button on event cards")
+        
+        with tab_interested:
+            if int_events:
+                for event in int_events:
+                    display_event_card(event, st.session_state.username)
+            else:
+                st.info("You haven't marked any events as interested.")
+                st.caption("Mark interest by clicking the ? button on event cards")
+    
+    elif selected == "Profile":
+        st.header("👤 My Profile")
+        
+        student = db_manager.get_user(st.session_state.username)
+        
+        if not student:
+            st.error("User not found!")
+            return
+        
+        # Profile display
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### Personal Information")
+            st.markdown(f"**Full Name:** {student.get('name', 'N/A')}")
+            st.markdown(f"**Roll Number:** {student.get('roll_no', 'N/A')}")
+            st.markdown(f"**Department:** {student.get('department', 'N/A')}")
+            st.markdown(f"**Year:** {student.get('year', 'N/A')}")
+        
+        with col2:
+            st.markdown("### Account Information")
+            st.markdown(f"**Email:** {student.get('email', 'N/A')}")
+            st.markdown(f"**Username:** {student.get('username', 'N/A')}")
+            st.markdown(f"**Member Since:** {format_date(student.get('created_at'))}")
+        
+        # Statistics
+        st.markdown("---")
+        st.subheader("📊 My Statistics")
+        
+        # Get actual data
+        registrations = db_manager.get_registrations_by_student(st.session_state.username) or []
+        liked_events = db_manager.get_user_likes(st.session_state.username)
+        fav_events = db_manager.get_user_favorites(st.session_state.username)
+        
+        col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+        with col_stat1:
+            st.metric("Events Registered", len(registrations))
+        with col_stat2:
+            attended = len([r for r in registrations if r.get('attendance') == 'present'])
+            st.metric("Events Attended", attended)
+        with col_stat3:
+            st.metric("Events Liked", len(liked_events))
+        with col_stat4:
+            st.metric("Events Favorited", len(fav_events))
+    
+    # Logout button
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🚪 Logout", use_container_width=True, type="secondary"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
 
 # ============================================
 # AI EVENT GENERATOR
@@ -1576,7 +1896,6 @@ class AIEventGenerator:
             try:
                 return self._extract_with_ai(text)
             except Exception as e:
-                st.warning(f"AI extraction failed: {e}. Using regex fallback.")
                 logger.warning(f"AI extraction failed: {e}")
         
         # Fallback to regex extraction
@@ -1625,11 +1944,9 @@ class AIEventGenerator:
                 event_data['ai_prompt'] = text
                 return event_data
             except json.JSONDecodeError:
-                st.warning("AI returned invalid JSON. Using regex fallback.")
                 return self._extract_with_regex(text)
                 
         except Exception as e:
-            st.warning(f"OpenAI API error: {e}. Using regex fallback.")
             logger.warning(f"OpenAI API error: {e}")
             return self._extract_with_regex(text)
     
@@ -1646,7 +1963,7 @@ class AIEventGenerator:
             'ai_generated': False
         }
         
-        # Extract title (first line or capitalized words)
+        # Extract title (first line)
         lines = text.split('\n')
         if lines and lines[0].strip():
             event_data['title'] = lines[0].strip()[:100]
@@ -1690,643 +2007,6 @@ class AIEventGenerator:
         return event_data
 
 # ============================================
-# ADMIN DASHBOARD WITH CRUD OPERATIONS
-# ============================================
-def admin_dashboard():
-    """Admin dashboard with full CRUD operations"""
-    st.sidebar.title("👑 Admin Panel")
-    st.sidebar.markdown(f"**User:** {st.session_state.name}")
-    display_role_badge('admin')
-    
-    # Navigation
-    with st.sidebar:
-        selected = option_menu(
-            menu_title=None,
-            options=["Dashboard", "Manage Events", "Manage Users", "System Analytics", "Database"],
-            icons=["house", "calendar-event", "people", "graph-up", "database"],
-            default_index=0
-        )
-    
-    if selected == "Dashboard":
-        st.markdown('<h1 class="main-header">Admin Dashboard</h1>', unsafe_allow_html=True)
-        
-        # Update event status
-        db_manager.update_event_status()
-        
-        # Quick stats
-        events = db_manager.get_all_events(limit=1000)
-        users = db_manager.get_all_users(limit=1000)
-        registrations = db_manager.execute_query("SELECT * FROM registrations", fetch_all=True) or []
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Events", len(events))
-        with col2:
-            st.metric("Total Users", len(users))
-        with col3:
-            st.metric("Total Registrations", len(registrations))
-        with col4:
-            upcoming = len([e for e in events if e.get('status') == 'upcoming'])
-            st.metric("Upcoming Events", upcoming)
-        
-        # Recent events
-        st.subheader("📅 Recent Events")
-        if events:
-            for event in events[:5]:
-                display_event_card_social(event, None)
-        else:
-            st.info("No events found.")
-        
-        # System status
-        st.subheader("🔄 System Status")
-        col_status1, col_status2, col_status3 = st.columns(3)
-        
-        with col_status1:
-            st.info("✅ Database: Connected")
-        with col_status2:
-            st.info("✅ Users: Active")
-        with col_status3:
-            st.info("✅ Events: Updated")
-    
-    elif selected == "Manage Events":
-        st.header("📋 Manage Events")
-        
-        tab1, tab2, tab3 = st.tabs(["View All Events", "Create Event", "Edit Event"])
-        
-        with tab1:
-            events = db_manager.get_all_events()
-            
-            if events:
-                # Filters
-                col_filters = st.columns([2, 1, 1])
-                with col_filters[0]:
-                    search = st.text_input("Search events", key="admin_search")
-                with col_filters[1]:
-                    status_filter = st.selectbox("Status", ["All", "upcoming", "ongoing", "past"])
-                with col_filters[2]:
-                    type_filter = st.selectbox("Type", ["All", "Workshop", "Hackathon", "Competition", "Bootcamp", "Seminar", "Conference", "Webinar"])
-                
-                # Apply filters
-                filtered_events = events
-                if search:
-                    filtered_events = [e for e in filtered_events if search.lower() in e.get('title', '').lower()]
-                if status_filter != "All":
-                    filtered_events = [e for e in filtered_events if e.get('status') == status_filter]
-                if type_filter != "All":
-                    filtered_events = [e for e in filtered_events if e.get('event_type') == type_filter]
-                
-                st.caption(f"Showing {len(filtered_events)} of {len(events)} events")
-                
-                # Display events
-                for event in filtered_events:
-                    with st.container():
-                        col_view, col_actions = st.columns([3, 1])
-                        
-                        with col_view:
-                            display_event_card_social(event, None)
-                        
-                        with col_actions:
-                            st.markdown("### Actions")
-                            if st.button("Edit", key=f"edit_{event['id']}", use_container_width=True):
-                                st.session_state.edit_event_id = event['id']
-                                st.rerun()
-                            
-                            if st.button("Delete", key=f"delete_{event['id']}", use_container_width=True, type="secondary"):
-                                if db_manager.delete_event(event['id']):
-                                    st.success("Event deleted successfully!")
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to delete event")
-            else:
-                st.info("No events found.")
-        
-        with tab2:
-            st.subheader("➕ Create New Event")
-            
-            with st.form("admin_create_event"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    title = st.text_input("Event Title *")
-                    event_type = st.selectbox("Event Type *", 
-                                            ["Workshop", "Hackathon", "Competition", 
-                                             "Bootcamp", "Seminar", "Conference", "Webinar"])
-                    event_date = st.date_input("Event Date *", min_value=date.today())
-                    event_time = st.time_input("Event Time *")
-                    max_participants = st.number_input("Max Participants", min_value=1, value=100)
-                
-                with col2:
-                    venue = st.text_input("Venue *")
-                    organizer = st.text_input("Organizer *", value="G H Raisoni College")
-                    registration_link = st.text_input("Registration Link")
-                    
-                    # Flyer upload
-                    st.subheader("Event Flyer (Optional)")
-                    flyer = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif', 'webp'])
-                    if flyer:
-                        st.image(flyer, width=200)
-                
-                description = st.text_area("Event Description *", height=150)
-                
-                submit_button = st.form_submit_button("Create Event", use_container_width=True, type="primary")
-                
-                if submit_button:
-                    if not all([title, event_type, venue, organizer, description]):
-                        st.error("Please fill all required fields (*)")
-                    else:
-                        # Save flyer
-                        flyer_path = None
-                        if flyer:
-                            flyer_path = db_manager.save_image_simple(flyer)
-                        
-                        # Combine date and time
-                        event_datetime = datetime.combine(event_date, event_time)
-                        
-                        event_data = {
-                            'id': str(uuid.uuid4()),
-                            'title': title,
-                            'description': description,
-                            'event_type': event_type,
-                            'event_date': event_datetime.isoformat(),
-                            'venue': venue,
-                            'organizer': organizer,
-                            'registration_link': registration_link,
-                            'max_participants': max_participants,
-                            'flyer_path': flyer_path,
-                            'created_by': st.session_state.username,
-                            'created_by_name': st.session_state.name,
-                            'ai_generated': False
-                        }
-                        
-                        if db_manager.add_event(event_data):
-                            st.success(f"Event '{title}' created successfully! 🎉")
-                            st.balloons()
-                            st.rerun()
-                        else:
-                            st.error("Failed to create event")
-        
-        with tab3:
-            if 'edit_event_id' in st.session_state:
-                event = db_manager.get_event(st.session_state.edit_event_id)
-                
-                if event:
-                    st.subheader(f"✏️ Edit Event: {event['title']}")
-                    
-                    with st.form("edit_event_form"):
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            title = st.text_input("Event Title *", value=event.get('title'))
-                            event_type = st.selectbox("Event Type *", 
-                                                    ["Workshop", "Hackathon", "Competition", 
-                                                     "Bootcamp", "Seminar", "Conference", "Webinar"],
-                                                    index=["Workshop", "Hackathon", "Competition", 
-                                                           "Bootcamp", "Seminar", "Conference", "Webinar"]
-                                                           .index(event.get('event_type', 'Workshop')))
-                            
-                            event_date_str = event.get('event_date')
-                            if event_date_str:
-                                event_date = datetime.fromisoformat(event_date_str.replace('Z', '+00:00'))
-                                date_input = st.date_input("Event Date *", value=event_date.date())
-                                time_input = st.time_input("Event Time *", value=event_date.time())
-                            else:
-                                date_input = st.date_input("Event Date *", min_value=date.today())
-                                time_input = st.time_input("Event Time *")
-                            
-                            max_participants = st.number_input("Max Participants", 
-                                                             min_value=1, 
-                                                             value=event.get('max_participants', 100))
-                        
-                        with col2:
-                            venue = st.text_input("Venue *", value=event.get('venue'))
-                            organizer = st.text_input("Organizer *", value=event.get('organizer'))
-                            registration_link = st.text_input("Registration Link", 
-                                                            value=event.get('registration_link', ''))
-                            
-                            # Flyer upload/replace
-                            st.subheader("Event Flyer")
-                            current_flyer = event.get('flyer_path')
-                            if current_flyer:
-                                try:
-                                    st.image(current_flyer, width=200, caption="Current Flyer")
-                                except:
-                                    st.caption("Current flyer not displayable")
-                            
-                            new_flyer = st.file_uploader("Upload new image (optional)", 
-                                                        type=['jpg', 'jpeg', 'png', 'gif', 'webp'])
-                        
-                        description = st.text_area("Event Description *", 
-                                                  value=event.get('description', ''),
-                                                  height=150)
-                        
-                        col_submit, col_cancel = st.columns(2)
-                        with col_submit:
-                            submit_button = st.form_submit_button("Update Event", use_container_width=True, type="primary")
-                        with col_cancel:
-                            if st.form_submit_button("Cancel", use_container_width=True, type="secondary"):
-                                del st.session_state.edit_event_id
-                                st.rerun()
-                        
-                        if submit_button:
-                            if not all([title, event_type, venue, organizer, description]):
-                                st.error("Please fill all required fields (*)")
-                            else:
-                                # Save new flyer if uploaded
-                                flyer_path = current_flyer
-                                if new_flyer:
-                                    flyer_path = db_manager.save_image_simple(new_flyer)
-                                
-                                # Combine date and time
-                                event_datetime = datetime.combine(date_input, time_input)
-                                
-                                event_data = {
-                                    'title': title,
-                                    'description': description,
-                                    'event_type': event_type,
-                                    'event_date': event_datetime.isoformat(),
-                                    'venue': venue,
-                                    'organizer': organizer,
-                                    'registration_link': registration_link,
-                                    'max_participants': max_participants,
-                                    'flyer_path': flyer_path
-                                }
-                                
-                                if db_manager.update_event(event['id'], event_data):
-                                    st.success(f"Event '{title}' updated successfully! 🎉")
-                                    del st.session_state.edit_event_id
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to update event")
-                else:
-                    st.error("Event not found")
-                    del st.session_state.edit_event_id
-            else:
-                st.info("Select an event to edit from the 'View All Events' tab")
-    
-    elif selected == "Manage Users":
-        st.header("👥 Manage Users")
-        
-        tab1, tab2, tab3 = st.tabs(["View All Users", "Create User", "Edit User"])
-        
-        with tab1:
-            users = db_manager.get_all_users()
-            
-            if users:
-                # Filters
-                col_filters = st.columns([2, 1, 1])
-                with col_filters[0]:
-                    search = st.text_input("Search users", key="user_search")
-                with col_filters[1]:
-                    role_filter = st.selectbox("Role", ["All", "admin", "faculty", "student"])
-                with col_filters[2]:
-                    dept_filter = st.selectbox("Department", ["All", "CSE", "AIML", "IT", "EE", "BCA", "MCA", "BBA", "MBA", "EXTC", "MECH", "CIVIL", "DS"])
-                
-                # Apply filters
-                filtered_users = users
-                if search:
-                    filtered_users = [u for u in filtered_users if search.lower() in u.get('name', '').lower() or search.lower() in u.get('username', '').lower()]
-                if role_filter != "All":
-                    filtered_users = [u for u in filtered_users if u.get('role') == role_filter]
-                if dept_filter != "All":
-                    filtered_users = [u for u in filtered_users if u.get('department') == dept_filter]
-                
-                # Display users in a table
-                user_data = []
-                for user in filtered_users:
-                    user_data.append({
-                        'Name': user.get('name'),
-                        'Username': user.get('username'),
-                        'Role': user.get('role'),
-                        'Roll No': user.get('roll_no', 'N/A'),
-                        'Department': user.get('department', 'N/A'),
-                        'Year': user.get('year', 'N/A'),
-                        'Joined': format_date(user.get('created_at'))
-                    })
-                
-                df = pd.DataFrame(user_data)
-                st.dataframe(df, use_container_width=True)
-                
-                # User actions
-                st.subheader("User Actions")
-                selected_user = st.selectbox("Select User", [u['Username'] for u in user_data])
-                
-                if selected_user:
-                    col_actions = st.columns(3)
-                    with col_actions[0]:
-                        if st.button("Edit User", use_container_width=True):
-                            st.session_state.edit_user = selected_user
-                            st.rerun()
-                    with col_actions[1]:
-                        if st.button("View Details", use_container_width=True):
-                            st.session_state.view_user = selected_user
-                            st.rerun()
-                    with col_actions[2]:
-                        if st.button("Delete User", use_container_width=True, type="secondary"):
-                            if db_manager.delete_user(selected_user):
-                                st.success("User deleted successfully!")
-                                st.rerun()
-                            else:
-                                st.error("Failed to delete user")
-            else:
-                st.info("No users found.")
-        
-        with tab2:
-            st.subheader("➕ Create New User")
-            
-            with st.form("create_user_form"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    name = st.text_input("Full Name *")
-                    username = st.text_input("Username *")
-                    email = st.text_input("Email *")
-                    role = st.selectbox("Role *", ["student", "faculty", "admin"])
-                
-                with col2:
-                    if role == "student":
-                        roll_no = st.text_input("Roll Number *")
-                        department = st.selectbox("Department *", 
-                                                 ["CSE", "AIML", "IT", "EE", "BCA", "MCA", "BBA", "MBA", "EXTC", "MECH", "CIVIL", "DS", "Other"])
-                        year = st.selectbox("Year", ["I", "II", "III", "IV", "N/A"])
-                    else:
-                        roll_no = st.text_input("Roll Number (Optional)")
-                        department = st.text_input("Department (Optional)")
-                        year = "N/A"
-                    
-                    password = st.text_input("Password *", type="password")
-                    confirm_pass = st.text_input("Confirm Password *", type="password")
-                
-                submit_button = st.form_submit_button("Create User", use_container_width=True, type="primary")
-                
-                if submit_button:
-                    if password != confirm_pass:
-                        st.error("Passwords don't match")
-                    elif not all([name, username, email, password]):
-                        st.error("Please fill all required fields (*)")
-                    else:
-                        user_data = {
-                            'id': str(uuid.uuid4()),
-                            'name': name,
-                            'roll_no': roll_no if roll_no else None,
-                            'department': department if department else None,
-                            'year': year,
-                            'email': email,
-                            'username': username,
-                            'password': password,
-                            'role': role,
-                            'created_at': datetime.now().isoformat()
-                        }
-                        
-                        if db_manager.add_user(user_data):
-                            st.success(f"User '{username}' created successfully! 🎉")
-                            st.rerun()
-                        else:
-                            st.error("Failed to create user")
-        
-        with tab3:
-            if 'edit_user' in st.session_state:
-                user = db_manager.get_user(st.session_state.edit_user)
-                
-                if user:
-                    st.subheader(f"✏️ Edit User: {user['name']}")
-                    
-                    with st.form("edit_user_form"):
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            name = st.text_input("Full Name *", value=user.get('name'))
-                            email = st.text_input("Email *", value=user.get('email'))
-                            role = st.selectbox("Role *", ["student", "faculty", "admin"],
-                                              index=["student", "faculty", "admin"]
-                                              .index(user.get('role', 'student')))
-                        
-                        with col2:
-                            roll_no = st.text_input("Roll Number", value=user.get('roll_no', ''))
-                            department = st.selectbox("Department", 
-                                                     ["CSE", "AIML", "IT", "EE", "BCA", "MCA", "BBA", "MBA", "EXTC", "MECH", "CIVIL", "DS", "Other"],
-                                                     index=["CSE", "AIML", "IT", "EE", "BCA", "MCA", "BBA", "MBA", "EXTC", "MECH", "CIVIL", "DS", "Other"]
-                                                     .index(user.get('department', 'CSE')))
-                            year = st.selectbox("Year", ["I", "II", "III", "IV", "N/A"],
-                                               index=["I", "II", "III", "IV", "N/A"]
-                                               .index(user.get('year', 'N/A')))
-                        
-                        col_submit, col_cancel = st.columns(2)
-                        with col_submit:
-                            submit_button = st.form_submit_button("Update User", use_container_width=True, type="primary")
-                        with col_cancel:
-                            if st.form_submit_button("Cancel", use_container_width=True, type="secondary"):
-                                del st.session_state.edit_user
-                                st.rerun()
-                        
-                        if submit_button:
-                            if not all([name, email]):
-                                st.error("Please fill all required fields (*)")
-                            else:
-                                user_data = {
-                                    'name': name,
-                                    'roll_no': roll_no,
-                                    'department': department,
-                                    'year': year,
-                                    'email': email
-                                }
-                                
-                                if db_manager.update_user(user['username'], user_data):
-                                    st.success(f"User '{user['name']}' updated successfully! 🎉")
-                                    del st.session_state.edit_user
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to update user")
-                else:
-                    st.error("User not found")
-                    del st.session_state.edit_user
-            else:
-                st.info("Select a user to edit from the 'View All Users' tab")
-    
-    elif selected == "System Analytics":
-        st.header("📊 System Analytics")
-        
-        # Get data
-        events = db_manager.get_all_events(limit=1000)
-        users = db_manager.get_all_users(limit=1000)
-        registrations = db_manager.execute_query("SELECT * FROM registrations", fetch_all=True) or []
-        
-        # Overall statistics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Events", len(events))
-        with col2:
-            st.metric("Total Users", len(users))
-        with col3:
-            st.metric("Total Registrations", len(registrations))
-        with col4:
-            active_events = len([e for e in events if e.get('status') in ['upcoming', 'ongoing']])
-            st.metric("Active Events", active_events)
-        
-        # User distribution
-        st.subheader("👥 User Distribution")
-        user_roles = {}
-        for user in users:
-            role = user.get('role', 'unknown')
-            user_roles[role] = user_roles.get(role, 0) + 1
-        
-        role_df = pd.DataFrame({
-            'Role': list(user_roles.keys()),
-            'Count': list(user_roles.values())
-        })
-        st.bar_chart(role_df.set_index('Role'))
-        
-        # Event distribution
-        st.subheader("📅 Event Distribution")
-        event_types = {}
-        event_status = {}
-        for event in events:
-            e_type = event.get('event_type', 'Unknown')
-            e_status = event.get('status', 'Unknown')
-            event_types[e_type] = event_types.get(e_type, 0) + 1
-            event_status[e_status] = event_status.get(e_status, 0) + 1
-        
-        col_type, col_status = st.columns(2)
-        with col_type:
-            st.write("**By Type**")
-            type_df = pd.DataFrame({
-                'Type': list(event_types.keys()),
-                'Count': list(event_types.values())
-            })
-            st.bar_chart(type_df.set_index('Type'))
-        with col_status:
-            st.write("**By Status**")
-            status_df = pd.DataFrame({
-                'Status': list(event_status.keys()),
-                'Count': list(event_status.values())
-            })
-            st.bar_chart(status_df.set_index('Status'))
-        
-        # Social engagement
-        st.subheader("💬 Social Engagement")
-        total_likes = sum(e.get('likes_count', 0) for e in events)
-        total_favs = sum(e.get('favorites_count', 0) for e in events)
-        total_int = sum(e.get('interested_count', 0) for e in events)
-        total_shares = sum(e.get('shares_count', 0) for e in events)
-        
-        col_eng1, col_eng2, col_eng3, col_eng4 = st.columns(4)
-        with col_eng1:
-            st.metric("Total Likes", total_likes)
-        with col_eng2:
-            st.metric("Total Favorites", total_favs)
-        with col_eng3:
-            st.metric("Total Interested", total_int)
-        with col_eng4:
-            st.metric("Total Shares", total_shares)
-        
-        # Popular events
-        st.subheader("🔥 Most Popular Events")
-        if events:
-            popular_events = sorted(events, key=lambda x: x.get('views_count', 0), reverse=True)[:5]
-            for event in popular_events:
-                st.write(f"**{event['title']}** - 👁️ {event.get('views_count', 0)} views | ❤️ {event.get('likes_count', 0)} likes")
-    
-    elif selected == "Database":
-        st.header("🗄️ Database Management")
-        
-        tab1, tab2 = st.tabs(["Backup", "Health Check"])
-        
-        with tab1:
-            st.subheader("Database Backup")
-            
-            # Export data
-            col_export1, col_export2, col_export3 = st.columns(3)
-            
-            with col_export1:
-                if st.button("Export Users", use_container_width=True):
-                    users = db_manager.get_all_users()
-                    users_df = pd.DataFrame(users)
-                    csv = users_df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Users CSV",
-                        data=csv,
-                        file_name="users_backup.csv",
-                        mime="text/csv"
-                    )
-            
-            with col_export2:
-                if st.button("Export Events", use_container_width=True):
-                    events = db_manager.get_all_events()
-                    events_df = pd.DataFrame(events)
-                    csv = events_df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Events CSV",
-                        data=csv,
-                        file_name="events_backup.csv",
-                        mime="text/csv"
-                    )
-            
-            with col_export3:
-                if st.button("Export Registrations", use_container_width=True):
-                    registrations = db_manager.execute_query("SELECT * FROM registrations", fetch_all=True) or []
-                    reg_df = pd.DataFrame(registrations)
-                    csv = reg_df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Registrations CSV",
-                        data=csv,
-                        file_name="registrations_backup.csv",
-                        mime="text/csv"
-                    )
-            
-            # Backup entire database
-            st.subheader("Full Database Backup")
-            if st.button("Create Full Backup", use_container_width=True, type="primary"):
-                with st.spinner("Creating backup..."):
-                    import shutil
-                    backup_path = f"event_management_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
-                    shutil.copy2("event_management.db", backup_path)
-                    st.success(f"Backup created: {backup_path}")
-        
-        with tab2:
-            st.subheader("System Health Check")
-            
-            if st.button("Run Health Check", use_container_width=True, type="primary"):
-                with st.spinner("Checking system health..."):
-                    # Check database tables
-                    cursor = db_manager.conn.cursor()
-                    
-                    tables = ['users', 'events', 'registrations', 'event_likes', 'event_favorites', 'event_interested', 'social_logs']
-                    health_data = []
-                    
-                    for table in tables:
-                        cursor.execute(f"SELECT COUNT(*) FROM {table}")
-                        count = cursor.fetchone()[0]
-                        cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
-                        exists = cursor.fetchone() is not None
-                        
-                        status = '✅' if exists and count >= 0 else '❌'
-                        health_data.append({
-                            'Table': table,
-                            'Exists': 'Yes' if exists else 'No',
-                            'Records': count,
-                            'Status': status
-                        })
-                    
-                    health_df = pd.DataFrame(health_data)
-                    st.dataframe(health_df, use_container_width=True)
-                    
-                    # Check foreign key constraints
-                    st.subheader("Foreign Key Checks")
-                    cursor.execute("PRAGMA foreign_key_check")
-                    fk_errors = cursor.fetchall()
-                    
-                    if fk_errors:
-                        st.error(f"Found {len(fk_errors)} foreign key constraint violations")
-                        for error in fk_errors:
-                            st.write(f"Table: {error[0]}, Row: {error[1]}, Referenced: {error[2]}")
-                    else:
-                        st.success("✅ No foreign key constraint violations")
-                    
-                    # Check database size
-                    cursor.execute("SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()")
-                    db_size = cursor.fetchone()[0]
-                    st.info(f"Database Size: {db_size / 1024 / 1024:.2f} MB")
-
-# ============================================
 # FACULTY DASHBOARD
 # ============================================
 def faculty_dashboard():
@@ -2347,9 +2027,6 @@ def faculty_dashboard():
     
     if selected == "Dashboard":
         st.markdown('<h1 class="main-header">Faculty Dashboard</h1>', unsafe_allow_html=True)
-        
-        # Update event status
-        db_manager.update_event_status()
         
         # Statistics
         events = db_manager.get_events_by_creator(st.session_state.username)
@@ -2373,8 +2050,8 @@ def faculty_dashboard():
         # Recent events
         st.subheader("📅 My Recent Events")
         if events:
-            for event in events[-3:]:  # Last 3 events
-                display_event_card_social(event, None)
+            for event in events[-3:]:
+                display_event_card(event, None)
         else:
             st.info("No events created yet. Create your first event!")
     
@@ -2438,7 +2115,6 @@ def faculty_dashboard():
                     
                     if db_manager.add_event(event_data):
                         st.success(f"Event '{title}' created successfully! 🎉")
-                        st.balloons()
                         st.rerun()
                     else:
                         st.error("Failed to create event")
@@ -2468,11 +2144,10 @@ Prizes: ₹50,000""")
                 st.session_state.ai_generated_data = None
             
             if generate_button and event_text:
-                with st.spinner("Extracting event details..."):
-                    event_data = ai_gen.extract_event_info(event_text)
-                    st.session_state.ai_generated_data = event_data
-                    st.session_state.ai_event_text = event_text
-                    st.rerun()
+                event_data = ai_gen.extract_event_info(event_text)
+                st.session_state.ai_generated_data = event_data
+                st.session_state.ai_event_text = event_text
+                st.rerun()
             
             # Show form if we have generated data
             if st.session_state.ai_generated_data:
@@ -2520,7 +2195,7 @@ Prizes: ₹50,000""")
                     try:
                         default_index = event_type_options.index(extracted_type)
                     except ValueError:
-                        default_index = 0  # Default to Workshop if not found
+                        default_index = 0
                     
                     event_type = st.selectbox("Event Type *", 
                                              event_type_options,
@@ -2529,7 +2204,6 @@ Prizes: ₹50,000""")
                     col_date, col_time = st.columns(2)
                     with col_date:
                         try:
-                            # Try to parse the date
                             date_str = event_data.get('event_date', date.today().isoformat())
                             parsed_date = datetime.strptime(date_str, '%Y-%m-%d').date()
                             event_date_input = st.date_input("Date *", value=parsed_date)
@@ -2581,7 +2255,6 @@ Prizes: ₹50,000""")
                             
                             if db_manager.add_event(event_to_save):
                                 st.success("Event created successfully! 🎉")
-                                st.balloons()
                                 # Clear session state
                                 st.session_state.ai_generated_data = None
                                 st.session_state.ai_event_text = None
@@ -2598,12 +2271,11 @@ Prizes: ₹50,000""")
                 st.text_area("File Content", content, height=200, key="ai_file_content")
                 
                 if st.button("Extract from File", use_container_width=True, key="extract_from_file", type="primary"):
-                    with st.spinner("Extracting event details..."):
-                        event_data = ai_gen.extract_event_info(content)
-                        # Store in session state
-                        st.session_state.ai_generated_data = event_data
-                        st.session_state.ai_event_text = content
-                        st.rerun()
+                    event_data = ai_gen.extract_event_info(content)
+                    # Store in session state
+                    st.session_state.ai_generated_data = event_data
+                    st.session_state.ai_event_text = content
+                    st.rerun()
     
     elif selected == "My Events":
         st.header("📋 My Events")
@@ -2621,7 +2293,7 @@ Prizes: ₹50,000""")
             upcoming = [e for e in events if e.get('status') == 'upcoming']
             if upcoming:
                 for event in upcoming:
-                    display_event_card_social(event, None)
+                    display_event_card(event, None)
             else:
                 st.info("No upcoming events.")
         
@@ -2629,7 +2301,7 @@ Prizes: ₹50,000""")
             ongoing = [e for e in events if e.get('status') == 'ongoing']
             if ongoing:
                 for event in ongoing:
-                    display_event_card_social(event, None)
+                    display_event_card(event, None)
             else:
                 st.info("No ongoing events.")
         
@@ -2637,7 +2309,7 @@ Prizes: ₹50,000""")
             past = [e for e in events if e.get('status') == 'past']
             if past:
                 for event in past:
-                    display_event_card_social(event, None)
+                    display_event_card(event, None)
             else:
                 st.info("No past events.")
     
@@ -2780,778 +2452,216 @@ Prizes: ₹50,000""")
         if len(df) > 0:
             chart_df = df.set_index('Event')[['Likes', 'Favorites', 'Interested']].head(5)
             st.bar_chart(chart_df)
+    
+    # Logout button
+    st.sidebar.markdown("---")
+    if st.sidebar.button("Logout", type="secondary", use_container_width=True):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
 
 # ============================================
-# STUDENT DASHBOARD - FIXED VERSION
+# ADMIN DASHBOARD
 # ============================================
-def student_dashboard():
-    """Student dashboard - Fixed version"""
-    
-    st.sidebar.title("👨‍🎓 Student Panel")
+def admin_dashboard():
+    """Admin dashboard with full CRUD operations"""
+    st.sidebar.title("👑 Admin Panel")
     st.sidebar.markdown(f"**User:** {st.session_state.name}")
+    display_role_badge('admin')
     
-    # Get student info
-    student = db_manager.get_user(st.session_state.username)
-    
-    if student:
-        st.sidebar.markdown(f"**Roll No:** {student.get('roll_no', 'N/A')}")
-        st.sidebar.markdown(f"**Department:** {student.get('department', 'N/A')}")
-        st.sidebar.markdown(f"**Year:** {student.get('year', 'N/A')}")
-    
-    display_role_badge('student')
-    
-    # Navigation - Fix: Use session state to persist tab selection
-    if 'student_tab' not in st.session_state:
-        st.session_state.student_tab = 0
-    
+    # Navigation
     with st.sidebar:
-        tab_options = ["Events Feed", "My Registrations", "My Interests", "Profile"]
         selected = option_menu(
             menu_title=None,
-            options=tab_options,
-            icons=["compass", "list-check", "heart", "person"],
-            default_index=st.session_state.student_tab
+            options=["Dashboard", "Manage Events", "Manage Users", "System Analytics"],
+            icons=["house", "calendar-event", "people", "graph-up"],
+            default_index=0
         )
-        st.session_state.student_tab = tab_options.index(selected)
     
-    if selected == "Events Feed":
-        st.markdown('<h1 class="main-header">🎯 Discover Events</h1>', unsafe_allow_html=True)
+    if selected == "Dashboard":
+        st.markdown('<h1 class="main-header">Admin Dashboard</h1>', unsafe_allow_html=True)
         
         # Update event status
         db_manager.update_event_status()
         
-        # Filters - FIXED: Use session state for filters
-        col_filters = st.columns([2, 1, 1])
-        with col_filters[0]:
-            if 'event_search' not in st.session_state:
-                st.session_state.event_search = ""
-            search = st.text_input("🔍 Search events", 
-                                  placeholder="Search...",
-                                  value=st.session_state.event_search,
-                                  key="search_input")
-            if search != st.session_state.event_search:
-                st.session_state.event_search = search
-                st.rerun()
+        # Quick stats
+        events = db_manager.get_all_events(limit=1000)
+        users = db_manager.get_all_users(limit=1000)
+        registrations = db_manager.execute_query("SELECT * FROM registrations", fetch_all=True) or []
         
-        with col_filters[1]:
-            if 'event_type_filter' not in st.session_state:
-                st.session_state.event_type_filter = "All"
-            event_type = st.selectbox("Type", 
-                                     ["All", "Workshop", "Hackathon", "Competition", 
-                                      "Bootcamp", "Seminar", "Conference", "Webinar"],
-                                     index=["All", "Workshop", "Hackathon", "Competition", 
-                                            "Bootcamp", "Seminar", "Conference", "Webinar"]
-                                            .index(st.session_state.event_type_filter),
-                                     key="type_select")
-            if event_type != st.session_state.event_type_filter:
-                st.session_state.event_type_filter = event_type
-                st.rerun()
-        
-        with col_filters[2]:
-            if 'event_status_filter' not in st.session_state:
-                st.session_state.event_status_filter = "All"
-            show_only = st.selectbox("Show", 
-                                    ["All", "Upcoming", "Ongoing", "Past"],
-                                    index=["All", "Upcoming", "Ongoing", "Past"]
-                                    .index(st.session_state.event_status_filter),
-                                    key="status_select")
-            if show_only != st.session_state.event_status_filter:
-                st.session_state.event_status_filter = show_only
-                st.rerun()
-        
-        # Get events - FIXED: Ensure we get all events
-        events = db_manager.get_all_events(limit=200)  # Increased limit
-        
-        if not events:
-            st.info("No events available.")
-            return
-        
-        # Apply filters
-        filtered_events = events
-        
-        if st.session_state.event_search:
-            search_term = st.session_state.event_search.lower()
-            filtered_events = [e for e in filtered_events 
-                             if search_term in e.get('title', '').lower() or 
-                             search_term in e.get('description', '').lower() or
-                             search_term in e.get('venue', '').lower() or
-                             search_term in e.get('organizer', '').lower()]
-        
-        if st.session_state.event_type_filter != "All":
-            filtered_events = [e for e in filtered_events 
-                             if e.get('event_type') == st.session_state.event_type_filter]
-        
-        if st.session_state.event_status_filter != "All":
-            status_map = {
-                "Upcoming": "upcoming",
-                "Ongoing": "ongoing", 
-                "Past": "past"
-            }
-            filtered_events = [e for e in filtered_events 
-                             if e.get('status') == status_map.get(st.session_state.event_status_filter)]
-        
-        # Sort by date - FIXED: Handle missing dates
-        filtered_events.sort(key=lambda x: x.get('event_date', ''), reverse=True)
-        
-        # Display events count
-        st.caption(f"Found {len(filtered_events)} events")
-        
-        # Display events - FIXED: Check if user is logged in
-        if filtered_events:
-            for event in filtered_events:
-                # Ensure event has required fields
-                if not event.get('id'):
-                    continue
-                    
-                # Check if event is valid
-                try:
-                    display_event_card_social(event, st.session_state.username)
-                except Exception as e:
-                    logger.error(f"Error displaying event {event.get('id')}: {e}")
-                    continue
-        else:
-            st.info("No events found matching your criteria.")
-            
-            # Reset filters button
-            if st.button("Reset Filters", use_container_width=True):
-                st.session_state.event_search = ""
-                st.session_state.event_type_filter = "All"
-                st.session_state.event_status_filter = "All"
-                st.rerun()
-    
-    elif selected == "My Registrations":
-        st.header("📋 My Registrations")
-        
-        # Get registrations - FIXED: Ensure we get registrations
-        registrations = db_manager.get_registrations_by_student(st.session_state.username)
-        
-        if not registrations:
-            st.info("You haven't registered for any events yet.")
-            # Show a link to events feed
-            col1, col2 = st.columns([3, 1])
-            with col2:
-                if st.button("Browse Events", use_container_width=True, type="primary"):
-                    st.session_state.student_tab = 0  # Switch to Events Feed
-                    st.rerun()
-            return
-        
-        # Get all events for mapping - FIXED: Handle missing events
-        all_events = db_manager.get_all_events(limit=200)
-        event_map = {e['id']: e for e in all_events if 'id' in e}
-        
-        # Display registration statistics
-        total_reg = len(registrations)
-        upcoming_reg = len([r for r in registrations 
-                          if event_map.get(r.get('event_id'), {}).get('status') == 'upcoming'])
-        completed_reg = len([r for r in registrations 
-                           if event_map.get(r.get('event_id'), {}).get('status') == 'past'])
-        
-        col_stat1, col_stat2, col_stat3 = st.columns(3)
-        with col_stat1:
-            st.metric("Total Registrations", total_reg)
-        with col_stat2:
-            st.metric("Upcoming Events", upcoming_reg)
-        with col_stat3:
-            st.metric("Completed Events", completed_reg)
-        
-        # Tabs for different statuses - FIXED: Better tab handling
-        tab1, tab2, tab3 = st.tabs([f"Upcoming ({upcoming_reg})", 
-                                   f"Completed ({completed_reg})", 
-                                   f"All ({total_reg})"])
-        
-        with tab1:
-            if upcoming_reg > 0:
-                for reg in registrations:
-                    event = event_map.get(reg.get('event_id'))
-                    if event and event.get('status') == 'upcoming':
-                        with st.container():
-                            st.markdown('<div class="event-card">', unsafe_allow_html=True)
-                            col1, col2 = st.columns([3, 1])
-                            with col1:
-                                st.markdown(f'<div class="card-title">{event.get("title", "Untitled Event")}</div>', 
-                                           unsafe_allow_html=True)
-                                st.caption(f"📅 {format_date(event.get('event_date'))}")
-                                st.caption(f"📍 {event.get('venue', 'N/A')}")
-                            with col2:
-                                st.info(f"**Status:** {reg.get('status', 'pending').title()}")
-                                st.info(f"**Via:** {'Official Link' if reg.get('via_link') else 'App'}")
-                                
-                                # View Event button
-                                if st.button("View Event", key=f"view_{reg['id']}", 
-                                           use_container_width=True, type="secondary"):
-                                    # Store event to view and switch to events feed
-                                    st.session_state.view_event_id = event['id']
-                                    st.session_state.student_tab = 0
-                                    st.rerun()
-                            st.markdown('</div>', unsafe_allow_html=True)
-            else:
-                st.info("No upcoming registered events.")
-        
-        with tab2:
-            if completed_reg > 0:
-                for reg in registrations:
-                    event = event_map.get(reg.get('event_id'))
-                    if event and event.get('status') == 'past':
-                        with st.container():
-                            st.markdown('<div class="event-card">', unsafe_allow_html=True)
-                            col1, col2 = st.columns([3, 1])
-                            with col1:
-                                st.markdown(f'<div class="card-title">{event.get("title", "Untitled Event")}</div>', 
-                                           unsafe_allow_html=True)
-                                st.caption(f"📅 {format_date(event.get('event_date'))}")
-                                st.caption(f"📍 {event.get('venue', 'N/A')}")
-                            with col2:
-                                attendance = reg.get('attendance', 'absent')
-                                status_color = "✅ Present" if attendance == 'present' else "❌ Absent"
-                                st.info(f"**Attendance:** {status_color}")
-                                st.info(f"**Status:** {reg.get('status', 'pending').title()}")
-                            st.markdown('</div>', unsafe_allow_html=True)
-            else:
-                st.info("No completed events.")
-        
-        with tab3:
-            for reg in registrations:
-                event = event_map.get(reg.get('event_id'))
-                if event:
-                    with st.container():
-                        st.markdown('<div class="event-card">', unsafe_allow_html=True)
-                        col1, col2 = st.columns([3, 1])
-                        with col1:
-                            st.markdown(f'<div class="card-title">{event.get("title", "Untitled Event")}</div>', 
-                                       unsafe_allow_html=True)
-                            st.caption(f"📅 {format_date(event.get('event_date'))}")
-                            st.caption(f"📍 {event.get('venue', 'N/A')}")
-                        with col2:
-                            status = event.get('status', 'unknown')
-                            if status == 'upcoming':
-                                st.success("🟢 Upcoming")
-                            elif status == 'ongoing':
-                                st.warning("🟡 Ongoing")
-                            else:
-                                st.error("🔴 Past")
-                            
-                            reg_status = reg.get('status', 'pending').title()
-                            st.info(f"**Reg Status:** {reg_status}")
-                        st.markdown('</div>', unsafe_allow_html=True)
-    
-    elif selected == "My Interests":
-        st.header("⭐ My Interests")
-        
-        # Get events user has interacted with - FIXED: Handle empty results
-        liked_events = db_manager.get_user_likes(st.session_state.username) or []
-        fav_events = db_manager.get_user_favorites(st.session_state.username) or []
-        int_events = db_manager.get_user_interested(st.session_state.username) or []
-        
-        # Calculate counts
-        liked_count = len(liked_events)
-        fav_count = len(fav_events)
-        int_count = len(int_events)
-        
-        # Tabs with counts - FIXED: Proper tab labeling
-        tab1, tab2, tab3 = st.tabs([f"❤️ Liked ({liked_count})", 
-                                   f"⭐ Favorites ({fav_count})", 
-                                   f"🤔 Interested ({int_count})"])
-        
-        with tab1:
-            if liked_events:
-                for event in liked_events:
-                    if event and event.get('id'):
-                        try:
-                            display_event_card_social(event, st.session_state.username)
-                        except Exception as e:
-                            logger.error(f"Error displaying liked event: {e}")
-                            continue
-            else:
-                st.info("You haven't liked any events yet.")
-                st.caption("Like events by clicking the ❤️ button on event cards")
-        
-        with tab2:
-            if fav_events:
-                for event in fav_events:
-                    if event and event.get('id'):
-                        try:
-                            display_event_card_social(event, st.session_state.username)
-                        except Exception as e:
-                            logger.error(f"Error displaying favorite event: {e}")
-                            continue
-            else:
-                st.info("You haven't favorited any events yet.")
-                st.caption("Favorite events by clicking the ⭐ button on event cards")
-        
-        with tab3:
-            if int_events:
-                for event in int_events:
-                    if event and event.get('id'):
-                        try:
-                            display_event_card_social(event, st.session_state.username)
-                        except Exception as e:
-                            logger.error(f"Error displaying interested event: {e}")
-                            continue
-            else:
-                st.info("You haven't marked any events as interested.")
-                st.caption("Mark interest by clicking the ? button on event cards")
-    
-    elif selected == "Profile":
-        st.header("👤 My Profile")
-        
-        student = db_manager.get_user(st.session_state.username)
-        
-        if not student:
-            st.error("User profile not found!")
-            return
-        
-        # Profile display - FIXED: Better layout
-        col1, col2 = st.columns(2)
-        
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.markdown("### Personal Information")
-            st.markdown(f"**Full Name:** {student.get('name', 'N/A')}")
-            st.markdown(f"**Roll Number:** {student.get('roll_no', 'N/A')}")
-            st.markdown(f"**Department:** {student.get('department', 'N/A')}")
-            st.markdown(f"**Year:** {student.get('year', 'N/A')}")
-        
+            st.metric("Total Events", len(events))
         with col2:
-            st.markdown("### Account Information")
-            st.markdown(f"**Email:** {student.get('email', 'N/A')}")
-            st.markdown(f"**Username:** {student.get('username', 'N/A')}")
-            st.markdown(f"**Member Since:** {format_date(student.get('created_at'))}")
-            st.markdown(f"**Role:** {student.get('role', 'student').title()}")
+            st.metric("Total Users", len(users))
+        with col3:
+            st.metric("Total Registrations", len(registrations))
+        with col4:
+            upcoming = len([e for e in events if e.get('status') == 'upcoming'])
+            st.metric("Upcoming Events", upcoming)
         
-        # Edit Profile Section - NEW: Allow students to edit their profile
-        st.markdown("---")
-        st.subheader("✏️ Edit Profile")
+        # Recent events
+        st.subheader("📅 Recent Events")
+        if events:
+            for event in events[:5]:
+                display_event_card(event, None)
+        else:
+            st.info("No events found.")
+    
+    elif selected == "Manage Events":
+        st.header("📋 Manage Events")
         
-        with st.form("edit_profile_form"):
-            col_edit1, col_edit2 = st.columns(2)
+        tab1, tab2 = st.tabs(["View All Events", "Create Event"])
+        
+        with tab1:
+            events = db_manager.get_all_events()
             
-            with col_edit1:
-                new_name = st.text_input("Full Name", value=student.get('name', ''))
-                new_roll = st.text_input("Roll Number", value=student.get('roll_no', ''))
+            if events:
+                for event in events:
+                    with st.container():
+                        col_view, col_actions = st.columns([3, 1])
+                        
+                        with col_view:
+                            display_event_card(event, None)
+                        
+                        with col_actions:
+                            st.markdown("### Actions")
+                            if st.button("Delete", key=f"delete_{event['id']}", use_container_width=True, type="secondary"):
+                                if db_manager.delete_event(event['id']):
+                                    st.success("Event deleted successfully!")
+                                    st.rerun()
+                                else:
+                                    st.error("Failed to delete event")
+            else:
+                st.info("No events found.")
+        
+        with tab2:
+            st.subheader("➕ Create New Event")
             
-            with col_edit2:
-                new_dept = st.selectbox("Department", 
-                                       ["CSE", "AIML", "IT", "EE", "BCA", "MCA", "BBA", "MBA", "EXTC", "MECH", "CIVIL", "DS", "Other"],
-                                       index=["CSE", "AIML", "IT", "EE", "BCA", "MCA", "BBA", "MBA", "EXTC", "MECH", "CIVIL", "DS", "Other"]
-                                       .index(student.get('department', 'CSE') if student.get('department') in 
-                                              ["CSE", "AIML", "IT", "EE", "BCA", "MCA", "BBA", "MBA", "EXTC", "MECH", "CIVIL", "DS"] else 'Other'))
-                new_year = st.selectbox("Year", 
-                                       ["I", "II", "III", "IV"],
-                                       index=["I", "II", "III", "IV"]
-                                       .index(student.get('year', 'I') if student.get('year') in 
-                                              ["I", "II", "III", "IV"] else 'I'))
-            
-            # Password change (optional)
-            st.markdown("### Change Password (Optional)")
-            new_password = st.text_input("New Password", type="password")
-            confirm_password = st.text_input("Confirm Password", type="password")
-            
-            submit_button = st.form_submit_button("Update Profile", use_container_width=True, type="primary")
-            
-            if submit_button:
-                # Validate inputs
-                if not new_name:
-                    st.error("Full name is required")
-                elif new_password and new_password != confirm_password:
-                    st.error("Passwords don't match")
-                else:
-                    with st.spinner("Updating profile..."):
-                        # Update user data
-                        user_data = {
-                            'name': new_name,
-                            'roll_no': new_roll,
-                            'department': new_dept,
-                            'year': new_year,
-                            'email': student.get('email')  # Keep email as is
+            with st.form("admin_create_event"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    title = st.text_input("Event Title *")
+                    event_type = st.selectbox("Event Type *", 
+                                            ["Workshop", "Hackathon", "Competition", 
+                                             "Bootcamp", "Seminar", "Conference", "Webinar"])
+                    event_date = st.date_input("Event Date *", min_value=date.today())
+                    event_time = st.time_input("Event Time *")
+                    max_participants = st.number_input("Max Participants", min_value=1, value=100)
+                
+                with col2:
+                    venue = st.text_input("Venue *")
+                    organizer = st.text_input("Organizer *", value="G H Raisoni College")
+                    registration_link = st.text_input("Registration Link")
+                    
+                    # Flyer upload
+                    st.subheader("Event Flyer (Optional)")
+                    flyer = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif', 'webp'])
+                    if flyer:
+                        st.image(flyer, width=200)
+                
+                description = st.text_area("Event Description *", height=150)
+                
+                submit_button = st.form_submit_button("Create Event", use_container_width=True, type="primary")
+                
+                if submit_button:
+                    if not all([title, event_type, venue, organizer, description]):
+                        st.error("Please fill all required fields (*)")
+                    else:
+                        # Save flyer
+                        flyer_path = None
+                        if flyer:
+                            flyer_path = db_manager.save_image_simple(flyer)
+                        
+                        # Combine date and time
+                        event_datetime = datetime.combine(event_date, event_time)
+                        
+                        event_data = {
+                            'id': str(uuid.uuid4()),
+                            'title': title,
+                            'description': description,
+                            'event_type': event_type,
+                            'event_date': event_datetime.isoformat(),
+                            'venue': venue,
+                            'organizer': organizer,
+                            'registration_link': registration_link,
+                            'max_participants': max_participants,
+                            'flyer_path': flyer_path,
+                            'created_by': st.session_state.username,
+                            'created_by_name': st.session_state.name,
+                            'ai_generated': False
                         }
                         
-                        if db_manager.update_user(student['username'], user_data):
-                            # Update password if provided
-                            if new_password:
-                                hashed_pass = db_manager._hash_password(new_password)
-                                db_manager.execute_query(
-                                    "UPDATE users SET password = ? WHERE username = ?",
-                                    (hashed_pass, student['username'])
-                                )
-                            
-                            # Update session state
-                            st.session_state.name = new_name
-                            
-                            st.success("✅ Profile updated successfully!")
-                            st.balloons()
+                        if db_manager.add_event(event_data):
+                            st.success(f"Event '{title}' created successfully! 🎉")
                             st.rerun()
                         else:
-                            st.error("Failed to update profile")
-        
-        # Statistics - FIXED: Calculate actual statistics
-        st.markdown("---")
-        st.subheader("📊 My Statistics")
-        
-        registrations = db_manager.get_registrations_by_student(st.session_state.username) or []
-        liked_events = db_manager.get_user_likes(st.session_state.username) or []
-        fav_events = db_manager.get_user_favorites(st.session_state.username) or []
-        int_events = db_manager.get_user_interested(st.session_state.username) or []
-        
-        col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-        with col_stat1:
-            st.metric("Events Registered", len(registrations))
-        with col_stat2:
-            attended = len([r for r in registrations if r.get('attendance') == 'present'])
-            st.metric("Events Attended", attended)
-        with col_stat3:
-            st.metric("Events Liked", len(liked_events))
-        with col_stat4:
-            st.metric("Events Favorited", len(fav_events))
-        
-        # Activity timeline - NEW: Show recent activity
-        st.markdown("---")
-        st.subheader("📈 Recent Activity")
-        
-        # Get recent registrations
-        if registrations:
-            recent_regs = sorted(registrations, 
-                               key=lambda x: x.get('registered_at', ''), 
-                               reverse=True)[:5]
-            
-            st.markdown("**Recent Registrations:**")
-            for reg in recent_regs:
-                event = db_manager.get_event(reg.get('event_id'))
-                if event:
-                    event_title = event.get('title', 'Unknown Event')
-                    reg_date = format_date(reg.get('registered_at'))
-                    st.caption(f"📅 {reg_date}: {event_title} ({reg.get('status', 'pending').title()})")
-        else:
-            st.info("No recent activity to show")
+                            st.error("Failed to create event")
     
-    # Logout button - FIXED: Position consistently
+    elif selected == "Manage Users":
+        st.header("👥 Manage Users")
+        
+        users = db_manager.get_all_users()
+        
+        if users:
+            # Display users in a table
+            user_data = []
+            for user in users:
+                user_data.append({
+                    'Name': user.get('name'),
+                    'Username': user.get('username'),
+                    'Role': user.get('role'),
+                    'Roll No': user.get('roll_no', 'N/A'),
+                    'Department': user.get('department', 'N/A'),
+                    'Year': user.get('year', 'N/A'),
+                    'Joined': format_date(user.get('created_at'))
+                })
+            
+            df = pd.DataFrame(user_data)
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.info("No users found.")
+    
+    elif selected == "System Analytics":
+        st.header("📊 System Analytics")
+        
+        # Get data
+        events = db_manager.get_all_events(limit=1000)
+        users = db_manager.get_all_users(limit=1000)
+        registrations = db_manager.execute_query("SELECT * FROM registrations", fetch_all=True) or []
+        
+        # Overall statistics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Events", len(events))
+        with col2:
+            st.metric("Total Users", len(users))
+        with col3:
+            st.metric("Total Registrations", len(registrations))
+        with col4:
+            active_events = len([e for e in events if e.get('status') in ['upcoming', 'ongoing']])
+            st.metric("Active Events", active_events)
+        
+        # User distribution
+        st.subheader("👥 User Distribution")
+        user_roles = {}
+        for user in users:
+            role = user.get('role', 'unknown')
+            user_roles[role] = user_roles.get(role, 0) + 1
+        
+        role_df = pd.DataFrame({
+            'Role': list(user_roles.keys()),
+            'Count': list(user_roles.values())
+        })
+        st.bar_chart(role_df.set_index('Role'))
+    
+    # Logout button
     st.sidebar.markdown("---")
-    if st.sidebar.button("🚪 Logout", use_container_width=True, type="secondary"):
-        # Clear session state
-        keys_to_clear = ['role', 'username', 'name', 'user_id', 'student_tab',
-                        'event_search', 'event_type_filter', 'event_status_filter']
-        for key in keys_to_clear:
-            if key in st.session_state:
-                del st.session_state[key]
+    if st.sidebar.button("Logout", type="secondary", use_container_width=True):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
         st.rerun()
-
-# ============================================
-# FIXES FOR DISPLAY_EVENT_CARD_SOCIAL FUNCTION
-# ============================================
-def display_event_card_social(event, current_user=None):
-    """Display enhanced event card with social features - Fixed version"""
-    if not event or not event.get('id'):
-        st.error("Invalid event data")
-        return
-    
-    event_id = event.get('id')
-    
-    # Generate unique keys
-    unique_suffix = f"{event_id}_{int(time.time() * 1000)}"
-    
-    # Get user interaction status - FIXED: Check if user exists
-    user_liked = False
-    user_favorited = False
-    user_interested = False
-    
-    if current_user and current_user != "None":
-        user_liked = db_manager.check_user_like(event_id, current_user)
-        user_favorited = db_manager.check_user_favorite(event_id, current_user)
-        user_interested = db_manager.check_user_interested(event_id, current_user)
-    
-    # Check if registered - FIXED: Check if user exists
-    is_registered = False
-    if current_user and current_user != "None":
-        is_registered = db_manager.is_student_registered(event_id, current_user)
-    
-    # Get counts - FIXED: Handle None values
-    likes_count = event.get('likes_count', 0) or 0
-    favorites_count = event.get('favorites_count', 0) or 0
-    interested_count = event.get('interested_count', 0) or 0
-    shares_count = event.get('shares_count', 0) or 0
-    views_count = event.get('views_count', 0) or 0
-    
-    # Enhanced card
-    with st.container():
-        st.markdown('<div class="event-card">', unsafe_allow_html=True)
-        
-        # Header with status and AI badge
-        col_header = st.columns([3, 1])
-        with col_header[0]:
-            st.markdown(f'<div class="card-title">{event.get("title", "Untitled Event")}</div>', unsafe_allow_html=True)
-        with col_header[1]:
-            if event.get('ai_generated'):
-                st.markdown('<span class="ai-badge">🤖 AI Generated</span>', unsafe_allow_html=True)
-        
-        # Status
-        event_date = event.get('event_date')
-        status_html = get_event_status(event_date)
-        st.markdown(status_html, unsafe_allow_html=True)
-        
-        # Compact details
-        st.markdown('<div class="compact-details">', unsafe_allow_html=True)
-        
-        col_details = st.columns(4)
-        with col_details[0]:
-            st.markdown(f'<div class="detail-item">📅 {format_date(event_date)}</div>', unsafe_allow_html=True)
-        with col_details[1]:
-            venue = event.get('venue', 'N/A')
-            st.markdown(f'<div class="detail-item">📍 {venue[:25]}{"..." if len(venue) > 25 else ""}</div>', unsafe_allow_html=True)
-        with col_details[2]:
-            event_type = event.get('event_type', 'N/A')
-            st.markdown(f'<div class="detail-item">🏷️ {event_type}</div>', unsafe_allow_html=True)
-        with col_details[3]:
-            organizer = event.get('organizer', 'N/A')
-            st.markdown(f'<div class="detail-item">👨‍🏫 {organizer[:20]}{"..." if len(organizer) > 20 else ""}</div>', unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Description
-        desc = event.get('description', 'No description')
-        if len(desc) > 200:
-            with st.expander("📝 View Full Description"):
-                st.write(desc)
-            st.markdown(f'<div class="card-description">{desc[:200]}...</div>', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<div class="card-description">{desc}</div>', unsafe_allow_html=True)
-        
-        # Event flyer - FIXED: Better error handling
-        if event.get('flyer_path'):
-            try:
-                if isinstance(event['flyer_path'], str) and event['flyer_path'].startswith('data:image/'):
-                    st.image(event['flyer_path'], width=250, caption="Event Flyer", use_column_width=True)
-            except Exception as e:
-                logger.error(f"Error displaying flyer: {e}")
-        
-        # Social interactions - FIXED: Check if user is logged in
-        st.markdown('<div class="social-container">', unsafe_allow_html=True)
-        
-        col_social = st.columns(5)
-        
-        # LIKE button
-        with col_social[0]:
-            like_key = f"like_{unique_suffix}"
-            like_text = "❤️ Liked" if user_liked else "🤍 Like"
-            if st.button(like_text, key=like_key, use_container_width=True, 
-                        type="primary" if user_liked else "secondary"):
-                if current_user and current_user != "None":
-                    with st.spinner():
-                        success = db_manager.update_event_like(
-                            event_id, 
-                            current_user, 
-                            add=not user_liked
-                        )
-                        if success:
-                            st.rerun()
-                else:
-                    st.warning("Please login to like events")
-            st.markdown(f'<div class="social-count">{likes_count}</div>', unsafe_allow_html=True)
-        
-        # FAVORITE button
-        with col_social[1]:
-            fav_key = f"fav_{unique_suffix}"
-            fav_text = "⭐ Favorited" if user_favorited else "☆ Favorite"
-            if st.button(fav_text, key=fav_key, use_container_width=True, 
-                        type="primary" if user_favorited else "secondary"):
-                if current_user and current_user != "None":
-                    with st.spinner():
-                        success = db_manager.update_event_favorite(
-                            event_id, 
-                            current_user, 
-                            add=not user_favorited
-                        )
-                        if success:
-                            st.rerun()
-                else:
-                    st.warning("Please login to favorite events")
-            st.markdown(f'<div class="social-count">{favorites_count}</div>', unsafe_allow_html=True)
-        
-        # INTERESTED button
-        with col_social[2]:
-            int_key = f"int_{unique_suffix}"
-            int_text = "✓ Interested" if user_interested else "? Interested"
-            if st.button(int_text, key=int_key, use_container_width=True, 
-                        type="primary" if user_interested else "secondary"):
-                if current_user and current_user != "None":
-                    with st.spinner():
-                        success = db_manager.update_event_interested(
-                            event_id, 
-                            current_user, 
-                            add=not user_interested
-                        )
-                        if success:
-                            st.rerun()
-                else:
-                    st.warning("Please login to mark interest")
-            st.markdown(f'<div class="social-count">{interested_count}</div>', unsafe_allow_html=True)
-        
-        # SHARE button - FIXED: Show share info
-        with col_social[3]:
-            share_key = f"share_{unique_suffix}"
-            if st.button("📤 Share", key=share_key, use_container_width=True):
-                if current_user and current_user != "None":
-                    with st.spinner("Sharing..."):
-                        success = db_manager.increment_event_shares(event_id, current_user)
-                        if success:
-                            # Create shareable text
-                            event_title = event.get('title', 'Event')
-                            share_text = f"🎯 Check out this event: {event_title}\n"
-                            share_text += f"📅 Date: {format_date(event_date)}\n"
-                            share_text += f"📍 Venue: {event.get('venue', 'N/A')}\n"
-                            if event.get('registration_link'):
-                                share_text += f"🔗 Register here: {event.get('registration_link')}"
-                            
-                            st.success("Event shared! Copy the text below:")
-                            st.code(share_text, language=None)
-                else:
-                    st.warning("Please login to share events")
-            st.markdown(f'<div class="social-count">{shares_count}</div>', unsafe_allow_html=True)
-        
-        # VIEW button
-        with col_social[4]:
-            view_key = f"view_{unique_suffix}"
-            if st.button("👁️ View", key=view_key, use_container_width=True):
-                if current_user and current_user != "None":
-                    db_manager.increment_event_views(event_id, current_user)
-                    st.rerun()
-            st.markdown(f'<div class="social-count">{views_count}</div>', unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Registration section - FIXED: Clear registration logic
-        if current_user and current_user != "None":
-            st.markdown('<div class="registration-section">', unsafe_allow_html=True)
-            
-            if is_registered:
-                st.success("✅ You are registered for this event")
-                
-                # Show registration details
-                reg = db_manager.get_registration_details(event_id, current_user)
-                if reg:
-                    col_reg = st.columns(3)
-                    with col_reg[0]:
-                        st.info(f"**Status:** {reg.get('status', 'pending').title()}")
-                    with col_reg[1]:
-                        st.info(f"**Via:** {'Official Link' if reg.get('via_link') else 'App'}")
-                    with col_reg[2]:
-                        st.info(f"**Registered:** {format_date(reg.get('registered_at'))}")
-            else:
-                st.markdown("### Register for this Event")
-                
-                # Option 1: Official Registration Link
-                registration_link = event.get('registration_link', '')
-                
-                if registration_link:
-                    col_link, col_app = st.columns(2)
-                    
-                    with col_link:
-                        st.markdown(f"[🔗 **Register via Official Link**]({registration_link})", 
-                                   unsafe_allow_html=True)
-                        st.caption("Click to register on the official platform")
-                        
-                        if st.button("✅ I've Registered via Link", 
-                                   key=f"reg_link_{unique_suffix}", 
-                                   use_container_width=True, type="secondary"):
-                            with st.spinner("Recording your registration..."):
-                                student = db_manager.get_user(current_user)
-                                
-                                if student:
-                                    reg_data = {
-                                        'id': str(uuid.uuid4()),
-                                        'event_id': event_id,
-                                        'student_username': current_user,
-                                        'student_name': student.get('name', current_user),
-                                        'student_roll': student.get('roll_no', 'N/A'),
-                                        'student_dept': student.get('department', 'N/A'),
-                                        'via_link': True,
-                                        'via_app': False,
-                                        'status': 'confirmed',
-                                        'attendance': 'absent'
-                                    }
-                                    
-                                    result = db_manager.add_registration(reg_data)
-                                    if result is not None:
-                                        st.success("✅ Registration recorded via link!")
-                                        st.balloons()
-                                        st.rerun()
-                                    else:
-                                        st.error("Failed to record registration")
-                                else:
-                                    st.error("Student information not found")
-                    
-                    with col_app:
-                        st.markdown("**Register via App**")
-                        st.caption("Register directly in the system")
-                        
-                        if st.button("📱 Register via App", 
-                                   key=f"reg_app_{unique_suffix}", 
-                                   use_container_width=True, type="primary"):
-                            with st.spinner("Processing your registration..."):
-                                student = db_manager.get_user(current_user)
-                                
-                                if student:
-                                    reg_data = {
-                                        'id': str(uuid.uuid4()),
-                                        'event_id': event_id,
-                                        'student_username': current_user,
-                                        'student_name': student.get('name', current_user),
-                                        'student_roll': student.get('roll_no', 'N/A'),
-                                        'student_dept': student.get('department', 'N/A'),
-                                        'via_link': False,
-                                        'via_app': True,
-                                        'status': 'pending',
-                                        'attendance': 'absent'
-                                    }
-                                    
-                                    result = db_manager.add_registration(reg_data)
-                                    if result is not None:
-                                        st.success("✅ Registration successful! Status: Pending")
-                                        st.balloons()
-                                        st.rerun()
-                                    else:
-                                        st.error("Failed to register or already registered")
-                                else:
-                                    st.error("Student information not found")
-                else:
-                    # Only app registration option
-                    st.markdown("**Register via App**")
-                    st.caption("Register directly in the system")
-                    
-                    if st.button("📱 Register for Event", 
-                               key=f"reg_{unique_suffix}", 
-                               use_container_width=True, type="primary"):
-                        with st.spinner("Processing your registration..."):
-                            student = db_manager.get_user(current_user)
-                            
-                            if student:
-                                reg_data = {
-                                    'id': str(uuid.uuid4()),
-                                    'event_id': event_id,
-                                    'student_username': current_user,
-                                    'student_name': student.get('name', current_user),
-                                    'student_roll': student.get('roll_no', 'N/A'),
-                                    'student_dept': student.get('department', 'N/A'),
-                                    'via_link': False,
-                                    'via_app': True,
-                                    'status': 'pending',
-                                    'attendance': 'absent'
-                                }
-                                
-                                result = db_manager.add_registration(reg_data)
-                                if result is not None:
-                                    st.success("✅ Registration successful! Status: Pending")
-                                    st.balloons()
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to register or already registered")
-                            else:
-                                st.error("Student information not found")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Creator info
-        created_by = event.get('created_by_name', 'Unknown')
-        st.caption(f"Created by: {created_by}")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================
 # MAIN APPLICATION
@@ -3566,41 +2676,19 @@ def main():
         st.session_state.username = None
     if 'name' not in st.session_state:
         st.session_state.name = None
-    if 'user_id' not in st.session_state:
-        st.session_state.user_id = None
+    
+    # Update event status
+    db_manager.update_event_status()
     
     # Route based on login status
     if st.session_state.role is None:
         login_page()
     elif st.session_state.role == 'admin':
         admin_dashboard()
-        
-        # Logout button
-        st.sidebar.markdown("---")
-        if st.sidebar.button("Logout", type="secondary", use_container_width=True):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
-    
     elif st.session_state.role == 'faculty':
         faculty_dashboard()
-        
-        # Logout button
-        st.sidebar.markdown("---")
-        if st.sidebar.button("Logout", type="secondary", use_container_width=True):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
-    
     elif st.session_state.role == 'student':
         student_dashboard()
-        
-        # Logout button
-        st.sidebar.markdown("---")
-        if st.sidebar.button("Logout", type="secondary", use_container_width=True):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
 
 # ============================================
 # RUN APPLICATION
