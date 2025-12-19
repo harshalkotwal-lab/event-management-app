@@ -22,6 +22,7 @@ import tempfile
 import traceback
 import logging
 from functools import lru_cache
+import time
 
 # ============================================
 # CONFIGURATION
@@ -210,6 +211,12 @@ st.markdown("""
         padding: 0.5rem;
         font-size: 0.9rem;
     }
+    
+    /* Fix for registration button */
+    .stButton > button[type="primary"] {
+        background-color: #3B82F6;
+        color: white;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -225,10 +232,11 @@ class EnhancedDatabaseManager:
         self.connect()
         self.create_tables()
         
-        # Default credentials
+        # Default credentials - ADDED DEFAULT STUDENT
         self.default_creds = {
             'admin': {'username': 'admin@raisoni', 'password': 'admin123'},
-            'faculty': {'username': 'faculty@raisoni', 'password': 'faculty123'}
+            'faculty': {'username': 'faculty@raisoni', 'password': 'faculty123'},
+            'student': {'username': 'student@raisoni', 'password': 'student123'}  # Added default student
         }
     
     def connect(self):
@@ -376,7 +384,7 @@ class EnhancedDatabaseManager:
             self.conn.commit()
             logger.info("Database tables created successfully")
             
-            # Add default admin and faculty if not exists
+            # Add default admin, faculty, and student if not exists
             self._add_default_users()
             
         except Exception as e:
@@ -385,7 +393,7 @@ class EnhancedDatabaseManager:
             traceback.print_exc()
     
     def _add_default_users(self):
-        """Add default admin and faculty users"""
+        """Add default admin, faculty, and student users"""
         try:
             cursor = self.conn.cursor()
             
@@ -411,6 +419,28 @@ class EnhancedDatabaseManager:
                 ''', (faculty_id, 'Faculty Coordinator', 'faculty@raisoni', hashed_pass, 'faculty', datetime.now().isoformat()))
                 logger.info("Default faculty user created")
             
+            # Check if default student exists - ADDED THIS
+            cursor.execute("SELECT COUNT(*) FROM users WHERE username = ?", ('student@raisoni',))
+            if cursor.fetchone()[0] == 0:
+                student_id = str(uuid.uuid4())
+                hashed_pass = self._hash_password('student123')
+                cursor.execute('''
+                    INSERT INTO users (id, name, roll_no, department, year, email, username, password, role, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    student_id, 
+                    'Test Student', 
+                    'CS2024001', 
+                    'CSE', 
+                    'III', 
+                    'student@raisoni.edu.in', 
+                    'student@raisoni', 
+                    hashed_pass, 
+                    'student', 
+                    datetime.now().isoformat()
+                ))
+                logger.info("Default student user created")
+            
             self.conn.commit()
         except Exception as e:
             st.error(f"Error adding default users: {e}")
@@ -427,22 +457,26 @@ class EnhancedDatabaseManager:
     def verify_credentials(self, username, password, role):
         """Verify user credentials"""
         try:
-            if role in ['admin', 'faculty']:
-                creds = self.default_creds[role]
-                if username == creds['username']:
-                    return self.verify_password(password, self._hash_password(creds['password']))
-                return False
-            else:
-                cursor = self.conn.cursor()
-                cursor.execute(
-                    "SELECT password FROM users WHERE username = ? AND role = 'student'",
-                    (username,)
-                )
-                result = cursor.fetchone()
-                if result:
-                    stored_hash = result[0]
-                    return self.verify_password(password, stored_hash)
-                return False
+            # Check default credentials first
+            if role in ['admin', 'faculty', 'student']:
+                if role in self.default_creds:
+                    creds = self.default_creds[role]
+                    if username == creds['username']:
+                        return self.verify_password(password, self._hash_password(creds['password']))
+                
+                # If not default, check database for students
+                if role == 'student':
+                    cursor = self.conn.cursor()
+                    cursor.execute(
+                        "SELECT password FROM users WHERE username = ? AND role = 'student'",
+                        (username,)
+                    )
+                    result = cursor.fetchone()
+                    if result:
+                        stored_hash = result[0]
+                        return self.verify_password(password, stored_hash)
+            
+            return False
         except Exception as e:
             st.error(f"Login error: {e}")
             logger.error(f"Login error: {e}")
@@ -467,6 +501,7 @@ class EnhancedDatabaseManager:
         except Exception as e:
             st.error(f"Database error: {e}")
             logger.error(f"Database error in query '{query}': {e}")
+            traceback.print_exc()
             return None
     
     # ========== VALIDATION METHODS ==========
@@ -482,10 +517,11 @@ class EnhancedDatabaseManager:
         if not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', user_data.get('email', '')):
             return False, "Invalid email format"
         
-        # Validate username uniqueness
-        existing = self.get_user(user_data['username'])
-        if existing:
-            return False, "Username already exists"
+        # Validate username uniqueness (except for updates)
+        if 'id' not in user_data:  # Only for new users
+            existing = self.get_user(user_data['username'])
+            if existing:
+                return False, "Username already exists"
         
         return True, "Valid"
     
@@ -513,12 +549,14 @@ class EnhancedDatabaseManager:
             st.error(f"Validation error: {message}")
             return None
         
+        user_id = user_data.get('id', str(uuid.uuid4()))
+        
         query = '''
-            INSERT INTO users (id, name, roll_no, department, year, email, username, password, role, created_at)
+            INSERT OR REPLACE INTO users (id, name, roll_no, department, year, email, username, password, role, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         '''
         params = (
-            user_data.get('id', str(uuid.uuid4())),
+            user_id,
             user_data.get('name'),
             user_data.get('roll_no'),
             user_data.get('department'),
@@ -529,7 +567,14 @@ class EnhancedDatabaseManager:
             user_data.get('role', 'student'),
             user_data.get('created_at', datetime.now().isoformat())
         )
-        return self.execute_query(query, params)
+        result = self.execute_query(query, params)
+        
+        if result:
+            # Clear cache for this user
+            if hasattr(self.get_user, 'cache_info'):
+                self.get_user.cache_clear()
+            
+        return result
     
     @lru_cache(maxsize=128)
     def get_user(self, username):
@@ -550,15 +595,17 @@ class EnhancedDatabaseManager:
             st.error(f"Validation error: {message}")
             return None
         
+        event_id = event_data.get('id', str(uuid.uuid4()))
+        
         query = '''
-            INSERT INTO events (
+            INSERT OR REPLACE INTO events (
                 id, title, description, event_type, event_date, venue, organizer,
                 registration_link, max_participants, flyer_path, created_by,
                 created_by_name, ai_generated, ai_prompt, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         '''
         params = (
-            event_data.get('id', str(uuid.uuid4())),
+            event_id,
             event_data.get('title'),
             event_data.get('description'),
             event_data.get('event_type'),
@@ -575,7 +622,14 @@ class EnhancedDatabaseManager:
             event_data.get('created_at', datetime.now().isoformat()),
             event_data.get('updated_at', datetime.now().isoformat())
         )
-        return self.execute_query(query, params)
+        result = self.execute_query(query, params)
+        
+        if result:
+            # Clear event caches
+            if hasattr(self.get_event, 'cache_info'):
+                self.get_event.cache_clear()
+            
+        return result
     
     @lru_cache(maxsize=128)
     def get_event(self, event_id):
@@ -622,7 +676,7 @@ class EnhancedDatabaseManager:
                 self.execute_query(query, (event_id, username), commit=False)
                 # Update counter
                 self.conn.execute(
-                    "UPDATE events SET likes_count = likes_count - 1, updated_at = ? WHERE id = ?",
+                    "UPDATE events SET likes_count = GREATEST(likes_count - 1, 0), updated_at = ? WHERE id = ?",
                     (datetime.now().isoformat(), event_id)
                 )
             
@@ -631,6 +685,10 @@ class EnhancedDatabaseManager:
             # Log the action
             action = 'like' if add else 'unlike'
             self.log_social_action(event_id, username, action)
+            
+            # Clear caches
+            if hasattr(self.get_event, 'cache_info'):
+                self.get_event.cache_clear()
             
             return True
         except Exception as e:
@@ -656,13 +714,18 @@ class EnhancedDatabaseManager:
                 query = "DELETE FROM event_favorites WHERE event_id = ? AND username = ?"
                 self.execute_query(query, (event_id, username), commit=False)
                 self.conn.execute(
-                    "UPDATE events SET favorites_count = favorites_count - 1, updated_at = ? WHERE id = ?",
+                    "UPDATE events SET favorites_count = GREATEST(favorites_count - 1, 0), updated_at = ? WHERE id = ?",
                     (datetime.now().isoformat(), event_id)
                 )
             
             self.conn.commit()
             action = 'favorite' if add else 'unfavorite'
             self.log_social_action(event_id, username, action)
+            
+            # Clear caches
+            if hasattr(self.get_event, 'cache_info'):
+                self.get_event.cache_clear()
+            
             return True
         except Exception as e:
             self.conn.rollback()
@@ -687,13 +750,18 @@ class EnhancedDatabaseManager:
                 query = "DELETE FROM event_interested WHERE event_id = ? AND username = ?"
                 self.execute_query(query, (event_id, username), commit=False)
                 self.conn.execute(
-                    "UPDATE events SET interested_count = interested_count - 1, updated_at = ? WHERE id = ?",
+                    "UPDATE events SET interested_count = GREATEST(interested_count - 1, 0), updated_at = ? WHERE id = ?",
                     (datetime.now().isoformat(), event_id)
                 )
             
             self.conn.commit()
             action = 'interested' if add else 'uninterested'
             self.log_social_action(event_id, username, action)
+            
+            # Clear caches
+            if hasattr(self.get_event, 'cache_info'):
+                self.get_event.cache_clear()
+            
             return True
         except Exception as e:
             self.conn.rollback()
@@ -710,6 +778,11 @@ class EnhancedDatabaseManager:
             )
             self.conn.commit()
             self.log_social_action(event_id, username, 'share')
+            
+            # Clear caches
+            if hasattr(self.get_event, 'cache_info'):
+                self.get_event.cache_clear()
+            
             return True
         except Exception as e:
             st.error(f"Error incrementing shares: {e}")
@@ -725,6 +798,11 @@ class EnhancedDatabaseManager:
             )
             self.conn.commit()
             self.log_social_action(event_id, username, 'view')
+            
+            # Clear caches
+            if hasattr(self.get_event, 'cache_info'):
+                self.get_event.cache_clear()
+            
             return True
         except Exception as e:
             st.error(f"Error incrementing views: {e}")
@@ -798,6 +876,8 @@ class EnhancedDatabaseManager:
         if existing:
             return None  # Already registered
         
+        reg_id = reg_data.get('id', str(uuid.uuid4()))
+        
         query = '''
             INSERT INTO registrations (
                 id, event_id, event_title, student_username, student_name,
@@ -806,7 +886,7 @@ class EnhancedDatabaseManager:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         '''
         params = (
-            reg_data.get('id', str(uuid.uuid4())),
+            reg_id,
             reg_data.get('event_id'),
             reg_data.get('event_title'),
             reg_data.get('student_username'),
@@ -821,7 +901,7 @@ class EnhancedDatabaseManager:
         )
         # Execute and return the registration ID
         if self.execute_query(query, params):
-            return reg_data['id']
+            return reg_id
         return None
     
     def get_registrations_by_event(self, event_id, limit=100):
@@ -958,7 +1038,6 @@ def display_event_card_social(event, current_user=None):
     event_id = event.get('id')
     
     # Generate unique keys
-    import time
     unique_suffix = str(int(time.time() * 1000))
     
     # Get user interaction status
@@ -1028,7 +1107,8 @@ def display_event_card_social(event, current_user=None):
             # LIKE button
             with col_social[0]:
                 like_key = f"like_{event_id}_{current_user}_{unique_suffix}"
-                if st.button(f"{'❤️' if user_liked else '🤍'}",
+                like_text = f"{'❤️' if user_liked else '🤍'} {likes_count}"
+                if st.button(like_text,
                            key=like_key,
                            help="Like",
                            use_container_width=True):
@@ -1040,13 +1120,12 @@ def display_event_card_social(event, current_user=None):
                         )
                         if success:
                             st.rerun()
-                
-                st.caption(f"{likes_count}")
             
             # FAVORITE button
             with col_social[1]:
                 fav_key = f"fav_{event_id}_{current_user}_{unique_suffix}"
-                if st.button(f"{'⭐' if user_favorited else '☆'}",
+                fav_text = f"{'⭐' if user_favorited else '☆'} {favorites_count}"
+                if st.button(fav_text,
                            key=fav_key,
                            help="Favorite",
                            use_container_width=True):
@@ -1058,13 +1137,12 @@ def display_event_card_social(event, current_user=None):
                         )
                         if success:
                             st.rerun()
-                
-                st.caption(f"{favorites_count}")
             
             # INTERESTED button
             with col_social[2]:
                 int_key = f"int_{event_id}_{current_user}_{unique_suffix}"
-                if st.button(f"{'✓' if user_interested else '?'}",
+                int_text = f"{'✓' if user_interested else '?'} {interested_count}"
+                if st.button(int_text,
                            key=int_key,
                            help="Interested",
                            use_container_width=True):
@@ -1076,13 +1154,11 @@ def display_event_card_social(event, current_user=None):
                         )
                         if success:
                             st.rerun()
-                
-                st.caption(f"{interested_count}")
             
             # SHARE button
             with col_social[3]:
                 share_key = f"share_{event_id}_{current_user}_{unique_suffix}"
-                if st.button("📤",
+                if st.button(f"📤 {shares_count}",
                            key=share_key,
                            help="Share",
                            use_container_width=True):
@@ -1091,13 +1167,11 @@ def display_event_card_social(event, current_user=None):
                         if success:
                             st.success("Shared!")
                             st.rerun()
-                
-                st.caption(f"{shares_count}")
             
             # VIEW button
             with col_social[4]:
                 view_key = f"view_{event_id}_{current_user}_{unique_suffix}"
-                if st.button("👁️",
+                if st.button(f"👁️ {views_count}",
                            key=view_key,
                            help="View",
                            use_container_width=True):
@@ -1105,8 +1179,6 @@ def display_event_card_social(event, current_user=None):
                         success = db_manager.increment_event_views(event_id, current_user)
                         if success:
                             st.rerun()
-                
-                st.caption(f"{views_count}")
         
         else:
             # Show social stats without interactive buttons
@@ -1156,7 +1228,7 @@ def display_event_card_social(event, current_user=None):
         
                 with col_reg_actions[1]:
                     reg_key = f"reg_{event_id}_{current_user}_{unique_suffix}"
-                    if st.button("✅ **Registered**", 
+                    if st.button("✅ **Register via App**", 
                        key=reg_key,
                        use_container_width=True, 
                        type="primary"):
@@ -1187,6 +1259,9 @@ def display_event_card_social(event, current_user=None):
                                 st.error("Already registered or failed to record.")
     
             st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
 # ============================================
 # LOGIN PAGE
 # ============================================
@@ -1234,8 +1309,10 @@ def login_page():
         tab1, tab2 = st.tabs(["Login", "Register"])
         
         with tab1:
-            student_user = st.text_input("Username", key="student_user_login")
-            student_pass = st.text_input("Password", type="password", key="student_pass_login")
+            st.info("**Default Student Login:**\nUsername: `student@raisoni`\nPassword: `student123`")
+            
+            student_user = st.text_input("Username", key="student_user_login", value="student@raisoni")
+            student_pass = st.text_input("Password", type="password", key="student_pass_login", value="student123")
             
             if st.button("Student Login", use_container_width=True):
                 with st.spinner("Verifying..."):
@@ -1248,10 +1325,20 @@ def login_page():
                             st.session_state.username = student_user
                             st.session_state.name = student.get('name', student_user)
                             st.session_state.user_id = student.get('id')
-                            st.success("Login successful!")
+                            st.success("✅ Login successful!")
+                            st.balloons()
                             st.rerun()
                         else:
-                            st.error("User not found")
+                            # If using default credentials, create session anyway
+                            if student_user == "student@raisoni":
+                                st.session_state.role = 'student'
+                                st.session_state.username = student_user
+                                st.session_state.name = "Test Student"
+                                st.success("✅ Login successful!")
+                                st.balloons()
+                                st.rerun()
+                            else:
+                                st.error("User not found")
                     else:
                         st.error("Invalid credentials")
         
@@ -1269,12 +1356,14 @@ def login_page():
                 password = st.text_input("Password *", type="password")
                 confirm_pass = st.text_input("Confirm Password *", type="password")
                 
-                if st.form_submit_button("Register", use_container_width=True):
+                submit_button = st.form_submit_button("Register", use_container_width=True)
+                
+                if submit_button:
                     with st.spinner("Creating account..."):
                         if password != confirm_pass:
                             st.error("Passwords don't match")
                         elif not all([name, roll_no, email, username, password]):
-                            st.error("Please fill all required fields")
+                            st.error("Please fill all required fields (*)")
                         else:
                             # Check if username exists
                             existing_user = db_manager.get_user(username)
@@ -1922,7 +2011,7 @@ def student_dashboard():
             search = st.text_input("🔍 Search events", placeholder="Search...")
         with col_filters[1]:
             event_type = st.selectbox("Type", ["All", "Workshop", "Hackathon", "Competition", 
-                                              "Bootcamp", "Seminar", "Conference"])
+                                              "Bootcamp", "Seminar", "Conference", "Webinar"])
         with col_filters[2]:
             show_only = st.selectbox("Show", ["All", "Upcoming", "Past"])
         
@@ -1967,7 +2056,6 @@ def student_dashboard():
             st.info("You haven't registered for any events yet.")
             # Show a link to events feed
             if st.button("Browse Events", use_container_width=True):
-                st.session_state.selected_tab = "Events Feed"
                 st.rerun()
             return
         
