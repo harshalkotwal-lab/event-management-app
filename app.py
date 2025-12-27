@@ -10,6 +10,20 @@ import hashlib
 import sys
 from pathlib import Path
 
+# ============================================
+# PAGE CONFIGURATION - MUST BE FIRST
+# ============================================
+
+st.set_page_config(
+    page_title="Raisoni Event Manager",
+    page_icon="🎓",
+    layout="wide"
+)
+
+# ============================================
+# REST OF YOUR IMPORTS AND CODE
+# ============================================
+
 # Add database path
 sys.path.append(str(Path(__file__).parent))
 
@@ -21,14 +35,7 @@ except:
     ORM_AVAILABLE = False
     st.error("Database modules not found!")
 
-# Page config
-st.set_page_config(
-    page_title="Raisoni Event Manager",
-    page_icon="🎓",
-    layout="wide"
-)
-
-# Custom CSS
+# Custom CSS - This comes AFTER set_page_config
 st.markdown("""
 <style>
     .event-card {
