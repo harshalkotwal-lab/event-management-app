@@ -16,7 +16,7 @@ from PIL import Image
 import io
 import re
 import sqlite3
-from streamlit_option_menu import option_menu
+#from streamlit_option_menu import option_menu
 import base64
 import tempfile
 import traceback
