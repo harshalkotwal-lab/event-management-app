@@ -22,8 +22,6 @@ from functools import lru_cache
 import time
 import atexit
 
-# Import AI Event Generator
-from ai_event_generator import AIEventGenerator
 
 # ============================================
 # CONFIGURATION
