@@ -2009,22 +2009,59 @@ class AIEventGenerator:
 # ============================================
 # FACULTY DASHBOARD
 # ============================================
+# ============================================
+# FACULTY DASHBOARD - FIXED VERSION
+# ============================================
 def faculty_dashboard():
     """Faculty coordinator dashboard"""
     st.sidebar.title("👨‍🏫 Faculty Panel")
     st.sidebar.markdown(f"**User:** {st.session_state.name}")
     display_role_badge('faculty')
     
-    # Navigation
+    # Navigation - FIXED: Use simpler navigation to avoid option_menu issues
     with st.sidebar:
-        selected = option_menu(
-            menu_title=None,
-            options=["Dashboard", "Create Event", "AI Event Creator", "My Events", 
-                    "Registrations", "Analytics"],
-            icons=["house", "plus-circle", "robot", "calendar-event", "list-check", "graph-up"],
-            default_index=0
-        )
+        st.markdown("### Navigation")
+        
+        # Create buttons for navigation
+        if st.button("📊 Dashboard", use_container_width=True, key="faculty_dash"):
+            st.session_state.faculty_page = "Dashboard"
+            st.rerun()
+        
+        if st.button("➕ Create Event", use_container_width=True, key="faculty_create"):
+            st.session_state.faculty_page = "Create Event"
+            st.rerun()
+        
+        if st.button("🤖 AI Event Creator", use_container_width=True, key="faculty_ai"):
+            st.session_state.faculty_page = "AI Event Creator"
+            st.rerun()
+        
+        if st.button("📋 My Events", use_container_width=True, key="faculty_events"):
+            st.session_state.faculty_page = "My Events"
+            st.rerun()
+        
+        if st.button("📝 Registrations", use_container_width=True, key="faculty_reg"):
+            st.session_state.faculty_page = "Registrations"
+            st.rerun()
+        
+        if st.button("📊 Analytics", use_container_width=True, key="faculty_analytics"):
+            st.session_state.faculty_page = "Analytics"
+            st.rerun()
+        
+        st.markdown("---")
+        
+        # Logout button
+        if st.button("🚪 Logout", use_container_width=True, type="secondary"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
     
+    # Initialize page state
+    if 'faculty_page' not in st.session_state:
+        st.session_state.faculty_page = "Dashboard"
+    
+    selected = st.session_state.faculty_page
+    
+    # Page routing
     if selected == "Dashboard":
         st.markdown('<h1 class="main-header">Faculty Dashboard</h1>', unsafe_allow_html=True)
         
@@ -2077,7 +2114,7 @@ def faculty_dashboard():
                 
                 # Flyer upload
                 st.subheader("Event Flyer (Optional)")
-                flyer = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif', 'webp'])
+                flyer = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif', 'webp'], key="faculty_flyer")
                 if flyer:
                     st.image(flyer, width=200)
             
@@ -2447,18 +2484,24 @@ Prizes: ₹50,000""")
         df = pd.DataFrame(analytics_data)
         st.dataframe(df, use_container_width=True)
         
+        # Export option
+        csv = export_events_to_csv(events)
+        if csv:
+            st.download_button(
+                label="📥 Export Events Data",
+                data=csv,
+                file_name="faculty_events_analytics.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
         # Chart
-        st.subheader("Engagement Chart")
-        if len(df) > 0:
-            chart_df = df.set_index('Event')[['Likes', 'Favorites', 'Interested']].head(5)
-            st.bar_chart(chart_df)
-    
-    # Logout button
-    st.sidebar.markdown("---")
-    if st.sidebar.button("Logout", type="secondary", use_container_width=True):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+        if len(events) > 0:
+            st.subheader("Engagement Chart")
+            chart_df = pd.DataFrame(analytics_data)
+            if not chart_df.empty:
+                chart_df = chart_df.set_index('Event')[['Likes', 'Favorites', 'Interested']].head(5)
+                st.bar_chart(chart_df)
 
 # ============================================
 # ADMIN DASHBOARD
