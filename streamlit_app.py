@@ -25,6 +25,7 @@ import openai
 import os
 from pathlib import Path
 import pandas as pd
+from typing import Dict, List, Optional, Any
 
 # Base directory
 BASE_DIR = Path(__file__).parent
