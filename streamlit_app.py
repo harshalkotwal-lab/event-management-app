@@ -22,6 +22,9 @@ from functools import lru_cache
 import time
 import atexit
 
+# Import AI Event Generator
+from ai_event_generator import AIEventGenerator
+
 # ============================================
 # CONFIGURATION
 # ============================================
@@ -456,9 +459,9 @@ class DatabaseManager:
             cursor.execute('''
                 INSERT INTO events (
                     id, title, description, event_type, event_date, venue, organizer,
-                    registration_link, max_participants, flyer_path, created_by,
+                    registration_link, max_participants, current_participants, flyer_path, created_by,
                     created_by_name, ai_generated, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 event_data.get('id', str(uuid.uuid4())),
                 event_data.get('title'),
@@ -469,6 +472,7 @@ class DatabaseManager:
                 event_data.get('organizer'),
                 event_data.get('registration_link', ''),
                 event_data.get('max_participants', 100),
+                event_data.get('current_participants', 0),
                 event_data.get('flyer_path'),
                 event_data.get('created_by'),
                 event_data.get('created_by_name'),
@@ -545,6 +549,19 @@ class DatabaseManager:
             WHERE r.student_username = ?
             ORDER BY r.registered_at DESC
         ''', (username,))
+        results = cursor.fetchall()
+        return [dict(row) for row in results]
+    
+    def get_registrations_by_event(self, event_id):
+        """Get all registrations for an event"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT r.*, u.department, u.year 
+            FROM registrations r
+            LEFT JOIN users u ON r.student_username = u.username
+            WHERE r.event_id = ?
+            ORDER BY r.registered_at DESC
+        ''', (event_id,))
         results = cursor.fetchall()
         return [dict(row) for row in results]
     
@@ -872,7 +889,7 @@ def student_dashboard():
         db.update_event_status()
         
         # Filters
-        col_filters = st.columns([2, 1, 1])
+        col_filters = st.columns([2, 1, 1, 1])
         with col_filters[0]:
             search = st.text_input("🔍 Search events", placeholder="Search by title, description...")
         with col_filters[1]:
@@ -880,6 +897,8 @@ def student_dashboard():
                                               "Bootcamp", "Seminar", "Conference", "Webinar"])
         with col_filters[2]:
             show_only = st.selectbox("Show", ["All", "Upcoming", "Ongoing", "Past"])
+        with col_filters[3]:
+            ai_only = st.checkbox("🤖 AI-Generated Only")
         
         # Get events
         events = db.get_all_events()
@@ -902,6 +921,9 @@ def student_dashboard():
             filtered_events = [e for e in filtered_events if e.get('status') == 'ongoing']
         elif show_only == "Past":
             filtered_events = [e for e in filtered_events if e.get('status') == 'past']
+        
+        if ai_only:
+            filtered_events = [e for e in filtered_events if e.get('ai_generated')]
         
         # Display events count
         st.caption(f"Found {len(filtered_events)} events")
@@ -1075,79 +1097,226 @@ def faculty_dashboard():
     elif selected == "Create Event":
         st.header("➕ Create New Event")
         
-        with st.form("create_event_form"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                title = st.text_input("Event Title *")
-                event_type = st.selectbox("Event Type *", 
-                                        ["Workshop", "Hackathon", "Competition", 
-                                         "Bootcamp", "Seminar", "Conference", "Webinar"])
-                event_date = st.date_input("Event Date *", min_value=date.today())
-                event_time = st.time_input("Event Time *")
-                max_participants = st.number_input("Max Participants", min_value=1, value=100)
-            
-            with col2:
-                venue = st.text_input("Venue *")
-                organizer = st.text_input("Organizer *", value="G H Raisoni College")
-                registration_link = st.text_input("Registration Link")
+        # AI Event Generator tab
+        tab1, tab2 = st.tabs(["📝 Manual Entry", "🤖 AI Generator"])
+        
+        with tab1:
+            # Existing manual event creation form
+            with st.form("create_event_form"):
+                col1, col2 = st.columns(2)
                 
-                # Flyer upload
-                st.subheader("Event Flyer (Optional)")
-                flyer = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif', 'webp'], key="faculty_flyer")
-                if flyer:
-                    st.image(flyer, width=200)
-            
-            description = st.text_area("Event Description *", height=150)
-            
-            submit_button = st.form_submit_button("Create Event", use_container_width=True, type="primary")
-            
-            if submit_button:
-                if not all([title, event_type, venue, organizer, description]):
-                    st.error("Please fill all required fields (*)")
-                else:
-                    # Save flyer
-                    flyer_path = None
+                with col1:
+                    title = st.text_input("Event Title *")
+                    event_type = st.selectbox("Event Type *", 
+                                            ["Workshop", "Hackathon", "Competition", 
+                                             "Bootcamp", "Seminar", "Conference", "Webinar"])
+                    event_date = st.date_input("Event Date *", min_value=date.today())
+                    event_time = st.time_input("Event Time *")
+                    max_participants = st.number_input("Max Participants", min_value=1, value=100)
+                
+                with col2:
+                    venue = st.text_input("Venue *")
+                    organizer = st.text_input("Organizer *", value="G H Raisoni College")
+                    registration_link = st.text_input("Registration Link")
+                    
+                    # Flyer upload
+                    st.subheader("Event Flyer (Optional)")
+                    flyer = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif', 'webp'], key="faculty_flyer")
                     if flyer:
-                        try:
-                            flyer.seek(0)
-                            image_bytes = flyer.getvalue()
-                            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-                            file_ext = os.path.splitext(flyer.name)[1].lower()
-                            mime_types = {
-                                '.jpg': 'image/jpeg',
-                                '.jpeg': 'image/jpeg',
-                                '.png': 'image/png',
-                                '.gif': 'image/gif'
-                            }
-                            mime_type = mime_types.get(file_ext, 'image/jpeg')
-                            flyer_path = f"data:{mime_type};base64,{image_base64}"
-                        except Exception as e:
-                            logger.error(f"Error processing image: {e}")
-                    
-                    # Combine date and time
-                    event_datetime = datetime.combine(event_date, event_time)
-                    
-                    event_data = {
-                        'title': title,
-                        'description': description,
-                        'event_type': event_type,
-                        'event_date': event_datetime.isoformat(),
-                        'venue': venue,
-                        'organizer': organizer,
-                        'registration_link': registration_link,
-                        'max_participants': max_participants,
-                        'flyer_path': flyer_path,
-                        'created_by': st.session_state.username,
-                        'created_by_name': st.session_state.name,
-                        'ai_generated': False
-                    }
-                    
-                    if db.add_event(event_data):
-                        st.success(f"Event '{title}' created successfully! 🎉")
-                        st.rerun()
+                        st.image(flyer, width=200)
+                
+                description = st.text_area("Event Description *", height=150)
+                
+                submit_button = st.form_submit_button("Create Event", use_container_width=True, type="primary")
+                
+                if submit_button:
+                    if not all([title, event_type, venue, organizer, description]):
+                        st.error("Please fill all required fields (*)")
                     else:
-                        st.error("Failed to create event")
+                        # Save flyer
+                        flyer_path = None
+                        if flyer:
+                            try:
+                                flyer.seek(0)
+                                image_bytes = flyer.getvalue()
+                                image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                                file_ext = os.path.splitext(flyer.name)[1].lower()
+                                mime_types = {
+                                    '.jpg': 'image/jpeg',
+                                    '.jpeg': 'image/jpeg',
+                                    '.png': 'image/png',
+                                    '.gif': 'image/gif'
+                                }
+                                mime_type = mime_types.get(file_ext, 'image/jpeg')
+                                flyer_path = f"data:{mime_type};base64,{image_base64}"
+                            except Exception as e:
+                                logger.error(f"Error processing image: {e}")
+                        
+                        # Combine date and time
+                        event_datetime = datetime.combine(event_date, event_time)
+                        
+                        event_data = {
+                            'title': title,
+                            'description': description,
+                            'event_type': event_type,
+                            'event_date': event_datetime.isoformat(),
+                            'venue': venue,
+                            'organizer': organizer,
+                            'registration_link': registration_link,
+                            'max_participants': max_participants,
+                            'flyer_path': flyer_path,
+                            'created_by': st.session_state.username,
+                            'created_by_name': st.session_state.name,
+                            'ai_generated': False
+                        }
+                        
+                        if db.add_event(event_data):
+                            st.success(f"Event '{title}' created successfully! 🎉")
+                            st.rerun()
+                        else:
+                            st.error("Failed to create event")
+        
+        with tab2:
+            st.subheader("🤖 AI-Powered Event Generator")
+            st.markdown("""
+            **Instructions:**
+            1. Paste text from WhatsApp, email, or any event announcement
+            2. AI will automatically extract event details
+            3. Review and edit the generated event
+            4. Click "Create Event" to save
+            """)
+            
+            # Initialize AI Event Generator
+            ai_generator = AIEventGenerator()
+            
+            # Text input for AI processing
+            event_text = st.text_area("Paste event text here:", 
+                                     placeholder="Example: Join us for a Python Workshop on 15th Dec 2023 at Seminar Hall. Organized by CSE Department...",
+                                     height=200)
+            
+            if st.button("🤖 Generate Event with AI", use_container_width=True, type="primary"):
+                if event_text:
+                    with st.spinner("AI is processing your event..."):
+                        # Extract event info using AI
+                        event_data = ai_generator.extract_event_info(event_text)
+                        
+                        # Store in session state for editing
+                        st.session_state.ai_generated_event = event_data
+                        
+                        # Display generated event
+                        st.success("✅ Event details extracted successfully!")
+                else:
+                    st.error("Please paste some event text first")
+            
+            # Display and edit AI-generated event
+            if 'ai_generated_event' in st.session_state:
+                event_data = st.session_state.ai_generated_event
+                
+                st.markdown("---")
+                st.subheader("✏️ Review & Edit AI-Generated Event")
+                
+                with st.form("ai_event_form"):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        ai_title = st.text_input("Event Title", value=event_data.get('title', ''))
+                        ai_event_type = st.selectbox("Event Type", 
+                                                   ["Workshop", "Hackathon", "Competition", 
+                                                    "Bootcamp", "Seminar", "Conference", "Webinar"],
+                                                   index=["Workshop", "Hackathon", "Competition", "Bootcamp", "Seminar", "Conference", "Webinar"].index(event_data.get('event_type', 'workshop').capitalize()) if event_data.get('event_type') in ["Workshop", "Hackathon", "Competition", "Bootcamp", "Seminar", "Conference", "Webinar"] else 0)
+                        
+                        # Parse date from AI
+                        try:
+                            ai_date_str = event_data.get('event_date', '')
+                            if isinstance(ai_date_str, str):
+                                ai_date = datetime.strptime(ai_date_str, '%Y-%m-%d').date()
+                            else:
+                                ai_date = date.today()
+                        except:
+                            ai_date = date.today()
+                        
+                        ai_date = st.date_input("Event Date", value=ai_date, min_value=date.today())
+                        ai_time = st.time_input("Event Time", value=datetime.now().time())
+                        ai_max_participants = st.number_input("Max Participants", min_value=1, value=event_data.get('max_participants', 100))
+                    
+                    with col2:
+                        ai_venue = st.text_input("Venue", value=event_data.get('venue', 'G H Raisoni College'))
+                        ai_organizer = st.text_input("Organizer", value=event_data.get('organizer', 'G H Raisoni College'))
+                        ai_reg_link = st.text_input("Registration Link", value=event_data.get('registration_link', ''))
+                        
+                        # Optional: AI-enhanced description
+                        if st.checkbox("🤖 Enhance Description with AI", value=True):
+                            if 'ai_enhanced' not in event_data or not event_data.get('ai_enhanced'):
+                                with st.spinner("Enhancing description..."):
+                                    enhanced_event = ai_generator.enhance_event_description(event_data)
+                                    if 'description' in enhanced_event:
+                                        event_data['description'] = enhanced_event['description']
+                                        event_data['ai_enhanced'] = True
+                    
+                    ai_description = st.text_area("Event Description", 
+                                                value=event_data.get('description', ''),
+                                                height=150)
+                    
+                    # Flyer upload for AI events too
+                    st.subheader("Event Flyer (Optional)")
+                    ai_flyer = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif', 'webp'], key="ai_flyer")
+                    if ai_flyer:
+                        st.image(ai_flyer, width=200)
+                    
+                    ai_submit = st.form_submit_button("✅ Create AI-Generated Event", use_container_width=True)
+                    
+                    if ai_submit:
+                        if not all([ai_title, ai_venue, ai_organizer, ai_description]):
+                            st.error("Please fill all required fields (*)")
+                        else:
+                            # Save flyer
+                            flyer_path = None
+                            if ai_flyer:
+                                try:
+                                    ai_flyer.seek(0)
+                                    image_bytes = ai_flyer.getvalue()
+                                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                                    file_ext = os.path.splitext(ai_flyer.name)[1].lower()
+                                    mime_types = {
+                                        '.jpg': 'image/jpeg',
+                                        '.jpeg': 'image/jpeg',
+                                        '.png': 'image/png',
+                                        '.gif': 'image/gif'
+                                    }
+                                    mime_type = mime_types.get(file_ext, 'image/jpeg')
+                                    flyer_path = f"data:{mime_type};base64,{image_base64}"
+                                except Exception as e:
+                                    logger.error(f"Error processing image: {e}")
+                            
+                            # Combine date and time
+                            event_datetime = datetime.combine(ai_date, ai_time)
+                            
+                            final_event_data = {
+                                'title': ai_title,
+                                'description': ai_description,
+                                'event_type': ai_event_type,
+                                'event_date': event_datetime.isoformat(),
+                                'venue': ai_venue,
+                                'organizer': ai_organizer,
+                                'registration_link': ai_reg_link,
+                                'max_participants': ai_max_participants,
+                                'flyer_path': flyer_path,
+                                'created_by': st.session_state.username,
+                                'created_by_name': st.session_state.name,
+                                'ai_generated': True,
+                                'ai_metadata': event_data.get('ai_metadata', {})
+                            }
+                            
+                            if db.add_event(final_event_data):
+                                st.success(f"✅ AI-generated event '{ai_title}' created successfully! 🎉")
+                                
+                                # Clear session state
+                                if 'ai_generated_event' in st.session_state:
+                                    del st.session_state.ai_generated_event
+                                
+                                st.rerun()
+                            else:
+                                st.error("Failed to create event")
     
     elif selected == "My Events":
         st.header("📋 My Events")
@@ -1202,9 +1371,63 @@ def faculty_dashboard():
             selected_event = next(e for e in events if e['title'] == selected_title)
             event_id = selected_event['id']
             
-            # Get registrations (simplified - in real app, you'd need a method to get registrations by event)
-            st.info(f"Viewing registrations for: {selected_title}")
-            st.caption("Registration tracking feature will be available in the next update.")
+            # Get registrations for the selected event
+            registrations = db.get_registrations_by_event(event_id)
+            
+            st.info(f"📊 Registrations for: **{selected_title}**")
+            st.caption(f"Total Registrations: {len(registrations)}")
+            
+            if registrations:
+                # Display registrations in a table
+                df_data = []
+                for reg in registrations:
+                    df_data.append({
+                        'Student Name': reg.get('student_name'),
+                        'Roll No': reg.get('student_roll', 'N/A'),
+                        'Department': reg.get('student_dept', 'N/A'),
+                        'Year': reg.get('year', 'N/A'),
+                        'Status': reg.get('status', 'pending').title(),
+                        'Registered On': format_date(reg.get('registered_at')),
+                        'Attendance': reg.get('attendance', 'absent').title()
+                    })
+                
+                if df_data:
+                    df = pd.DataFrame(df_data)
+                    st.dataframe(df, use_container_width=True)
+                    
+                    # Export option
+                    csv = df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download CSV",
+                        data=csv,
+                        file_name=f"registrations_{selected_title.replace(' ', '_')}.csv",
+                        mime="text/csv"
+                    )
+                    
+                    # Attendance management
+                    st.subheader("📋 Mark Attendance")
+                    student_options = {f"{reg['student_name']} ({reg['student_roll']})": reg['id'] for reg in registrations}
+                    selected_student = st.selectbox("Select Student", list(student_options.keys()))
+                    
+                    if selected_student:
+                        reg_id = student_options[selected_student]
+                        col_at1, col_at2 = st.columns(2)
+                        with col_at1:
+                            if st.button("✅ Mark as Present", use_container_width=True):
+                                cursor = db.conn.cursor()
+                                cursor.execute("UPDATE registrations SET attendance = 'present' WHERE id = ?", (reg_id,))
+                                db.conn.commit()
+                                st.success("Attendance marked as Present!")
+                                st.rerun()
+                        with col_at2:
+                            if st.button("❌ Mark as Absent", use_container_width=True):
+                                cursor = db.conn.cursor()
+                                cursor.execute("UPDATE registrations SET attendance = 'absent' WHERE id = ?", (reg_id,))
+                                db.conn.commit()
+                                st.success("Attendance marked as Absent!")
+                                st.rerun()
+            else:
+                st.info("No registrations for this event yet.")
 
 # ============================================
 # ADMIN DASHBOARD
@@ -1250,12 +1473,19 @@ def admin_dashboard():
         # Get data
         events = db.get_all_events()
         
-        col1, col2 = st.columns(2)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Total Events", len(events))
         with col2:
             upcoming = len([e for e in events if e.get('status') == 'upcoming'])
             st.metric("Upcoming Events", upcoming)
+        with col3:
+            ai_events = len([e for e in events if e.get('ai_generated')])
+            st.metric("🤖 AI Events", ai_events)
+        with col4:
+            today = date.today()
+            recent_events = len([e for e in events if datetime.fromisoformat(e.get('event_date').replace('Z', '+00:00')).date() >= today])
+            st.metric("Recent Events", recent_events)
         
         # Recent events
         st.subheader("📅 Recent Events")
@@ -1281,14 +1511,91 @@ def admin_dashboard():
                     with col_actions:
                         st.markdown("### Actions")
                         if st.button("Delete", key=f"delete_{event['id']}", use_container_width=True, type="secondary"):
-                            # Note: In real app, implement delete functionality
-                            st.warning("Delete functionality will be implemented in next update")
+                            # Delete event from database
+                            cursor = db.conn.cursor()
+                            try:
+                                # First delete registrations
+                                cursor.execute("DELETE FROM registrations WHERE event_id = ?", (event['id'],))
+                                # Then delete event
+                                cursor.execute("DELETE FROM events WHERE id = ?", (event['id'],))
+                                db.conn.commit()
+                                st.success("Event deleted successfully!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Error deleting event: {e}")
         else:
             st.info("No events found.")
     
     elif selected == "Manage Users":
         st.header("👥 Manage Users")
-        st.info("User management feature will be available in the next update.")
+        
+        # Get all users
+        cursor = db.conn.cursor()
+        cursor.execute("SELECT * FROM users ORDER BY created_at DESC")
+        users = cursor.fetchall()
+        users = [dict(user) for user in users]
+        
+        if users:
+            # Display user statistics
+            admin_count = len([u for u in users if u['role'] == 'admin'])
+            faculty_count = len([u for u in users if u['role'] == 'faculty'])
+            student_count = len([u for u in users if u['role'] == 'student'])
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Admins", admin_count)
+            with col2:
+                st.metric("Faculty", faculty_count)
+            with col3:
+                st.metric("Students", student_count)
+            
+            # User table
+            df_data = []
+            for user in users:
+                df_data.append({
+                    'Name': user.get('name'),
+                    'Username': user.get('username'),
+                    'Role': user.get('role').title(),
+                    'Department': user.get('department', 'N/A'),
+                    'Roll No': user.get('roll_no', 'N/A'),
+                    'Created': format_date(user.get('created_at')),
+                    'Status': 'Active'
+                })
+            
+            if df_data:
+                df = pd.DataFrame(df_data)
+                st.dataframe(df, use_container_width=True)
+                
+                # User actions
+                st.subheader("User Actions")
+                user_options = {f"{user['name']} ({user['username']})": user['id'] for user in users}
+                selected_user = st.selectbox("Select User", list(user_options.keys()))
+                
+                if selected_user:
+                    user_id = user_options[selected_user]
+                    col_act1, col_act2 = st.columns(2)
+                    with col_act1:
+                        if st.button("Reset Password", use_container_width=True):
+                            cursor = db.conn.cursor()
+                            default_pass = hashlib.sha256('password123'.encode()).hexdigest()
+                            cursor.execute("UPDATE users SET password = ? WHERE id = ?", (default_pass, user_id))
+                            db.conn.commit()
+                            st.success("Password reset to 'password123'")
+                    with col_act2:
+                        if st.button("Delete User", use_container_width=True, type="secondary"):
+                            # Don't allow deleting default admin and faculty
+                            cursor = db.conn.cursor()
+                            cursor.execute("SELECT username FROM users WHERE id = ?", (user_id,))
+                            result = cursor.fetchone()
+                            if result and result['username'] in ['admin@raisoni', 'faculty@raisoni']:
+                                st.error("Cannot delete default admin/faculty accounts")
+                            else:
+                                cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+                                db.conn.commit()
+                                st.success("User deleted successfully!")
+                                st.rerun()
+        else:
+            st.info("No users found.")
 
 # ============================================
 # MAIN APPLICATION
