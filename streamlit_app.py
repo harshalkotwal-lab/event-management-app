@@ -986,6 +986,7 @@ class DatabaseManager:
         self.conn = None
         self.connect()
         self.create_tables()
+        self._add_default_users()
     
     def connect(self):
         """Connect to SQLite database"""
@@ -1086,9 +1087,6 @@ class DatabaseManager:
             ''')
             
             self.conn.commit()
-            
-            # Add default users if not exist
-            self._add_default_users()
             
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
