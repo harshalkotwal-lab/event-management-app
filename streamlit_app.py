@@ -1217,7 +1217,7 @@ def display_event_card(event, current_user=None):
                 except:
                     # Small placeholder if image fails
                     st.markdown('''
-                    <div style="width: 120px; height: 120px; background: linear-gradient(135deg, #f0f0f0 0%, #e0e0e0 100%); 
+                    <div style="width: 200px; height: 200px; background: linear-gradient(135deg, #f0f0f0 0%, #e0e0e0 100%); 
                     display: flex; align-items: center; justify-content: center; border-radius: 8px; margin: 0 auto;">
                         <span style="font-size: 24px;">📷</span>
                     </div>
@@ -1225,7 +1225,7 @@ def display_event_card(event, current_user=None):
             else:
                 # Compact placeholder
                 st.markdown('''
-                <div style="width: 120px; height: 120px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                <div style="width: 200px; height: 200px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                 display: flex; align-items: center; justify-content: center; border-radius: 8px; margin: 0 auto;">
                     <span style="font-size: 24px; color: white;">🎯</span>
                 </div>
