@@ -5,13 +5,13 @@ Deployable on Streamlit Cloud - Streamlit Native Version
 """
 
 import streamlit as st
-# Page configuration
-#st.set_page_config(
-#    page_title="G H Raisoni Event Manager",
-#    page_icon="🎓",
-#    layout="wide",
-#    initial_sidebar_state="collapsed"
-#)
+Page configuration
+st.set_page_config(
+    page_title="G H Raisoni Event Manager",
+    page_icon="🎓",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
 from datetime import datetime, date, timedelta
 import json
@@ -91,14 +91,14 @@ COLLEGE_CONFIG = {
 }
 
 # Application settings
-APP_CONFIG = {
-    "title": "G H Raisoni Event Manager",
-    "page_icon": "🎓",
-    "layout": "wide",
-    "initial_sidebar_state": "auto",
-    "session_state_expiry": 86400,  # 24 hours in seconds
-    "items_per_page": 10
-}
+#APP_CONFIG = {
+ #   "title": "G H Raisoni Event Manager",
+  #  "page_icon": "🎓",
+   # "layout": "wide",
+    #"initial_sidebar_state": "auto",
+    #"session_state_expiry": 86400,  # 24 hours in seconds
+    #"items_per_page": 10
+#}
 
 # Feature flags
 FEATURES = {
