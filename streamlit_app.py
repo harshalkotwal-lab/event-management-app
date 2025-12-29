@@ -89,16 +89,6 @@ COLLEGE_CONFIG = {
     ]
 }
 
-# Application settings
-#APP_CONFIG = {
- #   "title": "G H Raisoni Event Manager",
-  #  "page_icon": "🎓",
-   # "layout": "wide",
-    #"initial_sidebar_state": "auto",
-    #"session_state_expiry": 86400,  # 24 hours in seconds
-    #"items_per_page": 10
-#}
-
 # Feature flags
 FEATURES = {
     "student_registration": True,
