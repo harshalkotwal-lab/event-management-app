@@ -985,8 +985,11 @@ class DatabaseManager:
         self.db_path = db_path
         self.conn = None
         self.connect()
-        self.create_tables()
-        self._add_default_users()
+        if self.conn:
+            self.create_tables()
+            self._add_default_users()
+        else:
+            logger.error("Failed to connect to database")
     
     def connect(self):
         """Connect to SQLite database"""
@@ -994,14 +997,18 @@ class DatabaseManager:
             self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
             self.conn.row_factory = sqlite3.Row
             self.conn.execute("PRAGMA foreign_keys = ON")
+            logger.info("Database connected successfully")
+            return True
         except Exception as e:
             logger.error(f"Database connection error: {e}")
+            return False
     
     def create_tables(self):
         """Create all necessary tables including likes and interested"""
         try:
             cursor = self.conn.cursor()
-
+            
+            # Users table - MUST BE CREATED FIRST
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id TEXT PRIMARY KEY,
@@ -1017,8 +1024,9 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            logger.info("Created/Verified users table")
             
-            # Users table (existing)
+            # Events table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS events (
                     id TEXT PRIMARY KEY,
@@ -1040,30 +1048,9 @@ class DatabaseManager:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+            logger.info("Created/Verified events table")
             
-            # Events table (existing)
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS events (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    description TEXT,
-                    event_type TEXT,
-                    event_date TIMESTAMP,
-                    venue TEXT,
-                    organizer TEXT,
-                    registration_link TEXT,
-                    max_participants INTEGER DEFAULT 100,
-                    current_participants INTEGER DEFAULT 0,
-                    flyer_path TEXT,
-                    created_by TEXT,
-                    created_by_name TEXT,
-                    ai_generated BOOLEAN DEFAULT 0,
-                    status TEXT DEFAULT 'upcoming',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # Registrations table (existing)
+            # Registrations table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS registrations (
                     id TEXT PRIMARY KEY,
@@ -1079,8 +1066,9 @@ class DatabaseManager:
                     UNIQUE(event_id, student_username)
                 )
             ''')
+            logger.info("Created/Verified registrations table")
             
-            # Likes table (NEW)
+            # Likes table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS event_likes (
                     id TEXT PRIMARY KEY,
@@ -1090,8 +1078,9 @@ class DatabaseManager:
                     UNIQUE(event_id, student_username)
                 )
             ''')
+            logger.info("Created/Verified event_likes table")
             
-            # Interested table (NEW)
+            # Interested table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS event_interested (
                     id TEXT PRIMARY KEY,
@@ -1101,15 +1090,35 @@ class DatabaseManager:
                     UNIQUE(event_id, student_username)
                 )
             ''')
+            logger.info("Created/Verified event_interested table")
+            
             self.conn.commit()
-            logger.info("All tables created successfully")
+            logger.info("All tables created/verified successfully")
+            return True
             
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
+            # Try to show what tables exist
+            try:
+                cursor = self.conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = cursor.fetchall()
+                logger.info(f"Existing tables: {[t[0] for t in tables]}")
+            except:
+                pass
+            return False
     
     def _add_default_users(self):
         """Add default admin, faculty, and student users"""
         try:
+            # First check if users table exists
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+            if not cursor.fetchone():
+                logger.error("Users table doesn't exist. Creating it now...")
+                self.create_tables()
+            
+            # Now add default users
             cursor = self.conn.cursor()
             
             # Check if admin exists
@@ -1121,6 +1130,7 @@ class DatabaseManager:
                     INSERT INTO users (id, name, username, password, role, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                 ''', (admin_id, 'Administrator', 'admin@raisoni', hashed_pass, 'admin', datetime.now().isoformat()))
+                logger.info("Added default admin user")
             
             # Check if faculty exists
             cursor.execute("SELECT COUNT(*) FROM users WHERE username = ?", ('faculty@raisoni',))
@@ -1131,6 +1141,7 @@ class DatabaseManager:
                     INSERT INTO users (id, name, username, password, role, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                 ''', (faculty_id, 'Faculty Coordinator', 'faculty@raisoni', hashed_pass, 'faculty', datetime.now().isoformat()))
+                logger.info("Added default faculty user")
             
             # Add default student accounts
             default_students = [
@@ -1201,10 +1212,15 @@ class DatabaseManager:
                         'student',
                         datetime.now().isoformat()
                     ))
+                    logger.info(f"Added student user: {student['name']}")
             
             self.conn.commit()
+            logger.info("Default users added successfully")
+            return True
+            
         except Exception as e:
             logger.error(f"Error adding default users: {e}")
+            return False
     
     def _hash_password(self, password):
         """Hash password using SHA-256"""
