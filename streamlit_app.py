@@ -1001,6 +1001,22 @@ class DatabaseManager:
         """Create all necessary tables including likes and interested"""
         try:
             cursor = self.conn.cursor()
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    roll_no TEXT,
+                    department TEXT,
+                    year TEXT,
+                    email TEXT,
+                    is_active BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
             
             # Users table (existing)
             cursor.execute('''
@@ -1085,7 +1101,6 @@ class DatabaseManager:
                     UNIQUE(event_id, student_username)
                 )
             ''')
-            logger.info("Created/Verified event_interested table")
             self.conn.commit()
             logger.info("All tables created successfully")
             
