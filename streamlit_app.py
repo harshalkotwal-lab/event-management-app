@@ -106,10 +106,6 @@ EMAIL_CONFIG = {
     "use_tls": True
 }
 
-"""
-Handle event flyer image uploads and processing
-"""
-
 class ImageProcessor:
     """Handle image uploads and processing"""
     
