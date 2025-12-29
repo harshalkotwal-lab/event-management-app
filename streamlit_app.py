@@ -828,6 +828,36 @@ st.markdown("""
         border-color: #3B82F6;
         font-weight: 600;
     }
+
+    /* Engagement buttons */
+    .engagement-button {
+        transition: all 0.2s ease;
+    }
+    
+    .engagement-button:hover {
+        transform: scale(1.05);
+    }
+    
+    /* Liked state */
+    .liked-button {
+        background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%) !important;
+        color: white !important;
+    }
+    
+    /* Interested state */
+    .interested-button {
+        background: linear-gradient(135deg, #FFD93D 0%, #FF9F1C 100%) !important;
+        color: white !important;
+    }
+    
+    /* Engagement metrics */
+    .engagement-metric {
+        font-size: 0.9rem;
+        color: #64748b;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -897,11 +927,11 @@ class DatabaseManager:
             logger.error(f"Database connection error: {e}")
     
     def create_tables(self):
-        """Create all necessary tables"""
+        """Create all necessary tables including likes and interested"""
         try:
             cursor = self.conn.cursor()
             
-            # Users table
+            # Users table (existing)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id TEXT PRIMARY KEY,
@@ -917,7 +947,7 @@ class DatabaseManager:
                 )
             ''')
             
-            # Events table
+            # Events table (existing)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS events (
                     id TEXT PRIMARY KEY,
@@ -939,7 +969,7 @@ class DatabaseManager:
                 )
             ''')
             
-            # Registrations table
+            # Registrations table (existing)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS registrations (
                     id TEXT PRIMARY KEY,
@@ -952,6 +982,28 @@ class DatabaseManager:
                     status TEXT DEFAULT 'pending',
                     attendance TEXT DEFAULT 'absent',
                     registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(event_id, student_username)
+                )
+            ''')
+            
+            # Likes table (NEW)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS event_likes (
+                    id TEXT PRIMARY KEY,
+                    event_id TEXT NOT NULL,
+                    student_username TEXT NOT NULL,
+                    liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(event_id, student_username)
+                )
+            ''')
+            
+            # Interested table (NEW)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS event_interested (
+                    id TEXT PRIMARY KEY,
+                    event_id TEXT NOT NULL,
+                    student_username TEXT NOT NULL,
+                    interested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(event_id, student_username)
                 )
             ''')
@@ -1259,6 +1311,155 @@ class DatabaseManager:
             logger.error(f"Error updating event status: {e}")
             return False
 
+    def add_like(self, event_id, student_username):
+        """Add a like for an event"""
+        try:
+            cursor = self.conn.cursor()
+            like_id = str(uuid.uuid4())
+            cursor.execute('''
+                INSERT INTO event_likes (id, event_id, student_username, liked_at)
+                VALUES (?, ?, ?, ?)
+            ''', (like_id, event_id, student_username, datetime.now().isoformat()))
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            # Already liked
+            return False
+        except Exception as e:
+            logger.error(f"Error adding like: {e}")
+            return False
+    
+    def remove_like(self, event_id, student_username):
+        """Remove a like for an event"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                DELETE FROM event_likes 
+                WHERE event_id = ? AND student_username = ?
+            ''', (event_id, student_username))
+            self.conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing like: {e}")
+            return False
+    
+    def is_event_liked(self, event_id, student_username):
+        """Check if student liked an event"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                SELECT id FROM event_likes 
+                WHERE event_id = ? AND student_username = ?
+            ''', (event_id, student_username))
+            return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking like: {e}")
+            return False
+    
+    def get_event_likes_count(self, event_id):
+        """Get total likes for an event"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                SELECT COUNT(*) FROM event_likes 
+                WHERE event_id = ?
+            ''', (event_id,))
+            return cursor.fetchone()[0]
+        except Exception as e:
+            logger.error(f"Error getting likes count: {e}")
+            return 0
+    
+    def get_student_liked_events(self, student_username):
+        """Get all events liked by a student"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                SELECT e.* FROM events e
+                JOIN event_likes l ON e.id = l.event_id
+                WHERE l.student_username = ?
+                ORDER BY l.liked_at DESC
+            ''', (student_username,))
+            results = cursor.fetchall()
+            return [dict(row) for row in results]
+        except Exception as e:
+            logger.error(f"Error getting student liked events: {e}")
+            return []
+    
+    # INTERESTED METHODS
+    def add_interested(self, event_id, student_username):
+        """Add interested for an event"""
+        try:
+            cursor = self.conn.cursor()
+            interested_id = str(uuid.uuid4())
+            cursor.execute('''
+                INSERT INTO event_interested (id, event_id, student_username, interested_at)
+                VALUES (?, ?, ?, ?)
+            ''', (interested_id, event_id, student_username, datetime.now().isoformat()))
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            # Already interested
+            return False
+        except Exception as e:
+            logger.error(f"Error adding interested: {e}")
+            return False
+    
+    def remove_interested(self, event_id, student_username):
+        """Remove interested for an event"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                DELETE FROM event_interested 
+                WHERE event_id = ? AND student_username = ?
+            ''', (event_id, student_username))
+            self.conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error removing interested: {e}")
+            return False
+    
+    def is_event_interested(self, event_id, student_username):
+        """Check if student is interested in an event"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                SELECT id FROM event_interested 
+                WHERE event_id = ? AND student_username = ?
+            ''', (event_id, student_username))
+            return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Error checking interested: {e}")
+            return False
+    
+    def get_event_interested_count(self, event_id):
+        """Get total interested count for an event"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                SELECT COUNT(*) FROM event_interested 
+                WHERE event_id = ?
+            ''', (event_id,))
+            return cursor.fetchone()[0]
+        except Exception as e:
+            logger.error(f"Error getting interested count: {e}")
+            return 0
+    
+    def get_student_interested_events(self, student_username):
+        """Get all events student is interested in"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                SELECT e.* FROM events e
+                JOIN event_interested i ON e.id = i.event_id
+                WHERE i.student_username = ?
+                ORDER BY i.interested_at DESC
+            ''', (student_username,))
+            results = cursor.fetchall()
+            return [dict(row) for row in results]
+        except Exception as e:
+            logger.error(f"Error getting student interested events: {e}")
+            return []
+
 # Initialize database
 db = DatabaseManager()
 
@@ -1266,7 +1467,7 @@ db = DatabaseManager()
 # EVENT CARD DISPLAY
 # ============================================
 def display_event_card(event, current_user=None):
-    """Display event card in compact horizontal layout with 200px wide flyer"""
+    """Display event card with Like and Interested buttons"""
     if not event or not event.get('id'):
         return
     
@@ -1275,36 +1476,27 @@ def display_event_card(event, current_user=None):
     with st.container():
         st.markdown('<div class="event-card">', unsafe_allow_html=True)
         
-        # Create horizontal layout - image column slightly wider for 200px image
-        col_img, col_info = st.columns([1, 2.5], gap="small")  # Adjusted ratio for 200px image
+        # Create horizontal layout
+        col_img, col_info = st.columns([1, 2.5], gap="small")
         
         with col_img:
-            # Display event flyer with 200px width
+            # Display event flyer
             flyer = event.get('flyer_path')
             if flyer and flyer.startswith('data:image'):
                 try:
-                    # Fixed 200px width
                     st.image(flyer, width=200, use_column_width=False)
-                except Exception as e:
-                    # Fallback placeholder
-                    st.markdown(f'''
-                    <div style="width: 200px; height: 150px; background: linear-gradient(135deg, #f0f0f0 0%, #e0e0e0 100%); 
-                    display: flex; align-items: center; justify-content: center; border-radius: 8px; margin: 0 auto;">
-                        <div style="text-align: center;">
-                            <span style="font-size: 32px;">📷</span><br>
-                            <span style="font-size: 12px; color: #666;">Image unavailable</span>
-                        </div>
+                except:
+                    st.markdown('''
+                    <div style="width: 200px; height: 150px; background: #f0f0f0; 
+                    display: flex; align-items: center; justify-content: center; border-radius: 8px;">
+                        <span style="font-size: 32px;">📷</span>
                     </div>
                     ''', unsafe_allow_html=True)
             else:
-                # Placeholder with 200px width
                 st.markdown('''
                 <div style="width: 200px; height: 150px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                display: flex; align-items: center; justify-content: center; border-radius: 8px; margin: 0 auto;">
-                    <div style="text-align: center; color: white;">
-                        <span style="font-size: 32px;">🎯</span><br>
-                        <span style="font-size: 12px;">No Flyer</span>
-                    </div>
+                display: flex; align-items: center; justify-content: center; border-radius: 8px;">
+                    <span style="font-size: 32px; color: white;">🎯</span>
                 </div>
                 ''', unsafe_allow_html=True)
         
@@ -1313,7 +1505,6 @@ def display_event_card(event, current_user=None):
             title_col, badge_col = st.columns([4, 1])
             with title_col:
                 title = event.get('title', 'Untitled Event')
-                # Truncate long titles
                 if len(title) > 60:
                     title = title[:57] + "..."
                 st.markdown(f'<div class="card-title">{title}</div>', unsafe_allow_html=True)
@@ -1321,7 +1512,7 @@ def display_event_card(event, current_user=None):
                 if event.get('ai_generated'):
                     st.markdown('<span class="ai-badge">🤖 AI</span>', unsafe_allow_html=True)
             
-            # Status and date on same line
+            # Status and date
             col_status, col_date = st.columns([1, 2])
             with col_status:
                 event_date = event.get('event_date')
@@ -1329,8 +1520,7 @@ def display_event_card(event, current_user=None):
             with col_date:
                 st.caption(f"📅 {format_date(event_date)}")
             
-            # Compact details - 2 rows
-            # Row 1: Venue and Type
+            # Event details
             row1_col1, row1_col2 = st.columns(2)
             with row1_col1:
                 venue = event.get('venue', 'TBD')
@@ -1339,34 +1529,67 @@ def display_event_card(event, current_user=None):
                 st.caption(f"📍 {venue}")
             with row1_col2:
                 event_type = event.get('event_type', 'Event')
-                if len(event_type) > 20:
-                    event_type = event_type[:17] + "..."
                 st.caption(f"🏷️ {event_type}")
             
-            # Row 2: Organizer and Participants
-            row2_col1, row2_col2 = st.columns(2)
-            with row2_col1:
-                organizer = event.get('organizer', 'College')
-                if len(organizer) > 25:
-                    organizer = organizer[:22] + "..."
-                st.caption(f"👨‍🏫 {organizer}")
-            with row2_col2:
-                current = event.get('current_participants', 0)
-                max_parts = event.get('max_participants', 100)
-                st.caption(f"👥 {current}/{max_parts}")
+            # Engagement metrics (Likes and Interested counts)
+            likes_count = db.get_event_likes_count(event_id)
+            interested_count = db.get_event_interested_count(event_id)
             
-            # Description with expander
+            engagement_col1, engagement_col2 = st.columns(2)
+            with engagement_col1:
+                st.caption(f"❤️ {likes_count} Likes")
+            with engagement_col2:
+                st.caption(f"⭐ {interested_count} Interested")
+            
+            # Like and Interested buttons (only for logged in students)
+            if current_user:
+                col_like, col_interested, col_spacer = st.columns([1, 1, 2])
+                
+                with col_like:
+                    # Check if student already liked this event
+                    is_liked = db.is_event_liked(event_id, current_user)
+                    like_text = "❤️ Liked" if is_liked else "🤍 Like"
+                    like_type = "secondary" if is_liked else "primary"
+                    
+                    if st.button(like_text, key=f"like_{event_id}", 
+                               use_container_width=True, type=like_type):
+                        if is_liked:
+                            # Unlike
+                            if db.remove_like(event_id, current_user):
+                                st.success("Removed like!")
+                                st.rerun()
+                        else:
+                            # Like
+                            if db.add_like(event_id, current_user):
+                                st.success("Liked!")
+                                st.rerun()
+                
+                with col_interested:
+                    # Check if student is already interested
+                    is_interested = db.is_event_interested(event_id, current_user)
+                    interested_text = "⭐ Interested" if is_interested else "☆ Interested"
+                    interested_type = "secondary" if is_interested else "primary"
+                    
+                    if st.button(interested_text, key=f"interested_{event_id}", 
+                               use_container_width=True, type=interested_type):
+                        if is_interested:
+                            # Remove interested
+                            if db.remove_interested(event_id, current_user):
+                                st.success("Removed from interested!")
+                                st.rerun()
+                        else:
+                            # Add interested
+                            if db.add_interested(event_id, current_user):
+                                st.success("Marked as interested!")
+                                st.rerun()
+            
+            # Description
             desc = event.get('description', '')
             if desc:
-                if len(desc) > 120:
+                if len(desc) > 100:
                     with st.expander("📝 Description", expanded=False):
                         st.write(desc)
-                    # Show preview
-                    preview = desc.split('\n')[0]
-                    if len(preview) > 120:
-                        st.caption(f"{preview[:117]}...")
-                    else:
-                        st.caption(preview)
+                    st.caption(f"{desc[:100]}...")
                 else:
                     st.caption(desc)
         
@@ -1379,61 +1602,30 @@ def display_event_card(event, current_user=None):
             if is_registered:
                 st.success("✅ Registered", icon="✅")
             else:
-                reg_link = event.get('registration_link', '')
-                
-                if reg_link:
-                    col_reg1, col_reg2 = st.columns(2)
-                    
-                    with col_reg1:
-                        st.markdown(f"[🔗 **External Registration**]({reg_link})", 
-                                   unsafe_allow_html=True)
-                    
-                    with col_reg2:
-                        if st.button("📱 Register in App", 
-                                   key=f"app_reg_{event_id}",
-                                   use_container_width=True,
-                                   type="primary"):
-                            student = db.get_user(current_user)
-                            if student:
-                                reg_data = {
-                                    'id': str(uuid.uuid4()),
-                                    'event_id': event_id,
-                                    'event_title': event.get('title'),
-                                    'student_username': current_user,
-                                    'student_name': student.get('name', current_user),
-                                    'student_roll': student.get('roll_no', 'N/A'),
-                                    'student_dept': student.get('department', 'N/A')
-                                }
-                                if db.add_registration(reg_data):
-                                    st.success("✅ Registered!")
-                                    st.rerun()
-                else:
-                    if st.button("📱 Register Now", 
-                               key=f"reg_{event_id}",
-                               use_container_width=True,
-                               type="primary"):
-                        student = db.get_user(current_user)
-                        if student:
-                            reg_data = {
-                                'id': str(uuid.uuid4()),
-                                'event_id': event_id,
-                                'event_title': event.get('title'),
-                                'student_username': current_user,
-                                'student_name': student.get('name', current_user),
-                                'student_roll': student.get('roll_no', 'N/A'),
-                                'student_dept': student.get('department', 'N/A')
-                            }
-                            if db.add_registration(reg_data):
-                                st.success("✅ Registration successful!")
-                                st.rerun()
+                if st.button("📱 Register Now", 
+                           key=f"reg_{event_id}",
+                           use_container_width=True,
+                           type="primary"):
+                    student = db.get_user(current_user)
+                    if student:
+                        reg_data = {
+                            'id': str(uuid.uuid4()),
+                            'event_id': event_id,
+                            'event_title': event.get('title'),
+                            'student_username': current_user,
+                            'student_name': student.get('name', current_user),
+                            'student_roll': student.get('roll_no', 'N/A'),
+                            'student_dept': student.get('department', 'N/A')
+                        }
+                        if db.add_registration(reg_data):
+                            st.success("✅ Registration successful!")
+                            st.rerun()
             
             st.markdown('</div>', unsafe_allow_html=True)
         
-        # Footer - creator info
+        # Creator info
         created_by = event.get('created_by_name', 'Unknown')
-        if len(created_by) > 30:
-            created_by = created_by[:27] + "..."
-        st.caption(f"👤 Created by: {created_by}")
+        st.caption(f"👤 {created_by}")
         
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -1562,7 +1754,7 @@ def student_dashboard():
     # Navigation
     with st.sidebar:
         st.markdown("### Navigation")
-        nav_options = ["Events Feed", "My Registrations", "My Profile"]
+        nav_options = ["Events Feed", "My Registrations", "Liked Events", "Interested Events", "My Profile"]
         
         if 'student_page' not in st.session_state:
             st.session_state.student_page = "Events Feed"
@@ -1575,6 +1767,20 @@ def student_dashboard():
             if st.button(button_text, key=f"student_{option}", use_container_width=True):
                 st.session_state.student_page = option
                 st.rerun()
+        
+        # Engagement statistics
+        st.markdown("---")
+        st.markdown("### My Engagement")
+        
+        # Get counts
+        liked_events = db.get_student_liked_events(st.session_state.username)
+        interested_events = db.get_student_interested_events(st.session_state.username)
+        
+        col_stat1, col_stat2 = st.columns(2)
+        with col_stat1:
+            st.metric("❤️ Liked", len(liked_events))
+        with col_stat2:
+            st.metric("⭐ Interested", len(interested_events))
         
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True, type="secondary"):
@@ -1637,6 +1843,8 @@ def student_dashboard():
                 display_event_card(event, st.session_state.username)
         else:
             st.info("No events found matching your criteria.")
+
+        pass
     
     elif selected == "My Registrations":
         st.header("📋 My Registrations")
@@ -1701,6 +1909,95 @@ def student_dashboard():
                         st.error("🔴 Completed")
                 
                 st.markdown('</div>', unsafe_allow_html=True)
+        pass
+
+    elif selected == "Liked Events":
+        st.header("❤️ Liked Events")
+        
+        liked_events = db.get_student_liked_events(st.session_state.username)
+        
+        if not liked_events:
+            st.info("You haven't liked any events yet.")
+            st.markdown("""
+            **How to like events:**
+            1. Go to **Events Feed**
+            2. Click the **🤍 Like** button on any event
+            3. Your liked events will appear here
+            """)
+            if st.button("Browse Events", use_container_width=True, type="primary"):
+                st.session_state.student_page = "Events Feed"
+                st.rerun()
+            return
+        
+        # Filter tabs
+        tab1, tab2, tab3 = st.tabs(["All Liked", "Upcoming", "Past"])
+        
+        with tab1:
+            st.caption(f"Total liked events: {len(liked_events)}")
+            for event in liked_events:
+                display_event_card(event, st.session_state.username)
+        
+        with tab2:
+            upcoming = [e for e in liked_events if e.get('status') == 'upcoming']
+            if upcoming:
+                st.caption(f"Upcoming liked events: {len(upcoming)}")
+                for event in upcoming:
+                    display_event_card(event, st.session_state.username)
+            else:
+                st.info("No upcoming liked events.")
+        
+        with tab3:
+            past = [e for e in liked_events if e.get('status') == 'past']
+            if past:
+                st.caption(f"Past liked events: {len(past)}")
+                for event in past:
+                    display_event_card(event, st.session_state.username)
+            else:
+                st.info("No past liked events.")
+    
+    elif selected == "Interested Events":
+        st.header("⭐ Interested Events")
+        
+        interested_events = db.get_student_interested_events(st.session_state.username)
+        
+        if not interested_events:
+            st.info("You haven't marked any events as interested yet.")
+            st.markdown("""
+            **How to mark interest:**
+            1. Go to **Events Feed**
+            2. Click the **☆ Interested** button on any event
+            3. Your interested events will appear here
+            """)
+            if st.button("Browse Events", use_container_width=True, type="primary"):
+                st.session_state.student_page = "Events Feed"
+                st.rerun()
+            return
+        
+        # Filter tabs
+        tab1, tab2, tab3 = st.tabs(["All Interested", "Upcoming", "Past"])
+        
+        with tab1:
+            st.caption(f"Total interested events: {len(interested_events)}")
+            for event in interested_events:
+                display_event_card(event, st.session_state.username)
+        
+        with tab2:
+            upcoming = [e for e in interested_events if e.get('status') == 'upcoming']
+            if upcoming:
+                st.caption(f"Upcoming interested events: {len(upcoming)}")
+                for event in upcoming:
+                    display_event_card(event, st.session_state.username)
+            else:
+                st.info("No upcoming interested events.")
+        
+        with tab3:
+            past = [e for e in interested_events if e.get('status') == 'past']
+            if past:
+                st.caption(f"Past interested events: {len(past)}")
+                for event in past:
+                    display_event_card(event, st.session_state.username)
+            else:
+                st.info("No past interested events.")
     
     elif selected == "My Profile":
         st.header("👤 My Profile")
@@ -1739,6 +2036,8 @@ def student_dashboard():
         with col_stat2:
             attended = len([r for r in registrations if r.get('attendance') == 'present'])
             st.metric("Events Attended", attended)
+
+        pass
 
 # ============================================
 # FACULTY DASHBOARD
@@ -2066,6 +2365,17 @@ def faculty_dashboard():
             st.info("You haven't created any events yet.")
             return
         
+        # Show engagement statistics
+        st.subheader("📊 Event Engagement")
+        total_likes = sum(db.get_event_likes_count(e['id']) for e in events)
+        total_interested = sum(db.get_event_interested_count(e['id']) for e in events)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Total Likes", total_likes)
+        with col2:
+            st.metric("Total Interested", total_interested)
+            
         # Filter tabs
         tab1, tab2, tab3 = st.tabs(["Upcoming Events", "Ongoing Events", "Past Events"])
         
