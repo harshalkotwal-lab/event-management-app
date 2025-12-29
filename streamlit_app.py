@@ -1467,7 +1467,7 @@ db = DatabaseManager()
 # EVENT CARD DISPLAY
 # ============================================
 def display_event_card(event, current_user=None):
-    """Display event card with Like and Interested buttons"""
+    """Display event card with Like, Interested buttons and Registration Link"""
     if not event or not event.get('id'):
         return
     
@@ -1531,7 +1531,7 @@ def display_event_card(event, current_user=None):
                 event_type = event.get('event_type', 'Event')
                 st.caption(f"🏷️ {event_type}")
             
-            # Engagement metrics (Likes and Interested counts)
+            # Engagement metrics
             likes_count = db.get_event_likes_count(event_id)
             interested_count = db.get_event_interested_count(event_id)
             
@@ -1541,12 +1541,11 @@ def display_event_card(event, current_user=None):
             with engagement_col2:
                 st.caption(f"⭐ {interested_count} Interested")
             
-            # Like and Interested buttons (only for logged in students)
+            # Like and Interested buttons
             if current_user:
                 col_like, col_interested, col_spacer = st.columns([1, 1, 2])
                 
                 with col_like:
-                    # Check if student already liked this event
                     is_liked = db.is_event_liked(event_id, current_user)
                     like_text = "❤️ Liked" if is_liked else "🤍 Like"
                     like_type = "secondary" if is_liked else "primary"
@@ -1554,18 +1553,13 @@ def display_event_card(event, current_user=None):
                     if st.button(like_text, key=f"like_{event_id}", 
                                use_container_width=True, type=like_type):
                         if is_liked:
-                            # Unlike
                             if db.remove_like(event_id, current_user):
-                                st.success("Removed like!")
                                 st.rerun()
                         else:
-                            # Like
                             if db.add_like(event_id, current_user):
-                                st.success("Liked!")
                                 st.rerun()
                 
                 with col_interested:
-                    # Check if student is already interested
                     is_interested = db.is_event_interested(event_id, current_user)
                     interested_text = "⭐ Interested" if is_interested else "☆ Interested"
                     interested_type = "secondary" if is_interested else "primary"
@@ -1573,14 +1567,10 @@ def display_event_card(event, current_user=None):
                     if st.button(interested_text, key=f"interested_{event_id}", 
                                use_container_width=True, type=interested_type):
                         if is_interested:
-                            # Remove interested
                             if db.remove_interested(event_id, current_user):
-                                st.success("Removed from interested!")
                                 st.rerun()
                         else:
-                            # Add interested
                             if db.add_interested(event_id, current_user):
-                                st.success("Marked as interested!")
                                 st.rerun()
             
             # Description
@@ -1593,33 +1583,113 @@ def display_event_card(event, current_user=None):
                 else:
                     st.caption(desc)
         
-        # Registration Section
+        # ============================================
+        # REGISTRATION SECTION - ENHANCED WITH ACTUAL LINK
+        # ============================================
         if current_user:
             st.markdown('<div class="registration-section">', unsafe_allow_html=True)
             
             is_registered = db.is_student_registered(event_id, current_user)
+            registration_link = event.get('registration_link', '')
             
             if is_registered:
-                st.success("✅ Registered", icon="✅")
+                st.success("✅ You are already registered for this event")
+                
+                # Show external link even if registered (for reference)
+                if registration_link:
+                    st.markdown(f"""
+                    **🔗 External Registration Link:**  
+                    [Click here to visit registration page]({registration_link})
+                    """)
             else:
-                if st.button("📱 Register Now", 
-                           key=f"reg_{event_id}",
-                           use_container_width=True,
-                           type="primary"):
-                    student = db.get_user(current_user)
-                    if student:
-                        reg_data = {
-                            'id': str(uuid.uuid4()),
-                            'event_id': event_id,
-                            'event_title': event.get('title'),
-                            'student_username': current_user,
-                            'student_name': student.get('name', current_user),
-                            'student_roll': student.get('roll_no', 'N/A'),
-                            'student_dept': student.get('department', 'N/A')
-                        }
-                        if db.add_registration(reg_data):
-                            st.success("✅ Registration successful!")
-                            st.rerun()
+                # Check if there's an external registration link
+                if registration_link:
+                    # Show both options: External link + App registration
+                    col_link, col_app = st.columns([1, 1])
+                    
+                    with col_link:
+                        st.markdown("### 📝 Register Externally")
+                        st.markdown(f"""
+                        **Official Registration Link:**  
+                        [🌐 Click here to register on external platform]({registration_link})
+                        
+                        *Use this link for official registration*
+                        """)
+                        
+                        # Button to confirm external registration
+                        if st.button("✅ I've Registered via External Link", 
+                                   key=f"ext_reg_{event_id}",
+                                   use_container_width=True,
+                                   type="secondary"):
+                            student = db.get_user(current_user)
+                            if student:
+                                reg_data = {
+                                    'id': str(uuid.uuid4()),
+                                    'event_id': event_id,
+                                    'event_title': event.get('title'),
+                                    'student_username': current_user,
+                                    'student_name': student.get('name', current_user),
+                                    'student_roll': student.get('roll_no', 'N/A'),
+                                    'student_dept': student.get('department', 'N/A'),
+                                    'status': 'confirmed'
+                                }
+                                if db.add_registration(reg_data):
+                                    st.success("✅ External registration recorded!")
+                                    st.rerun()
+                    
+                    with col_app:
+                        st.markdown("### 📱 Register via App")
+                        st.markdown("""
+                        **Direct Registration:**  
+                        Register directly in our college system
+                        
+                        *Track your attendance and get certificates*
+                        """)
+                        
+                        if st.button("📱 Register via College App", 
+                                   key=f"app_reg_{event_id}",
+                                   use_container_width=True,
+                                   type="primary"):
+                            student = db.get_user(current_user)
+                            if student:
+                                reg_data = {
+                                    'id': str(uuid.uuid4()),
+                                    'event_id': event_id,
+                                    'event_title': event.get('title'),
+                                    'student_username': current_user,
+                                    'student_name': student.get('name', current_user),
+                                    'student_roll': student.get('roll_no', 'N/A'),
+                                    'student_dept': student.get('department', 'N/A')
+                                }
+                                if db.add_registration(reg_data):
+                                    st.success("✅ Registered successfully in college system!")
+                                    st.rerun()
+                else:
+                    # No external link, only app registration
+                    st.markdown("### 📱 Register via College App")
+                    st.markdown("""
+                    **Direct Registration:**  
+                    Register in our college system to track your participation
+                    """)
+                    
+                    if st.button("📱 Register Now", 
+                               key=f"reg_{event_id}",
+                               use_container_width=True,
+                               type="primary"):
+                        student = db.get_user(current_user)
+                        if student:
+                            reg_data = {
+                                'id': str(uuid.uuid4()),
+                                'event_id': event_id,
+                                'event_title': event.get('title'),
+                                'student_username': current_user,
+                                'student_name': student.get('name', current_user),
+                                'student_roll': student.get('roll_no', 'N/A'),
+                                'student_dept': student.get('department', 'N/A')
+                            }
+                            if db.add_registration(reg_data):
+                                st.success("✅ Registration successful!")
+                                st.rerun()
             
             st.markdown('</div>', unsafe_allow_html=True)
         
