@@ -1213,7 +1213,7 @@ def display_event_card(event, current_user=None):
             if flyer and flyer.startswith('data:image'):
                 try:
                     # Use fixed height for consistency
-                    st.image(flyer, width=120, use_column_width=False)
+                    st.image(flyer, width=200, use_column_width=False)
                 except:
                     # Small placeholder if image fails
                     st.markdown('''
