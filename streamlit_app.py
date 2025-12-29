@@ -1,6 +1,6 @@
 """
 G H Raisoni College - Advanced Event Management System
-Complete solution with AI, Image Uploads, Social Features
+Complete solution with AI, Image Uploads, Social Features, and Mentor Management
 Deployable on Streamlit Cloud - Streamlit Native Version
 """
 
@@ -206,8 +206,6 @@ class ImageProcessor:
         
         return image_path
 
-
-
 class Validators:
     """Collection of input validation methods"""
     
@@ -287,7 +285,6 @@ class Validators:
         sanitized = sanitized.replace('"', '&quot;').replace("'", '&#x27;')
         
         return sanitized.strip()
-
 
 class AuthManager:
     """Handles user authentication and session management"""
@@ -387,7 +384,6 @@ class AuthManager:
             return wrapper
         return decorator
 
-
 # ============================================
 # AI EVENT GENERATOR CLASS
 # ============================================
@@ -452,7 +448,7 @@ class AIEventGenerator:
         - event_date: Event date in YYYY-MM-DD format (extract from text or use reasonable default)
         - venue: Event venue/location (string)
         - organizer: Event organizer (string)
-        - event_link: Event website/URL if mentioned (string or null)  # NEW
+        - event_link: Event website/URL if mentioned (string or null)
         - registration_link: Registration URL if mentioned (string or null)
         - max_participants: Maximum participants if mentioned (integer or 100)
         
@@ -513,7 +509,7 @@ class AIEventGenerator:
             'event_date': (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d'),
             'venue': 'G H Raisoni College',
             'organizer': 'College Department',
-            'event_link': None,  # NEW
+            'event_link': None,
             'registration_link': None,
             'max_participants': 100,
             'ai_generated': False,
@@ -570,61 +566,6 @@ class AIEventGenerator:
                 event_data['registration_link'] = urls[1]
         
         return event_data
-    
-    def enhance_event_description(self, basic_info):
-        """Use AI to enhance event description"""
-        if not self.client:
-            return basic_info
-        
-        prompt = f"""
-        Enhance this event description to make it more engaging and professional:
-        
-        Title: {basic_info.get('title', 'Event')}
-        Basic Description: {basic_info.get('description', '')}
-        
-        Please provide:
-        1. A catchy, engaging title (max 10 words)
-        2. A professional description (3-4 paragraphs)
-        3. Key highlights/bullet points
-        4. Who should attend
-        5. What participants will learn/gain
-        
-        Return as JSON with fields: enhanced_title, enhanced_description, key_highlights, target_audience, learning_outcomes
-        """
-        
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are an expert at creating engaging event descriptions."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                max_tokens=800
-            )
-            
-            result_text = response.choices[0].message.content.strip()
-            result_text = re.sub(r'```json\s*', '', result_text)
-            result_text = re.sub(r'\s*```', '', result_text)
-            
-            enhanced_data = json.loads(result_text)
-            
-            # Merge enhanced data with basic info
-            if 'enhanced_title' in enhanced_data:
-                basic_info['title'] = enhanced_data['enhanced_title']
-            if 'enhanced_description' in enhanced_data:
-                basic_info['description'] = enhanced_data['enhanced_description']
-            
-            basic_info['ai_enhanced'] = True
-            if 'ai_metadata' not in basic_info:
-                basic_info['ai_metadata'] = {}
-            basic_info['ai_metadata']['enhancement'] = enhanced_data
-            
-            return basic_info
-            
-        except Exception as e:
-            st.warning(f"AI enhancement failed: {e}")
-            return basic_info
 
 # ============================================
 # CONFIGURATION
@@ -702,7 +643,6 @@ st.markdown("""
         border-left: 3px solid #3B82F6;
         font-size: 0.9rem;
     }
-
     
     .role-badge {
         display: inline-block;
@@ -789,11 +729,9 @@ st.markdown("""
         font-weight: 600;
     }
     
-    
     .status-upcoming { background: #D1FAE5; color: #065F46; }
     .status-ongoing { background: #FEF3C7; color: #92400E; }
     .status-past { background: #FEE2E2; color: #DC2626; }
-    
     
     .card-description {
         color: #475569;
@@ -928,6 +866,68 @@ st.markdown("""
         font-size: 0.7rem;
         font-weight: 600;
     }
+    
+    /* Mentor CSS */
+    .mentor-badge {
+        background: linear-gradient(135deg, #8B5CF6 0%, #A855F7 100%);
+        color: white;
+        padding: 0.3rem 0.8rem;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        margin: 0.5rem 0;
+    }
+    
+    .mentor-section {
+        background: linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%);
+        padding: 1rem;
+        border-radius: 8px;
+        margin: 1rem 0;
+        border: 1px solid #E5E7EB;
+        border-left: 4px solid #8B5CF6;
+    }
+    
+    .mentor-info-card {
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        margin: 0.5rem 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+    
+    .mentor-stats {
+        display: flex;
+        gap: 1rem;
+        margin: 1rem 0;
+        padding: 1rem;
+        background: #f8fafc;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+    }
+    
+    .mentor-stat-item {
+        flex: 1;
+        text-align: center;
+        padding: 0.5rem;
+    }
+    
+    .mentor-stat-value {
+        font-size: 1.8rem;
+        font-weight: 800;
+        color: #8B5CF6;
+        margin: 0.25rem 0;
+    }
+    
+    .mentor-stat-label {
+        font-size: 0.85rem;
+        color: #64748b;
+        font-weight: 600;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1026,6 +1026,24 @@ class DatabaseManager:
             ''')
             logger.info("Created/Verified users table")
             
+            # Mentors table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS mentors (
+                    id TEXT PRIMARY KEY,
+                    first_name TEXT NOT NULL,
+                    last_name TEXT NOT NULL,
+                    full_name TEXT NOT NULL,
+                    department TEXT NOT NULL,
+                    email TEXT NOT NULL UNIQUE,
+                    contact TEXT NOT NULL,
+                    expertise TEXT,
+                    is_active BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_by TEXT
+                )
+            ''')
+            logger.info("Created/Verified mentors table")
+            
             # Events table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS events (
@@ -1036,8 +1054,8 @@ class DatabaseManager:
                     event_date TIMESTAMP,
                     venue TEXT,
                     organizer TEXT,
-                    event_link TEXT,  -- NEW: Event URL/website
-                    registration_link TEXT,  -- Registration URL
+                    event_link TEXT,
+                    registration_link TEXT,
                     max_participants INTEGER DEFAULT 100,
                     current_participants INTEGER DEFAULT 0,
                     flyer_path TEXT,
@@ -1045,7 +1063,9 @@ class DatabaseManager:
                     created_by_name TEXT,
                     ai_generated BOOLEAN DEFAULT 0,
                     status TEXT DEFAULT 'upcoming',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    mentor_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (mentor_id) REFERENCES mentors(id)
                 )
             ''')
             logger.info("Created/Verified events table")
@@ -1098,27 +1118,11 @@ class DatabaseManager:
             
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
-            # Try to show what tables exist
-            try:
-                cursor = self.conn.cursor()
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-                tables = cursor.fetchall()
-                logger.info(f"Existing tables: {[t[0] for t in tables]}")
-            except:
-                pass
             return False
     
     def _add_default_users(self):
         """Add default admin, faculty, and student users"""
         try:
-            # First check if users table exists
-            cursor = self.conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-            if not cursor.fetchone():
-                logger.error("Users table doesn't exist. Creating it now...")
-                self.create_tables()
-            
-            # Now add default users
             cursor = self.conn.cursor()
             
             # Check if admin exists
@@ -1285,6 +1289,110 @@ class DatabaseManager:
             logger.error(f"Error adding user: {e}")
             return False
     
+    def add_mentor(self, mentor_data):
+        """Add new mentor"""
+        try:
+            cursor = self.conn.cursor()
+            
+            # Generate full name
+            full_name = f"{mentor_data.get('first_name')} {mentor_data.get('last_name')}"
+            
+            cursor.execute('''
+                INSERT INTO mentors (
+                    id, first_name, last_name, full_name, department, 
+                    email, contact, expertise, is_active, created_at, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                mentor_data.get('id', str(uuid.uuid4())),
+                mentor_data.get('first_name'),
+                mentor_data.get('last_name'),
+                full_name,
+                mentor_data.get('department'),
+                mentor_data.get('email'),
+                mentor_data.get('contact'),
+                mentor_data.get('expertise', ''),
+                mentor_data.get('is_active', True),
+                datetime.now().isoformat(),
+                mentor_data.get('created_by')
+            ))
+            
+            self.conn.commit()
+            logger.info(f"Added new mentor: {full_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Error adding mentor: {e}")
+            return False
+    
+    def get_all_mentors(self):
+        """Get all mentors"""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM mentors ORDER BY full_name")
+        results = cursor.fetchall()
+        return [dict(row) for row in results]
+    
+    def get_active_mentors(self):
+        """Get active mentors only"""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM mentors WHERE is_active = 1 ORDER BY full_name")
+        results = cursor.fetchall()
+        return [dict(row) for row in results]
+    
+    def get_mentor_by_id(self, mentor_id):
+        """Get mentor by ID"""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT * FROM mentors WHERE id = ?", (mentor_id,))
+        result = cursor.fetchone()
+        return dict(result) if result else None
+    
+    def update_mentor(self, mentor_id, mentor_data):
+        """Update mentor information"""
+        try:
+            cursor = self.conn.cursor()
+            
+            # Generate full name if names were updated
+            if 'first_name' in mentor_data or 'last_name' in mentor_data:
+                cursor.execute("SELECT first_name, last_name FROM mentors WHERE id = ?", (mentor_id,))
+                current = cursor.fetchone()
+                first_name = mentor_data.get('first_name', current['first_name'])
+                last_name = mentor_data.get('last_name', current['last_name'])
+                full_name = f"{first_name} {last_name}"
+                mentor_data['full_name'] = full_name
+            
+            # Build update query dynamically
+            set_clauses = []
+            values = []
+            
+            for key, value in mentor_data.items():
+                if key not in ['id', 'created_at']:
+                    set_clauses.append(f"{key} = ?")
+                    values.append(value)
+            
+            if not set_clauses:
+                return False
+            
+            values.append(mentor_id)
+            query = f"UPDATE mentors SET {', '.join(set_clauses)} WHERE id = ?"
+            cursor.execute(query, values)
+            
+            self.conn.commit()
+            logger.info(f"Updated mentor: {mentor_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating mentor: {e}")
+            return False
+    
+    def delete_mentor(self, mentor_id):
+        """Delete mentor (soft delete - set inactive)"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("UPDATE mentors SET is_active = 0 WHERE id = ?", (mentor_id,))
+            self.conn.commit()
+            logger.info(f"Deactivated mentor: {mentor_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting mentor: {e}")
+            return False
+    
     def add_event(self, event_data):
         """Add new event"""
         try:
@@ -1292,9 +1400,10 @@ class DatabaseManager:
             cursor.execute('''
                 INSERT INTO events (
                     id, title, description, event_type, event_date, venue, organizer,
-                    registration_link, max_participants, current_participants, flyer_path, created_by,
-                    created_by_name, ai_generated, status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    event_link, registration_link, max_participants, current_participants, 
+                    flyer_path, created_by, created_by_name, ai_generated, status, 
+                    mentor_id, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 event_data.get('id', str(uuid.uuid4())),
                 event_data.get('title'),
@@ -1303,6 +1412,7 @@ class DatabaseManager:
                 event_data.get('event_date'),
                 event_data.get('venue'),
                 event_data.get('organizer'),
+                event_data.get('event_link', ''),
                 event_data.get('registration_link', ''),
                 event_data.get('max_participants', 100),
                 event_data.get('current_participants', 0),
@@ -1311,6 +1421,7 @@ class DatabaseManager:
                 event_data.get('created_by_name'),
                 event_data.get('ai_generated', False),
                 'upcoming',
+                event_data.get('mentor_id'),
                 datetime.now().isoformat()
             ))
             self.conn.commit()
@@ -1332,6 +1443,32 @@ class DatabaseManager:
         cursor.execute("SELECT * FROM events WHERE created_by = ? ORDER BY event_date DESC", (username,))
         results = cursor.fetchall()
         return [dict(row) for row in results]
+    
+    def assign_mentor_to_event(self, event_id, mentor_id):
+        """Assign mentor to an event"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("UPDATE events SET mentor_id = ? WHERE id = ?", (mentor_id, event_id))
+            self.conn.commit()
+            logger.info(f"Assigned mentor {mentor_id} to event {event_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error assigning mentor to event: {e}")
+            return False
+    
+    def get_event_with_mentor(self, event_id):
+        """Get event details with mentor information"""
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT e.*, m.full_name as mentor_name, m.email as mentor_email, 
+                   m.contact as mentor_contact, m.department as mentor_department,
+                   m.expertise as mentor_expertise
+            FROM events e
+            LEFT JOIN mentors m ON e.mentor_id = m.id
+            WHERE e.id = ?
+        ''', (event_id,))
+        result = cursor.fetchone()
+        return dict(result) if result else None
     
     def add_registration(self, reg_data):
         """Add new registration"""
@@ -1492,7 +1629,6 @@ class DatabaseManager:
             logger.error(f"Error getting student liked events: {e}")
             return []
     
-    # INTERESTED METHODS
     def add_interested(self, event_id, student_username):
         """Add interested for an event"""
         try:
@@ -1649,9 +1785,32 @@ def display_event_card(event, current_user=None):
                 st.caption(f"⭐ {interested_count} Interested")
             
             # ============================================
+            # MENTOR INFORMATION
+            # ============================================
+            if event.get('mentor_id'):
+                mentor = db.get_mentor_by_id(event['mentor_id'])
+                if mentor:
+                    st.markdown('<div class="mentor-section">', unsafe_allow_html=True)
+                    st.markdown("### 👨‍🏫 **Event Mentor**")
+                    
+                    col_m1, col_m2 = st.columns(2)
+                    with col_m1:
+                        st.markdown(f"**Name:** {mentor['full_name']}")
+                        st.markdown(f"**Department:** {mentor['department']}")
+                    with col_m2:
+                        st.markdown(f"**Email:** {mentor['email']}")
+                        st.markdown(f"**Contact:** {mentor['contact']}")
+                    
+                    if mentor.get('expertise'):
+                        st.caption(f"**Expertise:** {mentor['expertise']}")
+                    
+                    st.info("This mentor will guide participants throughout the event and is the point of contact for queries.")
+                    st.markdown('</div>', unsafe_allow_html=True)
+            
+            # ============================================
             # EVENT LINKS SECTION
             # ============================================
-            event_link = event.get('event_link', '')  # New field for event URL
+            event_link = event.get('event_link', '')
             registration_link = event.get('registration_link', '')
             
             if event_link or registration_link:
@@ -2051,8 +2210,6 @@ def student_dashboard():
                 display_event_card(event, st.session_state.username)
         else:
             st.info("No events found matching your criteria.")
-
-        pass
     
     elif selected == "My Registrations":
         st.header("📋 My Registrations")
@@ -2117,8 +2274,7 @@ def student_dashboard():
                         st.error("🔴 Completed")
                 
                 st.markdown('</div>', unsafe_allow_html=True)
-        pass
-
+    
     elif selected == "Liked Events":
         st.header("❤️ Liked Events")
         
@@ -2245,8 +2401,6 @@ def student_dashboard():
             attended = len([r for r in registrations if r.get('attendance') == 'present'])
             st.metric("Events Attended", attended)
 
-        pass
-
 # ============================================
 # FACULTY DASHBOARD
 # ============================================
@@ -2353,12 +2507,20 @@ def faculty_dashboard():
                 with col2:
                     venue = st.text_input("Venue *")
                     organizer = st.text_input("Organizer *", value="G H Raisoni College")
-                    # NEW: Event link field
                     event_link = st.text_input("Event Website/URL", 
                                              placeholder="https://example.com/event-details")
-                    # Existing registration link
                     registration_link = st.text_input("Registration Link", 
                                                     placeholder="https://forms.google.com/registration")
+                    
+                    # Mentor selection
+                    st.subheader("👨‍🏫 Assign Mentor (Optional)")
+                    active_mentors = db.get_active_mentors()
+                    if active_mentors:
+                        mentor_options = ["None"] + [f"{m['full_name']} ({m['department']})" for m in active_mentors]
+                        selected_mentor = st.selectbox("Select Mentor", mentor_options)
+                    else:
+                        st.info("No active mentors available. Admin can add mentors.")
+                        selected_mentor = "None"
                     
                     # Flyer upload
                     st.subheader("Event Flyer (Optional)")
@@ -2374,6 +2536,14 @@ def faculty_dashboard():
                     if not all([title, event_type, venue, organizer, description]):
                         st.error("Please fill all required fields (*)")
                     else:
+                        # Get mentor ID if selected
+                        mentor_id = None
+                        if selected_mentor != "None" and active_mentors:
+                            mentor_name = selected_mentor.split(" (")[0]
+                            mentor = next((m for m in active_mentors if m['full_name'] == mentor_name), None)
+                            if mentor:
+                                mentor_id = mentor['id']
+                        
                         # Save flyer
                         flyer_path = None
                         if flyer:
@@ -2403,17 +2573,20 @@ def faculty_dashboard():
                             'event_date': event_datetime.isoformat(),
                             'venue': venue,
                             'organizer': organizer,
-                            'event_link': event_link,  # NEW
+                            'event_link': event_link,
                             'registration_link': registration_link,
                             'max_participants': max_participants,
                             'flyer_path': flyer_path,
                             'created_by': st.session_state.username,
                             'created_by_name': st.session_state.name,
-                            'ai_generated': False
+                            'ai_generated': False,
+                            'mentor_id': mentor_id
                         }
                         
                         if db.add_event(event_data):
                             st.success(f"Event '{title}' created successfully! 🎉")
+                            if mentor_id:
+                                st.info(f"✅ Mentor assigned: {selected_mentor}")
                             st.rerun()
                         else:
                             st.error("Failed to create event")
@@ -2502,6 +2675,16 @@ def faculty_dashboard():
                         ai_venue = st.text_input("Venue", value=event_data.get('venue', 'G H Raisoni College'))
                         ai_organizer = st.text_input("Organizer", value=event_data.get('organizer', 'G H Raisoni College'))
                         ai_reg_link = st.text_input("Registration Link", value=event_data.get('registration_link', ''))
+                        
+                        # NEW: Mentor selection for AI-generated events
+                        st.subheader("👨‍🏫 Assign Mentor (Optional)")
+                        active_mentors = db.get_active_mentors()
+                        if active_mentors:
+                            mentor_options = ["None"] + [f"{m['full_name']} ({m['department']})" for m in active_mentors]
+                            ai_selected_mentor = st.selectbox("Select Mentor", mentor_options, key="ai_mentor_select")
+                        else:
+                            st.info("No active mentors available. Admin can add mentors.")
+                            ai_selected_mentor = "None"
                     
                     ai_description = st.text_area("Event Description", 
                                                 value=event_data.get('description', ''),
@@ -2519,6 +2702,14 @@ def faculty_dashboard():
                         if not all([ai_title, ai_venue, ai_organizer, ai_description]):
                             st.error("Please fill all required fields (*)")
                         else:
+                            # Get mentor ID if selected
+                            ai_mentor_id = None
+                            if ai_selected_mentor != "None" and active_mentors:
+                                mentor_name = ai_selected_mentor.split(" (")[0]
+                                mentor = next((m for m in active_mentors if m['full_name'] == mentor_name), None)
+                                if mentor:
+                                    ai_mentor_id = mentor['id']
+                            
                             # Save flyer
                             flyer_path = None
                             if ai_flyer:
@@ -2554,11 +2745,14 @@ def faculty_dashboard():
                                 'created_by': st.session_state.username,
                                 'created_by_name': st.session_state.name,
                                 'ai_generated': True,
-                                'ai_metadata': event_data.get('ai_metadata', {})
+                                'ai_metadata': event_data.get('ai_metadata', {}),
+                                'mentor_id': ai_mentor_id  # NEW
                             }
                             
                             if db.add_event(final_event_data):
                                 st.success(f"✅ AI-generated event '{ai_title}' created successfully! 🎉")
+                                if ai_mentor_id:
+                                    st.info(f"✅ Mentor assigned: {ai_selected_mentor}")
                                 
                                 # Clear session state
                                 if 'ai_generated_event' in st.session_state:
@@ -2702,7 +2896,7 @@ def admin_dashboard():
     # Navigation
     with st.sidebar:
         st.markdown("### Navigation")
-        nav_options = ["Dashboard", "Manage Events", "Manage Users"]
+        nav_options = ["Dashboard", "Manage Events", "Manage Users", "Manage Mentors"]
         
         if 'admin_page' not in st.session_state:
             st.session_state.admin_page = "Dashboard"
@@ -2733,6 +2927,7 @@ def admin_dashboard():
         
         # Get data
         events = db.get_all_events()
+        mentors = db.get_all_mentors()
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -2744,9 +2939,8 @@ def admin_dashboard():
             ai_events = len([e for e in events if e.get('ai_generated')])
             st.metric("🤖 AI Events", ai_events)
         with col4:
-            today = date.today()
-            recent_events = len([e for e in events if datetime.fromisoformat(e.get('event_date').replace('Z', '+00:00')).date() >= today])
-            st.metric("Recent Events", recent_events)
+            active_mentors = len([m for m in mentors if m.get('is_active')])
+            st.metric("👨‍🏫 Active Mentors", active_mentors)
         
         # Recent events
         st.subheader("📅 Recent Events")
@@ -2857,6 +3051,242 @@ def admin_dashboard():
                                 st.rerun()
         else:
             st.info("No users found.")
+    
+    # ADD THIS NEW SECTION FOR MENTORS
+    elif selected == "Manage Mentors":
+        st.header("👨‍🏫 Manage Mentors")
+        
+        tab1, tab2, tab3 = st.tabs(["Add New Mentor", "View All Mentors", "Assign to Events"])
+        
+        with tab1:
+            st.subheader("➕ Add New Mentor")
+            
+            with st.form("add_mentor_form"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    first_name = st.text_input("First Name *")
+                    last_name = st.text_input("Last Name *")
+                    department = st.selectbox("Department *", COLLEGE_CONFIG['departments'])
+                    email = st.text_input("Email *")
+                
+                with col2:
+                    contact = st.text_input("Contact Number *")
+                    expertise = st.text_area("Expertise/Areas", placeholder="Python, Machine Learning, Web Development...")
+                    is_active = st.checkbox("Active", value=True)
+                
+                submit = st.form_submit_button("Add Mentor", use_container_width=True, type="primary")
+                
+                if submit:
+                    if not all([first_name, last_name, department, email, contact]):
+                        st.error("Please fill all required fields (*)")
+                    else:
+                        mentor_data = {
+                            'first_name': first_name,
+                            'last_name': last_name,
+                            'department': department,
+                            'email': email,
+                            'contact': contact,
+                            'expertise': expertise,
+                            'is_active': is_active,
+                            'created_by': st.session_state.username
+                        }
+                        
+                        if db.add_mentor(mentor_data):
+                            st.success(f"✅ Mentor {first_name} {last_name} added successfully!")
+                            st.rerun()
+                        else:
+                            st.error("Failed to add mentor. Email might already exist.")
+        
+        with tab2:
+            st.subheader("📋 All Mentors")
+            
+            mentors = db.get_all_mentors()
+            
+            if not mentors:
+                st.info("No mentors found. Add your first mentor!")
+                return
+            
+            # Search and filter
+            col_search, col_filter = st.columns(2)
+            with col_search:
+                search_term = st.text_input("🔍 Search mentors", placeholder="Search by name, department...")
+            
+            with col_filter:
+                show_active = st.selectbox("Status", ["All", "Active Only", "Inactive Only"])
+            
+            # Filter mentors
+            filtered_mentors = mentors
+            if search_term:
+                search_term = search_term.lower()
+                filtered_mentors = [m for m in filtered_mentors 
+                                  if search_term in m.get('full_name', '').lower() or 
+                                  search_term in m.get('department', '').lower() or
+                                  search_term in m.get('expertise', '').lower()]
+            
+            if show_active == "Active Only":
+                filtered_mentors = [m for m in filtered_mentors if m.get('is_active')]
+            elif show_active == "Inactive Only":
+                filtered_mentors = [m for m in filtered_mentors if not m.get('is_active')]
+            
+            # Display mentors
+            st.caption(f"Found {len(filtered_mentors)} mentors")
+            
+            for mentor in filtered_mentors:
+                with st.container():
+                    st.markdown('<div class="event-card">', unsafe_allow_html=True)
+                    
+                    col_info, col_actions = st.columns([3, 1])
+                    
+                    with col_info:
+                        # Mentor status badge
+                        status_color = "🟢" if mentor.get('is_active') else "🔴"
+                        status_text = "Active" if mentor.get('is_active') else "Inactive"
+                        
+                        st.markdown(f'<div class="card-title">{mentor.get("full_name")} {status_color}</div>', unsafe_allow_html=True)
+                        st.caption(f"**Department:** {mentor.get('department')}")
+                        st.caption(f"**Email:** {mentor.get('email')}")
+                        st.caption(f"**Contact:** {mentor.get('contact')}")
+                        
+                        if mentor.get('expertise'):
+                            st.caption(f"**Expertise:** {mentor.get('expertise')}")
+                    
+                    with col_actions:
+                        st.markdown("### Actions")
+                        
+                        # Edit button
+                        if st.button("✏️ Edit", key=f"edit_{mentor['id']}", use_container_width=True):
+                            st.session_state.editing_mentor = mentor['id']
+                            st.rerun()
+                        
+                        # Delete/Activate button
+                        if mentor.get('is_active'):
+                            if st.button("❌ Deactivate", key=f"deact_{mentor['id']}", use_container_width=True, type="secondary"):
+                                if db.delete_mentor(mentor['id']):
+                                    st.success("Mentor deactivated!")
+                                    st.rerun()
+                        else:
+                            if st.button("✅ Activate", key=f"act_{mentor['id']}", use_container_width=True, type="secondary"):
+                                if db.update_mentor(mentor['id'], {'is_active': True}):
+                                    st.success("Mentor activated!")
+                                    st.rerun()
+                    
+                    st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Edit mentor form (appears when editing)
+            if 'editing_mentor' in st.session_state:
+                mentor_id = st.session_state.editing_mentor
+                mentor = db.get_mentor_by_id(mentor_id)
+                
+                if mentor:
+                    st.markdown("---")
+                    st.subheader("✏️ Edit Mentor")
+                    
+                    with st.form("edit_mentor_form"):
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            edit_first_name = st.text_input("First Name", value=mentor.get('first_name', ''))
+                            edit_last_name = st.text_input("Last Name", value=mentor.get('last_name', ''))
+                            edit_department = st.selectbox("Department", COLLEGE_CONFIG['departments'], 
+                                                         index=COLLEGE_CONFIG['departments'].index(mentor.get('department', '')) 
+                                                         if mentor.get('department') in COLLEGE_CONFIG['departments'] else 0)
+                        
+                        with col2:
+                            edit_email = st.text_input("Email", value=mentor.get('email', ''))
+                            edit_contact = st.text_input("Contact", value=mentor.get('contact', ''))
+                            edit_expertise = st.text_area("Expertise", value=mentor.get('expertise', ''))
+                            edit_active = st.checkbox("Active", value=bool(mentor.get('is_active', True)))
+                        
+                        col_save, col_cancel = st.columns(2)
+                        with col_save:
+                            save = st.form_submit_button("💾 Save Changes", use_container_width=True, type="primary")
+                        with col_cancel:
+                            cancel = st.form_submit_button("❌ Cancel", use_container_width=True, type="secondary")
+                        
+                        if save:
+                            update_data = {
+                                'first_name': edit_first_name,
+                                'last_name': edit_last_name,
+                                'department': edit_department,
+                                'email': edit_email,
+                                'contact': edit_contact,
+                                'expertise': edit_expertise,
+                                'is_active': edit_active
+                            }
+                            
+                            if db.update_mentor(mentor_id, update_data):
+                                st.success("✅ Mentor updated successfully!")
+                                del st.session_state.editing_mentor
+                                st.rerun()
+                            else:
+                                st.error("Failed to update mentor.")
+                        
+                        if cancel:
+                            del st.session_state.editing_mentor
+                            st.rerun()
+        
+        with tab3:
+            st.subheader("📅 Assign Mentors to Events")
+            
+            # Get all active mentors
+            active_mentors = db.get_active_mentors()
+            if not active_mentors:
+                st.info("No active mentors available. Please add mentors first.")
+                return
+            
+            # Get all events without mentors
+            cursor = db.conn.cursor()
+            cursor.execute("SELECT * FROM events WHERE mentor_id IS NULL ORDER BY event_date")
+            events_without_mentors = [dict(row) for row in cursor.fetchall()]
+            
+            if not events_without_mentors:
+                st.success("🎉 All events have mentors assigned!")
+                st.info("To reassign mentors, go to Faculty dashboard.")
+                return
+            
+            # Select event to assign mentor
+            event_options = {f"{e['title']} ({format_date(e['event_date'])})": e['id'] for e in events_without_mentors}
+            selected_event_label = st.selectbox("Select Event (without mentor)", list(event_options.keys()))
+            
+            if selected_event_label:
+                event_id = event_options[selected_event_label]
+                selected_event = next(e for e in events_without_mentors if e['id'] == event_id)
+                
+                # Display event details
+                st.markdown(f"**Selected Event:** {selected_event['title']}")
+                st.caption(f"Date: {format_date(selected_event['event_date'])}")
+                st.caption(f"Type: {selected_event.get('event_type', 'N/A')}")
+                st.caption(f"Venue: {selected_event.get('venue', 'N/A')}")
+                
+                # Select mentor
+                mentor_options = {f"{m['full_name']} ({m['department']})": m['id'] for m in active_mentors}
+                selected_mentor_label = st.selectbox("Select Mentor", list(mentor_options.keys()))
+                
+                if selected_mentor_label:
+                    mentor_id = mentor_options[selected_mentor_label]
+                    selected_mentor = next(m for m in active_mentors if m['id'] == mentor_id)
+                    
+                    # Display mentor details
+                    st.markdown("**Selected Mentor Details:**")
+                    col_m1, col_m2 = st.columns(2)
+                    with col_m1:
+                        st.caption(f"Name: {selected_mentor['full_name']}")
+                        st.caption(f"Department: {selected_mentor['department']}")
+                    with col_m2:
+                        st.caption(f"Email: {selected_mentor['email']}")
+                        st.caption(f"Contact: {selected_mentor['contact']}")
+                    
+                    if selected_mentor.get('expertise'):
+                        st.caption(f"Expertise: {selected_mentor['expertise']}")
+                    
+                    # Assign button
+                    if st.button("✅ Assign Mentor to Event", use_container_width=True, type="primary"):
+                        if db.assign_mentor_to_event(event_id, mentor_id):
+                            st.success(f"✅ {selected_mentor['full_name']} assigned to '{selected_event['title']}'!")
+                            st.rerun()
+                        else:
+                            st.error("Failed to assign mentor.")
 
 # ============================================
 # MAIN APPLICATION
