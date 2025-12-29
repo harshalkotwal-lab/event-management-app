@@ -1085,8 +1085,9 @@ class DatabaseManager:
                     UNIQUE(event_id, student_username)
                 )
             ''')
-            
+            logger.info("Created/Verified event_interested table")
             self.conn.commit()
+            logger.info("All tables created successfully")
             
         except Exception as e:
             logger.error(f"Error creating tables: {e}")
