@@ -965,7 +965,7 @@ class DatabaseManager:
             logger.error(f"Error creating tables: {e}")
     
     def _add_default_users(self):
-        """Add default admin and faculty users"""
+        """Add default admin, faculty, and student users"""
         try:
             cursor = self.conn.cursor()
             
@@ -988,6 +988,76 @@ class DatabaseManager:
                     INSERT INTO users (id, name, username, password, role, created_at)
                     VALUES (?, ?, ?, ?, ?, ?)
                 ''', (faculty_id, 'Faculty Coordinator', 'faculty@raisoni', hashed_pass, 'faculty', datetime.now().isoformat()))
+            
+            # Add default student accounts
+            default_students = [
+                {
+                    'name': 'Rohan Sharma',
+                    'username': 'rohan@student',
+                    'password': 'student123',
+                    'roll_no': 'CSE2023001',
+                    'department': 'Computer Science & Engineering',
+                    'year': 'III',
+                    'email': 'rohan.sharma@ghraisoni.edu'
+                },
+                {
+                    'name': 'Priya Patel',
+                    'username': 'priya@student',
+                    'password': 'student123',
+                    'roll_no': 'AIML2023002',
+                    'department': 'Artificial Intelligence & Machine Learning',
+                    'year': 'II',
+                    'email': 'priya.patel@ghraisoni.edu'
+                },
+                {
+                    'name': 'Amit Kumar',
+                    'username': 'amit@student',
+                    'password': 'student123',
+                    'roll_no': 'IT2023003',
+                    'department': 'Information Technology',
+                    'year': 'IV',
+                    'email': 'amit.kumar@ghraisoni.edu'
+                },
+                {
+                    'name': 'Neha Singh',
+                    'username': 'neha@student',
+                    'password': 'student123',
+                    'roll_no': 'DS2023004',
+                    'department': 'Data Science',
+                    'year': 'I',
+                    'email': 'neha.singh@ghraisoni.edu'
+                },
+                {
+                    'name': 'Vikram Verma',
+                    'username': 'vikram@student',
+                    'password': 'student123',
+                    'roll_no': 'ECE2023005',
+                    'department': 'Electronics & Communication',
+                    'year': 'III',
+                    'email': 'vikram.verma@ghraisoni.edu'
+                }
+            ]
+            
+            for student in default_students:
+                cursor.execute("SELECT COUNT(*) FROM users WHERE username = ?", (student['username'],))
+                if cursor.fetchone()[0] == 0:
+                    student_id = str(uuid.uuid4())
+                    hashed_pass = hashlib.sha256(student['password'].encode()).hexdigest()
+                    cursor.execute('''
+                        INSERT INTO users (id, name, roll_no, department, year, email, username, password, role, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        student_id,
+                        student['name'],
+                        student['roll_no'],
+                        student['department'],
+                        student['year'],
+                        student['email'],
+                        student['username'],
+                        hashed_pass,
+                        'student',
+                        datetime.now().isoformat()
+                    ))
             
             self.conn.commit()
         except Exception as e:
