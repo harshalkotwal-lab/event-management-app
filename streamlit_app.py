@@ -5,7 +5,6 @@ Deployable on Streamlit Cloud - Streamlit Native Version
 """
 
 import streamlit as st
-# Page configuration
 st.set_page_config(
     page_title="G H Raisoni Event Manager",
     page_icon="🎓",
