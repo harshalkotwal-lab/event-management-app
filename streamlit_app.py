@@ -397,19 +397,34 @@ class AuthManager:
 # ============================================
 class AIEventGenerator:
     """Generate structured event data from unstructured text"""
-    
+        
     def __init__(self):
-        # Initialize OpenAI client - access secrets here
+        # Initialize OpenAI client
+        self.api_key = ""
+        self.client = None
+        
         try:
+            # Try to get API key from Streamlit secrets
             self.api_key = st.secrets.get("OPENAI_API_KEY", "")
-        except Exception:
-            self.api_key = ""
             
-        if self.api_key:
-            self.client = openai.OpenAI(api_key=self.api_key)
-        else:
+            # Also check for other common secret names
+            if not self.api_key:
+                self.api_key = st.secrets.get("OPENAI_API_KEY", "")
+            
+            # Check if API key is valid
+            if self.api_key and self.api_key.startswith("sk-"):
+                self.client = openai.OpenAI(api_key=self.api_key)
+                st.success("✅ OpenAI API configured successfully")
+            elif self.api_key:
+                st.warning(f"Invalid OpenAI API key format. Starting with: {self.api_key[:10]}...")
+                self.client = None
+            else:
+                self.client = None
+                st.warning("OpenAI API key not configured. AI features will use regex fallback.")
+                
+        except Exception as e:
             self.client = None
-            st.warning("OpenAI API key not configured. AI features will use regex fallback.")
+            st.warning(f"Could not load OpenAI API key: {e}. Using regex fallback.")
     
     def extract_event_info(self, text):
         """Extract event information from text using AI or regex fallback"""
