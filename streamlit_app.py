@@ -1195,7 +1195,7 @@ db = DatabaseManager()
 # EVENT CARD DISPLAY
 # ============================================
 def display_event_card(event, current_user=None):
-    """Display event card in compact horizontal layout"""
+    """Display event card in compact horizontal layout with properly sized image"""
     if not event or not event.get('id'):
         return
     
@@ -1204,124 +1204,128 @@ def display_event_card(event, current_user=None):
     with st.container():
         st.markdown('<div class="event-card">', unsafe_allow_html=True)
         
-        # Create horizontal layout
-        col_img, col_info = st.columns([1, 3])
+        # Create horizontal layout with proper proportions
+        col_img, col_info = st.columns([1, 3], gap="small")
         
         with col_img:
-            # Display event flyer if available
+            # Display event flyer if available with fixed height
             flyer = event.get('flyer_path')
             if flyer and flyer.startswith('data:image'):
                 try:
-                    st.image(flyer, use_column_width=True)
+                    # Use fixed height for consistency
+                    st.image(flyer, width=120, use_column_width=False)
                 except:
-                    # Fallback if image fails to load
-                    st.markdown('<div style="height: 120px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 8px;">📷</div>', 
-                               unsafe_allow_html=True)
+                    # Small placeholder if image fails
+                    st.markdown('''
+                    <div style="width: 120px; height: 120px; background: linear-gradient(135deg, #f0f0f0 0%, #e0e0e0 100%); 
+                    display: flex; align-items: center; justify-content: center; border-radius: 8px; margin: 0 auto;">
+                        <span style="font-size: 24px;">📷</span>
+                    </div>
+                    ''', unsafe_allow_html=True)
             else:
-                # Placeholder for no image
-                st.markdown('<div style="height: 120px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; border-radius: 8px; color: white; font-size: 24px;">🎯</div>', 
-                           unsafe_allow_html=True)
+                # Compact placeholder
+                st.markdown('''
+                <div style="width: 120px; height: 120px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                display: flex; align-items: center; justify-content: center; border-radius: 8px; margin: 0 auto;">
+                    <span style="font-size: 24px; color: white;">🎯</span>
+                </div>
+                ''', unsafe_allow_html=True)
         
         with col_info:
-            # Header with title and badges
-            col_title, col_badge = st.columns([3, 1])
-            with col_title:
+            # Header with title and badges - single line
+            title_col, badge_col = st.columns([4, 1])
+            with title_col:
                 title = event.get('title', 'Untitled Event')
-                st.markdown(f'<div class="card-title" style="font-size: 1.1rem; margin-bottom: 0.25rem;">{title}</div>', 
-                           unsafe_allow_html=True)
-            with col_badge:
+                # Truncate long titles
+                if len(title) > 50:
+                    title = title[:47] + "..."
+                st.markdown(f'<div class="card-title">{title}</div>', unsafe_allow_html=True)
+            with badge_col:
                 if event.get('ai_generated'):
-                    st.markdown('<span class="ai-badge" style="font-size: 0.7rem;">🤖 AI</span>', 
-                               unsafe_allow_html=True)
+                    st.markdown('<span class="ai-badge">🤖</span>', unsafe_allow_html=True)
             
-            # Status and date on same line
-            col_status, col_date = st.columns([1, 2])
-            with col_status:
+            # Compact details grid - 2 rows of 3 columns
+            # Row 1: Status, Date, Venue
+            r1c1, r1c2, r1c3 = st.columns(3)
+            with r1c1:
                 event_date = event.get('event_date')
                 st.markdown(get_event_status(event_date), unsafe_allow_html=True)
-            with col_date:
+            with r1c2:
                 st.caption(f"📅 {format_date(event_date)}")
+            with r1c3:
+                venue = event.get('venue', 'TBD')
+                if len(venue) > 20:
+                    venue = venue[:17] + "..."
+                st.caption(f"📍 {venue}")
             
-            # Compact details in grid
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.caption(f"📍 {event.get('venue', 'TBD')[:15]}{'...' if len(event.get('venue', '')) > 15 else ''}")
-            with col2:
-                st.caption(f"🏷️ {event.get('event_type', 'Event')}")
-            with col3:
-                st.caption(f"👥 {event.get('current_participants', 0)}/{event.get('max_participants', 100)}")
+            # Row 2: Type, Organizer, Participants
+            r2c1, r2c2, r2c3 = st.columns(3)
+            with r2c1:
+                event_type = event.get('event_type', 'Event')
+                if len(event_type) > 15:
+                    event_type = event_type[:12] + "..."
+                st.caption(f"🏷️ {event_type}")
+            with r2c2:
+                organizer = event.get('organizer', 'College')
+                if len(organizer) > 20:
+                    organizer = organizer[:17] + "..."
+                st.caption(f"👨‍🏫 {organizer}")
+            with r2c3:
+                current = event.get('current_participants', 0)
+                max_parts = event.get('max_participants', 100)
+                st.caption(f"👥 {current}/{max_parts}")
             
-            # Description preview (truncated)
+            # Description with expander
             desc = event.get('description', '')
             if desc:
                 if len(desc) > 100:
-                    with st.expander("📝 Description", expanded=False):
+                    with st.expander("📝 Read description", expanded=False):
                         st.write(desc)
-                    st.caption(f"{desc[:100]}...")
+                    # Show first line or truncated preview
+                    first_line = desc.split('\n')[0]
+                    if len(first_line) > 100:
+                        st.caption(f"{first_line[:97]}...")
+                    else:
+                        st.caption(first_line)
                 else:
-                    st.caption(desc[:100])
+                    st.caption(desc)
         
-        # Registration Section (full width below)
+        # Registration Section (below the main content)
         if current_user:
-            st.markdown('<div class="registration-section" style="margin-top: 0.5rem; padding: 0.5rem;">', unsafe_allow_html=True)
+            st.markdown('<div class="registration-section">', unsafe_allow_html=True)
             
             is_registered = db.is_student_registered(event_id, current_user)
             
             if is_registered:
                 st.success("✅ Registered", icon="✅")
             else:
-                reg_link = event.get('registration_link', '')
-                
-                if reg_link:
-                    col_reg1, col_reg2 = st.columns(2)
-                    
-                    with col_reg1:
-                        st.markdown(f"[🔗 **External Link**]({reg_link})", unsafe_allow_html=True)
-                    
-                    with col_reg2:
-                        if st.button("📱 Register via App", 
-                                   key=f"reg_app_{event_id}",
-                                   use_container_width=True,
-                                   type="primary"):
-                            student = db.get_user(current_user)
-                            if student:
-                                reg_data = {
-                                    'id': str(uuid.uuid4()),
-                                    'event_id': event_id,
-                                    'event_title': event.get('title'),
-                                    'student_username': current_user,
-                                    'student_name': student.get('name', current_user),
-                                    'student_roll': student.get('roll_no', 'N/A'),
-                                    'student_dept': student.get('department', 'N/A')
-                                }
-                                if db.add_registration(reg_data):
-                                    st.success("✅ Registered!")
-                                    st.rerun()
-                else:
-                    if st.button("📱 Register", 
-                               key=f"reg_{event_id}",
-                               use_container_width=True,
-                               type="primary"):
-                        student = db.get_user(current_user)
-                        if student:
-                            reg_data = {
-                                'id': str(uuid.uuid4()),
-                                'event_id': event_id,
-                                'event_title': event.get('title'),
-                                'student_username': current_user,
-                                'student_name': student.get('name', current_user),
-                                'student_roll': student.get('roll_no', 'N/A'),
-                                'student_dept': student.get('department', 'N/A')
-                            }
-                            if db.add_registration(reg_data):
-                                st.success("✅ Registered!")
-                                st.rerun()
+                # Single register button for simplicity
+                if st.button("📱 Register Now", 
+                           key=f"reg_{event_id}",
+                           use_container_width=True,
+                           type="primary"):
+                    student = db.get_user(current_user)
+                    if student:
+                        reg_data = {
+                            'id': str(uuid.uuid4()),
+                            'event_id': event_id,
+                            'event_title': event.get('title'),
+                            'student_username': current_user,
+                            'student_name': student.get('name', current_user),
+                            'student_roll': student.get('roll_no', 'N/A'),
+                            'student_dept': student.get('department', 'N/A')
+                        }
+                        if db.add_registration(reg_data):
+                            st.success("✅ Registration successful!")
+                            st.rerun()
             
             st.markdown('</div>', unsafe_allow_html=True)
         
-        # Creator info (small and subtle)
+        # Footer - subtle creator info
         created_by = event.get('created_by_name', 'Unknown')
-        st.caption(f"👤 {created_by}", help=f"Event created by {created_by}")
+        if len(created_by) > 25:
+            created_by = created_by[:22] + "..."
+        st.caption(f"👤 {created_by}")
         
         st.markdown('</div>', unsafe_allow_html=True)
 
