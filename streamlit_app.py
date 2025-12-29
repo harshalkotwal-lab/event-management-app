@@ -444,22 +444,21 @@ class AIEventGenerator:
     
     def _extract_with_openai(self, text):
         """Use OpenAI to extract structured event data"""
-        import openai
-        
         prompt = f"""
-        Extract event information from the following text and return as JSON with these exact field names:
+        Extract event information from the following text and return as JSON with these fields:
         - title: Event title (string)
-        - description: Detailed event description (string, 3-5 sentences)
-        - event_type: Type of event (choose from: workshop, hackathon, competition, bootcamp, seminar, conference, webinar)
-        - event_date: Event date in YYYY-MM-DD format (extract from text or use next Friday)
+        - description: Detailed event description (string)
+        - event_type: Type of event (workshop, hackathon, competition, bootcamp, seminar, conference, webinar)
+        - event_date: Event date in YYYY-MM-DD format (extract from text or use reasonable default)
         - venue: Event venue/location (string)
         - organizer: Event organizer (string)
+        - event_link: Event website/URL if mentioned (string or null)  # NEW
         - registration_link: Registration URL if mentioned (string or null)
         - max_participants: Maximum participants if mentioned (integer or 100)
         
         Text: {text}
         
-        Return ONLY valid JSON, no other text.
+        Return only valid JSON, no other text.
         """
         
         try:
@@ -509,11 +508,12 @@ class AIEventGenerator:
         """Fallback regex-based extraction"""
         event_data = {
             'title': 'New Event',
-            'description': text[:300] + '...' if len(text) > 300 else text,
+            'description': text[:200] + '...' if len(text) > 200 else text,
             'event_type': 'workshop',
             'event_date': (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d'),
             'venue': 'G H Raisoni College',
             'organizer': 'College Department',
+            'event_link': None,  # NEW
             'registration_link': None,
             'max_participants': 100,
             'ai_generated': False,
@@ -561,8 +561,13 @@ class AIEventGenerator:
         # Try to extract URLs (registration links)
         url_pattern = r'https?://[^\s<>"\'()]+'
         urls = re.findall(url_pattern, text)
+        
         if urls:
-            event_data['registration_link'] = urls[0]
+            # Use first URL as event link
+            event_data['event_link'] = urls[0]
+            # If there's a second URL, use it as registration link
+            if len(urls) > 1:
+                event_data['registration_link'] = urls[1]
         
         return event_data
     
@@ -858,6 +863,71 @@ st.markdown("""
         align-items: center;
         gap: 4px;
     }
+
+    /* Event links styling */
+    .event-links-container {
+        background: #f8fafc;
+        padding: 12px;
+        border-radius: 8px;
+        margin: 12px 0;
+        border: 1px solid #e2e8f0;
+    }
+    
+    .event-link-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px;
+        margin: 4px 0;
+        background: white;
+        border-radius: 6px;
+        border: 1px solid #e2e8f0;
+        transition: all 0.2s;
+    }
+    
+    .event-link-item:hover {
+        background: #f1f5f9;
+        border-color: #3B82F6;
+    }
+    
+    .event-link-icon {
+        font-size: 1.2rem;
+        min-width: 24px;
+    }
+    
+    .event-link-text {
+        flex: 1;
+        word-break: break-all;
+    }
+    
+    .event-link-text a {
+        color: #1E40AF;
+        text-decoration: none;
+        font-weight: 500;
+    }
+    
+    .event-link-text a:hover {
+        text-decoration: underline;
+        color: #1E3A8A;
+    }
+    
+    .event-link-badge {
+        background: #3B82F6;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.7rem;
+        font-weight: 600;
+    }
+    
+    .registration-badge {
+        background: #10B981;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.7rem;
+        font-weight: 600;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -933,16 +1003,23 @@ class DatabaseManager:
             
             # Users table (existing)
             cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
+                CREATE TABLE IF NOT EXISTS events (
                     id TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    roll_no TEXT UNIQUE,
-                    department TEXT,
-                    year TEXT,
-                    email TEXT UNIQUE,
-                    username TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL,
-                    role TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    event_type TEXT,
+                    event_date TIMESTAMP,
+                    venue TEXT,
+                    organizer TEXT,
+                    event_link TEXT,  -- NEW: Event URL/website
+                    registration_link TEXT,  -- Registration URL
+                    max_participants INTEGER DEFAULT 100,
+                    current_participants INTEGER DEFAULT 0,
+                    flyer_path TEXT,
+                    created_by TEXT,
+                    created_by_name TEXT,
+                    ai_generated BOOLEAN DEFAULT 0,
+                    status TEXT DEFAULT 'upcoming',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
@@ -1467,7 +1544,7 @@ db = DatabaseManager()
 # EVENT CARD DISPLAY
 # ============================================
 def display_event_card(event, current_user=None):
-    """Display event card with Like, Interested buttons and Registration Link"""
+    """Display event card with Event Link, Registration Link, Like, and Interested buttons"""
     if not event or not event.get('id'):
         return
     
@@ -1541,6 +1618,31 @@ def display_event_card(event, current_user=None):
             with engagement_col2:
                 st.caption(f"⭐ {interested_count} Interested")
             
+            # ============================================
+            # EVENT LINKS SECTION
+            # ============================================
+            event_link = event.get('event_link', '')  # New field for event URL
+            registration_link = event.get('registration_link', '')
+            
+            if event_link or registration_link:
+                st.markdown("### 🔗 Event Links")
+                
+                # Show event link if available
+                if event_link:
+                    st.markdown(f"""
+                    **🌐 Event Page:**  
+                    [Click here to visit event website]({event_link})  
+                    *Official event page with detailed information*
+                    """)
+                
+                # Show registration link if available
+                if registration_link:
+                    st.markdown(f"""
+                    **📝 Registration:**  
+                    [Click here to register]({registration_link})  
+                    *Official registration link*
+                    """)
+            
             # Like and Interested buttons
             if current_user:
                 col_like, col_interested, col_spacer = st.columns([1, 1, 2])
@@ -1584,40 +1686,51 @@ def display_event_card(event, current_user=None):
                     st.caption(desc)
         
         # ============================================
-        # REGISTRATION SECTION - ENHANCED WITH ACTUAL LINK
+        # REGISTRATION SECTION
         # ============================================
         if current_user:
             st.markdown('<div class="registration-section">', unsafe_allow_html=True)
             
             is_registered = db.is_student_registered(event_id, current_user)
-            registration_link = event.get('registration_link', '')
             
             if is_registered:
                 st.success("✅ You are already registered for this event")
                 
-                # Show external link even if registered (for reference)
-                if registration_link:
-                    st.markdown(f"""
-                    **🔗 External Registration Link:**  
-                    [Click here to visit registration page]({registration_link})
-                    """)
-            else:
-                # Check if there's an external registration link
-                if registration_link:
-                    # Show both options: External link + App registration
-                    col_link, col_app = st.columns([1, 1])
+                # Show links for reference
+                if event_link or registration_link:
+                    col_links = st.columns(2)
+                    link_idx = 0
                     
-                    with col_link:
-                        st.markdown("### 📝 Register Externally")
+                    if event_link:
+                        with col_links[link_idx]:
+                            st.markdown(f"""
+                            **🌐 Event Page:**  
+                            [Visit Event]({event_link})
+                            """)
+                        link_idx += 1
+                    
+                    if registration_link:
+                        with col_links[link_idx]:
+                            st.markdown(f"""
+                            **📝 Registration:**  
+                            [Register Here]({registration_link})
+                            """)
+            else:
+                # Show registration options
+                if registration_link:
+                    # Two-column layout for registration options
+                    col_ext, col_app = st.columns([1, 1])
+                    
+                    with col_ext:
+                        st.markdown("### 🌐 **External Registration**")
                         st.markdown(f"""
-                        **Official Registration Link:**  
-                        [🌐 Click here to register on external platform]({registration_link})
+                        **[Click to register externally]({registration_link})**
                         
-                        *Use this link for official registration*
+                        *Use the official registration link*
                         """)
                         
                         # Button to confirm external registration
-                        if st.button("✅ I've Registered via External Link", 
+                        if st.button("✅ I Registered Externally", 
                                    key=f"ext_reg_{event_id}",
                                    use_container_width=True,
                                    type="secondary"):
@@ -1638,15 +1751,14 @@ def display_event_card(event, current_user=None):
                                     st.rerun()
                     
                     with col_app:
-                        st.markdown("### 📱 Register via App")
+                        st.markdown("### 📱 **College App Registration**")
                         st.markdown("""
-                        **Direct Registration:**  
-                        Register directly in our college system
+                        **Register in our system**
                         
-                        *Track your attendance and get certificates*
+                        *Track attendance & get certificates*
                         """)
                         
-                        if st.button("📱 Register via College App", 
+                        if st.button("📱 Register in App", 
                                    key=f"app_reg_{event_id}",
                                    use_container_width=True,
                                    type="primary"):
@@ -1662,17 +1774,13 @@ def display_event_card(event, current_user=None):
                                     'student_dept': student.get('department', 'N/A')
                                 }
                                 if db.add_registration(reg_data):
-                                    st.success("✅ Registered successfully in college system!")
+                                    st.success("✅ Registered in college system!")
                                     st.rerun()
                 else:
-                    # No external link, only app registration
-                    st.markdown("### 📱 Register via College App")
-                    st.markdown("""
-                    **Direct Registration:**  
-                    Register in our college system to track your participation
-                    """)
+                    # Only app registration available
+                    st.markdown("### 📱 **Register via College App**")
                     
-                    if st.button("📱 Register Now", 
+                    if st.button("Register Now", 
                                key=f"reg_{event_id}",
                                use_container_width=True,
                                type="primary"):
@@ -2197,11 +2305,9 @@ def faculty_dashboard():
     elif selected == "Create Event":
         st.header("➕ Create New Event")
         
-        # AI Event Generator tab
         tab1, tab2 = st.tabs(["📝 Manual Entry", "🤖 AI Generator"])
         
         with tab1:
-            # Existing manual event creation form
             with st.form("create_event_form"):
                 col1, col2 = st.columns(2)
                 
@@ -2217,7 +2323,12 @@ def faculty_dashboard():
                 with col2:
                     venue = st.text_input("Venue *")
                     organizer = st.text_input("Organizer *", value="G H Raisoni College")
-                    registration_link = st.text_input("Registration Link")
+                    # NEW: Event link field
+                    event_link = st.text_input("Event Website/URL", 
+                                             placeholder="https://example.com/event-details")
+                    # Existing registration link
+                    registration_link = st.text_input("Registration Link", 
+                                                    placeholder="https://forms.google.com/registration")
                     
                     # Flyer upload
                     st.subheader("Event Flyer (Optional)")
@@ -2262,6 +2373,7 @@ def faculty_dashboard():
                             'event_date': event_datetime.isoformat(),
                             'venue': venue,
                             'organizer': organizer,
+                            'event_link': event_link,  # NEW
                             'registration_link': registration_link,
                             'max_participants': max_participants,
                             'flyer_path': flyer_path,
