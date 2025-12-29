@@ -399,8 +399,12 @@ class AIEventGenerator:
     """Generate structured event data from unstructured text"""
     
     def __init__(self):
-        # Initialize OpenAI client
-        self.api_key = st.secrets.get("OPENAI_API_KEY", "")
+        # Initialize OpenAI client - access secrets here
+        try:
+            self.api_key = st.secrets.get("OPENAI_API_KEY", "")
+        except Exception:
+            self.api_key = ""
+            
         if self.api_key:
             self.client = openai.OpenAI(api_key=self.api_key)
         else:
