@@ -5,6 +5,14 @@ Deployable on Streamlit Cloud - Streamlit Native Version
 """
 
 import streamlit as st
+# Page configuration
+st.set_page_config(
+    page_title="G H Raisoni Event Manager",
+    page_icon="🎓",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
 from datetime import datetime, date, timedelta
 import json
 import os
@@ -22,9 +30,7 @@ from functools import lru_cache
 import time
 import atexit
 import openai
-import os
 from pathlib import Path
-import pandas as pd
 from typing import Dict, List, Tuple, Optional, Any
 
 # Base directory
@@ -296,291 +302,6 @@ class Validators:
         sanitized = sanitized.replace('"', '&quot;').replace("'", '&#x27;')
         
         return sanitized.strip()
-
-
-class ImageProcessor:
-    """Handle image uploads and processing"""
-    
-    def __init__(self, upload_dir="static/uploads"):
-        self.upload_dir = upload_dir
-        self.allowed_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
-        
-        # Create upload directory if it doesn't exist
-        os.makedirs(self.upload_dir, exist_ok=True)
-    
-    def save_uploaded_file(self, uploaded_file, event_id=None):
-        """Save uploaded file and return path"""
-        if uploaded_file is None:
-            return None
-        
-        # Validate file extension
-        file_ext = os.path.splitext(uploaded_file.name)[1].lower()
-        if file_ext not in self.allowed_extensions:
-            st.error(f"Unsupported file type: {file_ext}. Allowed: {', '.join(self.allowed_extensions)}")
-            return None
-        
-        # Generate unique filename
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        if event_id:
-            filename = f"event_{event_id}_{timestamp}{file_ext}"
-        else:
-            filename = f"temp_{timestamp}{file_ext}"
-        
-        file_path = os.path.join(self.upload_dir, filename)
-        
-        # Save file
-        try:
-            with open(file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            
-            # Optimize image if it's too large
-            self._optimize_image(file_path)
-            
-            return file_path
-            
-        except Exception as e:
-            st.error(f"Error saving file: {e}")
-            return None
-    
-    def _optimize_image(self, image_path, max_size=(1200, 1200), quality=85):
-        """Optimize image size and quality"""
-        try:
-            with Image.open(image_path) as img:
-                # Convert to RGB if necessary
-                if img.mode in ('RGBA', 'LA', 'P'):
-                    rgb_img = Image.new('RGB', img.size, (255, 255, 255))
-                    if img.mode == 'P':
-                        img = img.convert('RGBA')
-                    rgb_img.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
-                    img = rgb_img
-                
-                # Resize if too large
-                if img.size[0] > max_size[0] or img.size[1] > max_size[1]:
-                    img.thumbnail(max_size, Image.Resampling.LANCZOS)
-                
-                # Save optimized image
-                img.save(image_path, 'JPEG' if image_path.lower().endswith('.jpg') else 'PNG', 
-                        optimize=True, quality=quality)
-                
-        except Exception as e:
-            st.warning(f"Image optimization failed: {e}")
-    
-    def display_image(self, image_path, width=400):
-        """Display image in Streamlit"""
-        if image_path and os.path.exists(image_path):
-            try:
-                image = Image.open(image_path)
-                st.image(image, width=width, caption="Event Flyer")
-            except Exception as e:
-                st.error(f"Error displaying image: {e}")
-    
-    def delete_image(self, image_path):
-        """Delete image file"""
-        if image_path and os.path.exists(image_path):
-            try:
-                os.remove(image_path)
-                return True
-            except Exception as e:
-                st.error(f"Error deleting image: {e}")
-                return False
-        return True
-    
-    def get_image_url(self, image_path):
-        """Get URL for image (for web display)"""
-        if not image_path:
-            return None
-        
-        # For Streamlit Cloud, we need to serve static files differently
-        # This is a simplified version - in production, you'd use a CDN or proper static file serving
-        if image_path.startswith(self.upload_dir):
-            # Return relative path
-            return f"/{image_path}"
-        
-        return image_path
-
-
-
-class DatabaseManager:
-    """Manages all database operations for the application"""
-    
-    def __init__(self):
-        self._ensure_data_dir()
-    
-    def _ensure_data_dir(self):
-        """Create data directory if it doesn't exist"""
-        DATA_DIR.mkdir(exist_ok=True)
-    
-    def _load_json(self, file_path: Path) -> List[Dict]:
-        """Load JSON data from file"""
-        try:
-            if file_path.exists():
-                with open(file_path, 'r') as f:
-                    return json.load(f)
-            return []
-        except (json.JSONDecodeError, FileNotFoundError):
-            return []
-    
-    def _save_json(self, file_path: Path, data: List[Dict]):
-        """Save data to JSON file"""
-        with open(file_path, 'w') as f:
-            json.dump(data, f, indent=2)
-    
-    # User operations
-    def get_all_users(self) -> List[Dict]:
-        return self._load_json(USERS_FILE)
-    
-    def get_user_by_username(self, username: str) -> Optional[Dict]:
-        users = self.get_all_users()
-        for user in users:
-            if user.get('username') == username:
-                return user
-        return None
-    
-    def save_user(self, user_data: Dict) -> bool:
-        users = self.get_all_users()
-        
-        # Check if username already exists
-        if any(u.get('username') == user_data.get('username') for u in users):
-            return False
-        
-        # Add metadata
-        user_data['user_id'] = str(uuid.uuid4())
-        user_data['created_at'] = datetime.now().isoformat()
-        user_data['is_active'] = True
-        
-        users.append(user_data)
-        self._save_json(USERS_FILE, users)
-        return True
-    
-    def update_user(self, username: str, updates: Dict) -> bool:
-        users = self.get_all_users()
-        for i, user in enumerate(users):
-            if user.get('username') == username:
-                users[i].update(updates)
-                self._save_json(USERS_FILE, users)
-                return True
-        return False
-    
-    # Event operations
-    def get_all_events(self) -> List[Dict]:
-        return self._load_json(EVENTS_FILE)
-    
-    def get_event_by_id(self, event_id: str) -> Optional[Dict]:
-        events = self.get_all_events()
-        for event in events:
-            if event.get('event_id') == event_id:
-                return event
-        return None
-    
-    def save_event(self, event_data: Dict) -> str:
-        events = self.get_all_events()
-        
-        # Generate event ID
-        event_id = str(uuid.uuid4())
-        event_data['event_id'] = event_id
-        event_data['created_at'] = datetime.now().isoformat()
-        event_data['updated_at'] = datetime.now().isoformat()
-        
-        # Initialize engagement metrics
-        event_data.setdefault('likes', [])
-        event_data.setdefault('favorites', [])
-        event_data.setdefault('interested', [])
-        event_data.setdefault('views', 0)
-        
-        events.append(event_data)
-        self._save_json(EVENTS_FILE, events)
-        return event_id
-    
-    def update_event(self, event_id: str, updates: Dict) -> bool:
-        events = self.get_all_events()
-        for i, event in enumerate(events):
-            if event.get('event_id') == event_id:
-                updates['updated_at'] = datetime.now().isoformat()
-                events[i].update(updates)
-                self._save_json(EVENTS_FILE, events)
-                return True
-        return False
-    
-    def delete_event(self, event_id: str) -> bool:
-        events = self.get_all_events()
-        new_events = [e for e in events if e.get('event_id') != event_id]
-        
-        if len(new_events) != len(events):
-            self._save_json(EVENTS_FILE, new_events)
-            return True
-        return False
-    
-    # Registration operations
-    def get_all_registrations(self) -> List[Dict]:
-        return self._load_json(REGISTRATIONS_FILE)
-    
-    def get_registrations_by_event(self, event_id: str) -> List[Dict]:
-        registrations = self.get_all_registrations()
-        return [r for r in registrations if r.get('event_id') == event_id]
-    
-    def get_registrations_by_student(self, username: str) -> List[Dict]:
-        registrations = self.get_all_registrations()
-        return [r for r in registrations if r.get('student_username') == username]
-    
-    def save_registration(self, registration_data: Dict) -> str:
-        registrations = self.get_all_registrations()
-        
-        # Generate registration ID
-        reg_id = str(uuid.uuid4())
-        registration_data['registration_id'] = reg_id
-        registration_data['registered_at'] = datetime.now().isoformat()
-        registration_data.setdefault('status', 'pending')
-        registration_data.setdefault('attendance', 'absent')
-        
-        registrations.append(registration_data)
-        self._save_json(REGISTRATIONS_FILE, registrations)
-        return reg_id
-    
-    def update_registration_status(self, registration_id: str, status: str) -> bool:
-        registrations = self.get_all_registrations()
-        for i, reg in enumerate(registrations):
-            if reg.get('registration_id') == registration_id:
-                registrations[i]['status'] = status
-                registrations[i]['verified_at'] = datetime.now().isoformat()
-                self._save_json(REGISTRATIONS_FILE, registrations)
-                return True
-        return False
-    
-    # Analytics functions
-    def get_event_statistics(self) -> Dict:
-        events = self.get_all_events()
-        registrations = self.get_all_registrations()
-        
-        return {
-            'total_events': len(events),
-            'active_events': len([e for e in events if datetime.fromisoformat(e.get('event_date', '2000-01-01')) > datetime.now()]),
-            'total_registrations': len(registrations),
-            'unique_students': len(set(r.get('student_username') for r in registrations)),
-            'event_types': pd.Series([e.get('event_type', 'Other') for e in events]).value_counts().to_dict()
-        }
-    
-    def get_student_participation(self, username: str) -> Dict:
-        registrations = self.get_registrations_by_student(username)
-        events = self.get_all_events()
-        
-        student_events = []
-        for reg in registrations:
-            event = self.get_event_by_id(reg['event_id'])
-            if event:
-                student_events.append({
-                    'event_title': event['title'],
-                    'event_date': event.get('event_date'),
-                    'registration_status': reg.get('status'),
-                    'attendance': reg.get('attendance')
-                })
-        
-        return {
-            'total_registered': len(registrations),
-            'events_attended': len([r for r in registrations if r.get('attendance') == 'present']),
-            'events_list': student_events
-      }
-
-
 
 
 class AuthManager:
@@ -885,14 +606,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-# Page configuration
-st.set_page_config(
-    page_title="G H Raisoni Event Manager",
-    page_icon="🎓",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
 
 # ============================================
 # ENHANCED CUSTOM CSS
