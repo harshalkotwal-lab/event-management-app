@@ -662,21 +662,39 @@ st.markdown("""
     .event-card {
         border: 1px solid #E5E7EB;
         border-radius: 12px;
-        padding: 1.25rem;
-        margin: 0.75rem 0;
-        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-        transition: all 0.3s ease;
+        padding: 0.75rem;
+        margin: 0.5rem 0;
+        background: white;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        transition: all 0.2s ease;
         position: relative;
         overflow: hidden;
-        border-left: 4px solid #3B82F6;
+        border-left: 3px solid #3B82F6;
     }
     
     .event-card:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 8px 25px rgba(59, 130, 246, 0.15);
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
         border-color: #2563EB;
     }
+
+    .card-title {
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: #1E293B;
+        margin-bottom: 0.25rem;
+        line-height: 1.3;
+    }
+
+    .registration-section {
+        background: linear-gradient(135deg, #F0F9FF 0%, #E0F2FE 100%);
+        padding: 0.5rem;
+        border-radius: 6px;
+        margin-top: 0.5rem;
+        border-left: 3px solid #3B82F6;
+        font-size: 0.85rem;
+    }
+
     
     .role-badge {
         display: inline-block;
@@ -695,14 +713,14 @@ st.markdown("""
     .ai-badge {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-size: 0.75rem;
+        padding: 0.15rem 0.5rem;
+        border-radius: 10px;
+        font-size: 0.65rem;
         font-weight: 700;
         display: inline-flex;
         align-items: center;
-        gap: 0.25rem;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        gap: 0.2rem;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
     }
     
     .social-container {
@@ -757,22 +775,19 @@ st.markdown("""
     }
     
     .status-badge {
-        padding: 0.2rem 0.6rem;
-        border-radius: 12px;
-        font-size: 0.75rem;
+        padding: 0.15rem 0.5rem;
+        border-radius: 10px;
+        font-size: 0.7rem;
         font-weight: 600;
+        display: inline-block;
     }
+
+    
     
     .status-upcoming { background: #D1FAE5; color: #065F46; }
     .status-ongoing { background: #FEF3C7; color: #92400E; }
     .status-past { background: #FEE2E2; color: #DC2626; }
     
-    .card-title {
-        font-size: 1.3rem;
-        font-weight: 700;
-        color: #1E293B;
-        margin-bottom: 0.5rem;
-    }
     
     .card-description {
         color: #475569;
@@ -1180,7 +1195,7 @@ db = DatabaseManager()
 # EVENT CARD DISPLAY
 # ============================================
 def display_event_card(event, current_user=None):
-    """Display event card"""
+    """Display event card in compact horizontal layout"""
     if not event or not event.get('id'):
         return
     
@@ -1189,92 +1204,83 @@ def display_event_card(event, current_user=None):
     with st.container():
         st.markdown('<div class="event-card">', unsafe_allow_html=True)
         
-        # Header
-        col_title, col_badge = st.columns([3, 1])
-        with col_title:
-            title = event.get('title', 'Untitled Event')
-            st.markdown(f'<div class="card-title">{title}</div>', unsafe_allow_html=True)
-        with col_badge:
-            if event.get('ai_generated'):
-                st.markdown('<span class="ai-badge">🤖 AI Generated</span>', unsafe_allow_html=True)
+        # Create horizontal layout
+        col_img, col_info = st.columns([1, 3])
         
-        # Status and date
-        event_date = event.get('event_date')
-        st.markdown(get_event_status(event_date), unsafe_allow_html=True)
-        
-        # Details
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.caption(f"📅 {format_date(event_date)}")
-        with col2:
-            st.caption(f"📍 {event.get('venue', 'N/A')}")
-        with col3:
-            st.caption(f"🏷️ {event.get('event_type', 'N/A')}")
-        with col4:
-            st.caption(f"👨‍🏫 {event.get('organizer', 'N/A')}")
-        
-        # Description
-        desc = event.get('description', '')
-        if desc:
-            if len(desc) > 150:
-                with st.expander("📝 Description"):
-                    st.write(desc)
-                st.caption(f"{desc[:150]}...")
+        with col_img:
+            # Display event flyer if available
+            flyer = event.get('flyer_path')
+            if flyer and flyer.startswith('data:image'):
+                try:
+                    st.image(flyer, use_column_width=True)
+                except:
+                    # Fallback if image fails to load
+                    st.markdown('<div style="height: 120px; background: #f0f0f0; display: flex; align-items: center; justify-content: center; border-radius: 8px;">📷</div>', 
+                               unsafe_allow_html=True)
             else:
-                st.caption(desc)
+                # Placeholder for no image
+                st.markdown('<div style="height: 120px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; border-radius: 8px; color: white; font-size: 24px;">🎯</div>', 
+                           unsafe_allow_html=True)
         
-        # Flyer
-        flyer = event.get('flyer_path')
-        if flyer and flyer.startswith('data:image'):
-            try:
-                st.image(flyer, width=200, use_column_width=True)
-            except:
-                pass
+        with col_info:
+            # Header with title and badges
+            col_title, col_badge = st.columns([3, 1])
+            with col_title:
+                title = event.get('title', 'Untitled Event')
+                st.markdown(f'<div class="card-title" style="font-size: 1.1rem; margin-bottom: 0.25rem;">{title}</div>', 
+                           unsafe_allow_html=True)
+            with col_badge:
+                if event.get('ai_generated'):
+                    st.markdown('<span class="ai-badge" style="font-size: 0.7rem;">🤖 AI</span>', 
+                               unsafe_allow_html=True)
+            
+            # Status and date on same line
+            col_status, col_date = st.columns([1, 2])
+            with col_status:
+                event_date = event.get('event_date')
+                st.markdown(get_event_status(event_date), unsafe_allow_html=True)
+            with col_date:
+                st.caption(f"📅 {format_date(event_date)}")
+            
+            # Compact details in grid
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.caption(f"📍 {event.get('venue', 'TBD')[:15]}{'...' if len(event.get('venue', '')) > 15 else ''}")
+            with col2:
+                st.caption(f"🏷️ {event.get('event_type', 'Event')}")
+            with col3:
+                st.caption(f"👥 {event.get('current_participants', 0)}/{event.get('max_participants', 100)}")
+            
+            # Description preview (truncated)
+            desc = event.get('description', '')
+            if desc:
+                if len(desc) > 100:
+                    with st.expander("📝 Description", expanded=False):
+                        st.write(desc)
+                    st.caption(f"{desc[:100]}...")
+                else:
+                    st.caption(desc[:100])
         
-        # Registration Section
+        # Registration Section (full width below)
         if current_user:
-            st.markdown('<div class="registration-section">', unsafe_allow_html=True)
+            st.markdown('<div class="registration-section" style="margin-top: 0.5rem; padding: 0.5rem;">', unsafe_allow_html=True)
             
             is_registered = db.is_student_registered(event_id, current_user)
             
             if is_registered:
-                st.success("✅ You are registered for this event")
+                st.success("✅ Registered", icon="✅")
             else:
                 reg_link = event.get('registration_link', '')
                 
                 if reg_link:
-                    col_link, col_app = st.columns(2)
+                    col_reg1, col_reg2 = st.columns(2)
                     
-                    with col_link:
-                        st.markdown(f"[🔗 **Register via Official Link**]({reg_link})", 
-                                  unsafe_allow_html=True)
-                        st.caption("Click to register on external platform")
-                        
-                        if st.button("✅ I've Registered via Link", 
-                                   key=f"link_reg_{event_id}",
-                                   use_container_width=True):
-                            student = db.get_user(current_user)
-                            if student:
-                                reg_data = {
-                                    'id': str(uuid.uuid4()),
-                                    'event_id': event_id,
-                                    'event_title': event.get('title'),
-                                    'student_username': current_user,
-                                    'student_name': student.get('name', current_user),
-                                    'student_roll': student.get('roll_no', 'N/A'),
-                                    'student_dept': student.get('department', 'N/A'),
-                                    'status': 'confirmed'
-                                }
-                                if db.add_registration(reg_data):
-                                    st.success("✅ Registration recorded successfully!")
-                                    st.rerun()
+                    with col_reg1:
+                        st.markdown(f"[🔗 **External Link**]({reg_link})", unsafe_allow_html=True)
                     
-                    with col_app:
-                        st.markdown("**Register via App**")
-                        st.caption("Register directly in our system")
-                        
+                    with col_reg2:
                         if st.button("📱 Register via App", 
-                                   key=f"app_reg_{event_id}",
+                                   key=f"reg_app_{event_id}",
                                    use_container_width=True,
                                    type="primary"):
                             student = db.get_user(current_user)
@@ -1289,13 +1295,10 @@ def display_event_card(event, current_user=None):
                                     'student_dept': student.get('department', 'N/A')
                                 }
                                 if db.add_registration(reg_data):
-                                    st.success("✅ Registration recorded successfully!")
+                                    st.success("✅ Registered!")
                                     st.rerun()
                 else:
-                    st.markdown("**Register via App**")
-                    st.caption("Register directly in our system")
-                    
-                    if st.button("📱 Register for Event", 
+                    if st.button("📱 Register", 
                                key=f"reg_{event_id}",
                                use_container_width=True,
                                type="primary"):
@@ -1311,14 +1314,14 @@ def display_event_card(event, current_user=None):
                                 'student_dept': student.get('department', 'N/A')
                             }
                             if db.add_registration(reg_data):
-                                st.success("✅ Registration recorded successfully!")
+                                st.success("✅ Registered!")
                                 st.rerun()
             
             st.markdown('</div>', unsafe_allow_html=True)
         
-        # Creator info
+        # Creator info (small and subtle)
         created_by = event.get('created_by_name', 'Unknown')
-        st.caption(f"Created by: {created_by}")
+        st.caption(f"👤 {created_by}", help=f"Event created by {created_by}")
         
         st.markdown('</div>', unsafe_allow_html=True)
 
