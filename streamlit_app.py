@@ -397,34 +397,53 @@ class AuthManager:
 # ============================================
 class AIEventGenerator:
     """Generate structured event data from unstructured text"""
-        
+    
     def __init__(self):
         # Initialize OpenAI client
-        self.api_key = ""
         self.client = None
         
         try:
-            # Try to get API key from Streamlit secrets
-            self.api_key = st.secrets.get("OPENAI_API_KEY", "")
+            # Check if secrets are available
+            if not hasattr(st, 'secrets'):
+                return
+                
+            # Get API key
+            api_key = st.secrets.get("OPENAI_API_KEY", "")
             
-            # Also check for other common secret names
-            if not self.api_key:
-                self.api_key = st.secrets.get("OPENAI_API_KEY", "")
+            if not api_key:
+                return
+                
+            if not api_key.startswith("sk-"):
+                return
             
-            # Check if API key is valid
-            if self.api_key and self.api_key.startswith("sk-"):
-                self.client = openai.OpenAI(api_key=self.api_key)
-                st.success("✅ OpenAI API configured successfully")
-            elif self.api_key:
-                st.warning(f"Invalid OpenAI API key format. Starting with: {self.api_key[:10]}...")
+            # Try different initialization methods for compatibility
+            try:
+                # Method 1: Newer versions (>= 1.0.0)
+                import openai
+                self.client = openai.OpenAI(api_key=api_key)
+                
+            except TypeError as e:
+                if "proxies" in str(e):
+                    # Method 2: Older versions (< 1.0.0)
+                    try:
+                        import openai
+                        openai.api_key = api_key
+                        # For older versions, we need to use the old API style
+                        self.client = openai  # This will use the global api_key
+                    except:
+                        self.client = None
+                else:
+                    self.client = None
+            except Exception as e:
                 self.client = None
+            
+            if self.client:
+                st.success("✅ OpenAI client initialized")
             else:
-                self.client = None
-                st.warning("OpenAI API key not configured. AI features will use regex fallback.")
+                st.warning("OpenAI API configured but using regex fallback due to compatibility issues")
                 
         except Exception as e:
             self.client = None
-            st.warning(f"Could not load OpenAI API key: {e}. Using regex fallback.")
     
     def extract_event_info(self, text):
         """Extract event information from text using AI or regex fallback"""
@@ -441,53 +460,88 @@ class AIEventGenerator:
     
     def _extract_with_openai(self, text):
         """Use OpenAI to extract structured event data"""
-        prompt = f"""
-        Extract event information from the following text and return as JSON with these fields:
-        - title: Event title (string)
-        - description: Detailed event description (string)
-        - event_type: Type of event (workshop, hackathon, competition, bootcamp, seminar, conference, webinar)
-        - event_date: Event date in YYYY-MM-DD format (extract from text or use reasonable default)
-        - venue: Event venue/location (string)
-        - organizer: Event organizer (string)
-        - registration_link: Registration URL if mentioned (string or null)
-        - max_participants: Maximum participants if mentioned (integer or 100)
-        
-        Text: {text}
-        
-        Return only valid JSON, no other text.
-        """
-        
-        response = self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are an expert at extracting event information from text."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            max_tokens=500
-        )
-        
-        # Parse response
-        result_text = response.choices[0].message.content.strip()
-        
-        # Clean response (remove markdown code blocks if present)
-        result_text = re.sub(r'```json\s*', '', result_text)
-        result_text = re.sub(r'\s*```', '', result_text)
-        
         try:
-            event_data = json.loads(result_text)
+            # Check if we're using new or old OpenAI API
+            import openai
             
-            # Add AI metadata
-            event_data['ai_generated'] = True
-            event_data['ai_prompt'] = text
-            event_data['ai_metadata'] = {
-                'model': 'gpt-3.5-turbo',
-                'extracted_at': datetime.utcnow().isoformat()
-            }
+            # New API (>= 1.0.0)
+            if hasattr(self.client, 'chat') and hasattr(self.client.chat, 'completions'):
+                response = self.client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "You are an expert at extracting event information from text."},
+                        {"role": "user", "content": f"""
+                        Extract event information from the following text and return as JSON with these fields:
+                        - title: Event title (string)
+                        - description: Detailed event description (string)
+                        - event_type: Type of event (workshop, hackathon, competition, bootcamp, seminar, conference, webinar)
+                        - event_date: Event date in YYYY-MM-DD format (extract from text or use reasonable default)
+                        - venue: Event venue/location (string)
+                        - organizer: Event organizer (string)
+                        - registration_link: Registration URL if mentioned (string or null)
+                        - max_participants: Maximum participants if mentioned (integer or 100)
+                        
+                        Text: {text}
+                        
+                        Return only valid JSON, no other text.
+                        """}
+                    ],
+                    temperature=0.1,
+                    max_tokens=500
+                )
+                
+                result_text = response.choices[0].message.content.strip()
+                
+            # Old API (< 1.0.0)
+            else:
+                response = openai.ChatCompletion.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": "You are an expert at extracting event information from text."},
+                        {"role": "user", "content": f"""
+                        Extract event information from the following text and return as JSON with these fields:
+                        - title: Event title (string)
+                        - description: Detailed event description (string)
+                        - event_type: Type of event (workshop, hackathon, competition, bootcamp, seminar, conference, webinar)
+                        - event_date: Event date in YYYY-MM-DD format (extract from text or use reasonable default)
+                        - venue: Event venue/location (string)
+                        - organizer: Event organizer (string)
+                        - registration_link: Registration URL if mentioned (string or null)
+                        - max_participants: Maximum participants if mentioned (integer or 100)
+                        
+                        Text: {text}
+                        
+                        Return only valid JSON, no other text.
+                        """}
+                    ],
+                    temperature=0.1,
+                    max_tokens=500
+                )
+                
+                result_text = response.choices[0].message.content.strip()
             
-            return event_data
-        except json.JSONDecodeError:
-            st.error("Failed to parse AI response")
+            # Parse response
+            result_text = re.sub(r'```json\s*', '', result_text)
+            result_text = re.sub(r'\s*```', '', result_text)
+            
+            try:
+                event_data = json.loads(result_text)
+                
+                # Add AI metadata
+                event_data['ai_generated'] = True
+                event_data['ai_prompt'] = text
+                event_data['ai_metadata'] = {
+                    'model': 'gpt-3.5-turbo',
+                    'extracted_at': datetime.utcnow().isoformat()
+                }
+                
+                return event_data
+            except json.JSONDecodeError:
+                st.error("Failed to parse AI response")
+                return self._extract_with_regex(text)
+                
+        except Exception as e:
+            st.warning(f"OpenAI API error: {e}")
             return self._extract_with_regex(text)
     
     def _extract_with_regex(self, text):
