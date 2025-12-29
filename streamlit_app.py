@@ -396,159 +396,124 @@ class AuthManager:
 # AI EVENT GENERATOR CLASS
 # ============================================
 class AIEventGenerator:
-    """Generate structured event data from unstructured text"""
+    """Generate structured event data from unstructured text - Compatible with OpenAI v0.28"""
     
     def __init__(self):
         # Initialize OpenAI client
-        self.client = None
+        self.api_key = None
+        self.is_configured = False
         
         try:
-            # Check if secrets are available
-            if not hasattr(st, 'secrets'):
-                return
+            # Get API key from secrets
+            if hasattr(st, 'secrets'):
+                # Try different possible secret names
+                if 'OPENAI_API_KEY' in st.secrets:
+                    self.api_key = st.secrets["OPENAI_API_KEY"]
+                elif 'openai' in st.secrets and 'api_key' in st.secrets.openai:
+                    self.api_key = st.secrets.openai.api_key
                 
-            # Get API key
-            api_key = st.secrets.get("OPENAI_API_KEY", "")
-            
-            if not api_key:
-                return
-                
-            if not api_key.startswith("sk-"):
-                return
-            
-            # Try different initialization methods for compatibility
-            try:
-                # Method 1: Newer versions (>= 1.0.0)
-                import openai
-                self.client = openai.OpenAI(api_key=api_key)
-                
-            except TypeError as e:
-                if "proxies" in str(e):
-                    # Method 2: Older versions (< 1.0.0)
-                    try:
-                        import openai
-                        openai.api_key = api_key
-                        # For older versions, we need to use the old API style
-                        self.client = openai  # This will use the global api_key
-                    except:
-                        self.client = None
+                if self.api_key and self.api_key.startswith("sk-"):
+                    import openai
+                    # For OpenAI v0.28.x, set the API key directly
+                    openai.api_key = self.api_key
+                    self.is_configured = True
+                    st.success("✅ OpenAI configured successfully")
+                elif self.api_key:
+                    st.warning(f"⚠️ Invalid OpenAI API key format")
+                    self.is_configured = False
                 else:
-                    self.client = None
-            except Exception as e:
-                self.client = None
-            
-            if self.client:
-                st.success("✅ OpenAI client initialized")
+                    st.warning("⚠️ OpenAI API key not found in secrets")
+                    self.is_configured = False
             else:
-                st.warning("OpenAI API configured but using regex fallback due to compatibility issues")
+                st.warning("⚠️ Streamlit secrets not available")
+                self.is_configured = False
                 
         except Exception as e:
-            self.client = None
+            st.warning(f"⚠️ Could not initialize OpenAI: {str(e)[:100]}")
+            self.is_configured = False
     
     def extract_event_info(self, text):
         """Extract event information from text using AI or regex fallback"""
         
         # Try OpenAI first if available
-        if self.client:
+        if self.is_configured and self.api_key:
             try:
-                return self._extract_with_openai(text)
+                with st.spinner("🤖 AI is processing your event..."):
+                    return self._extract_with_openai(text)
             except Exception as e:
-                st.warning(f"OpenAI extraction failed: {e}. Using regex fallback.")
+                st.warning(f"AI extraction failed: {str(e)[:100]}. Using regex fallback.")
         
         # Fallback to regex extraction
         return self._extract_with_regex(text)
     
     def _extract_with_openai(self, text):
         """Use OpenAI to extract structured event data"""
+        import openai
+        
+        prompt = f"""
+        Extract event information from the following text and return as JSON with these exact field names:
+        - title: Event title (string)
+        - description: Detailed event description (string, 3-5 sentences)
+        - event_type: Type of event (choose from: workshop, hackathon, competition, bootcamp, seminar, conference, webinar)
+        - event_date: Event date in YYYY-MM-DD format (extract from text or use next Friday)
+        - venue: Event venue/location (string)
+        - organizer: Event organizer (string)
+        - registration_link: Registration URL if mentioned (string or null)
+        - max_participants: Maximum participants if mentioned (integer or 100)
+        
+        Text: {text}
+        
+        Return ONLY valid JSON, no other text.
+        """
+        
         try:
-            # Check if we're using new or old OpenAI API
-            import openai
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are an expert at extracting structured event information from text. Always return valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                max_tokens=600
+            )
             
-            # New API (>= 1.0.0)
-            if hasattr(self.client, 'chat') and hasattr(self.client.chat, 'completions'):
-                response = self.client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": "You are an expert at extracting event information from text."},
-                        {"role": "user", "content": f"""
-                        Extract event information from the following text and return as JSON with these fields:
-                        - title: Event title (string)
-                        - description: Detailed event description (string)
-                        - event_type: Type of event (workshop, hackathon, competition, bootcamp, seminar, conference, webinar)
-                        - event_date: Event date in YYYY-MM-DD format (extract from text or use reasonable default)
-                        - venue: Event venue/location (string)
-                        - organizer: Event organizer (string)
-                        - registration_link: Registration URL if mentioned (string or null)
-                        - max_participants: Maximum participants if mentioned (integer or 100)
-                        
-                        Text: {text}
-                        
-                        Return only valid JSON, no other text.
-                        """}
-                    ],
-                    temperature=0.1,
-                    max_tokens=500
-                )
-                
-                result_text = response.choices[0].message.content.strip()
-                
-            # Old API (< 1.0.0)
-            else:
-                response = openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": "You are an expert at extracting event information from text."},
-                        {"role": "user", "content": f"""
-                        Extract event information from the following text and return as JSON with these fields:
-                        - title: Event title (string)
-                        - description: Detailed event description (string)
-                        - event_type: Type of event (workshop, hackathon, competition, bootcamp, seminar, conference, webinar)
-                        - event_date: Event date in YYYY-MM-DD format (extract from text or use reasonable default)
-                        - venue: Event venue/location (string)
-                        - organizer: Event organizer (string)
-                        - registration_link: Registration URL if mentioned (string or null)
-                        - max_participants: Maximum participants if mentioned (integer or 100)
-                        
-                        Text: {text}
-                        
-                        Return only valid JSON, no other text.
-                        """}
-                    ],
-                    temperature=0.1,
-                    max_tokens=500
-                )
-                
-                result_text = response.choices[0].message.content.strip()
+            result_text = response.choices[0].message.content.strip()
             
-            # Parse response
+            # Clean response (remove markdown code blocks if present)
             result_text = re.sub(r'```json\s*', '', result_text)
             result_text = re.sub(r'\s*```', '', result_text)
+            result_text = re.sub(r'^json\s*', '', result_text, flags=re.IGNORECASE)
             
-            try:
-                event_data = json.loads(result_text)
-                
-                # Add AI metadata
-                event_data['ai_generated'] = True
-                event_data['ai_prompt'] = text
-                event_data['ai_metadata'] = {
-                    'model': 'gpt-3.5-turbo',
-                    'extracted_at': datetime.utcnow().isoformat()
-                }
-                
-                return event_data
-            except json.JSONDecodeError:
-                st.error("Failed to parse AI response")
-                return self._extract_with_regex(text)
-                
+            # Parse JSON
+            event_data = json.loads(result_text)
+            
+            # Validate required fields
+            required_fields = ['title', 'description', 'event_type', 'event_date', 'venue', 'organizer']
+            for field in required_fields:
+                if field not in event_data:
+                    event_data[field] = ""
+            
+            # Add AI metadata
+            event_data['ai_generated'] = True
+            event_data['ai_prompt'] = text
+            event_data['ai_extracted_at'] = datetime.now().isoformat()
+            
+            return event_data
+            
+        except json.JSONDecodeError as e:
+            st.error(f"Failed to parse AI response as JSON: {str(e)[:100]}")
+            # Show the raw response for debugging
+            st.code(f"Raw AI response: {result_text[:500]}...")
+            return self._extract_with_regex(text)
         except Exception as e:
-            st.warning(f"OpenAI API error: {e}")
+            st.error(f"OpenAI API error: {str(e)[:100]}")
             return self._extract_with_regex(text)
     
     def _extract_with_regex(self, text):
         """Fallback regex-based extraction"""
         event_data = {
             'title': 'New Event',
-            'description': text[:200] + '...' if len(text) > 200 else text,
+            'description': text[:300] + '...' if len(text) > 300 else text,
             'event_type': 'workshop',
             'event_date': (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d'),
             'venue': 'G H Raisoni College',
@@ -560,15 +525,17 @@ class AIEventGenerator:
         }
         
         # Try to extract title (first line or sentence)
-        lines = text.split('\n')
+        lines = text.strip().split('\n')
         if lines and lines[0].strip():
-            event_data['title'] = lines[0].strip()[:100]
+            first_line = lines[0].strip()
+            if len(first_line) < 100:  # Reasonable title length
+                event_data['title'] = first_line
         
         # Try to extract date patterns
         date_patterns = [
             r'(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})',  # DD-MM-YYYY
             r'(\d{2,4}[-/]\d{1,2}[-/]\d{1,2})',  # YYYY-MM-DD
-            r'(?:on|date|Date)[:\s]*(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})',
+            r'(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})',
         ]
         
         for pattern in date_patterns:
@@ -578,25 +545,25 @@ class AIEventGenerator:
                 break
         
         # Try to extract venue
-        venue_keywords = ['at', 'venue', 'location', 'place']
+        venue_keywords = ['at', 'venue', 'location', 'place', 'hall', 'room']
         for keyword in venue_keywords:
-            pattern = rf'{keyword}[:\s]*([^\n.,;]+)'
+            pattern = rf'{keyword}[:\s]*([^.\n,;]{5,50})'
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 event_data['venue'] = match.group(1).strip()
                 break
         
         # Try to extract organizer
-        organizer_keywords = ['by', 'organizer', 'organized by', 'conducted by']
+        organizer_keywords = ['by', 'organizer', 'organized by', 'conducted by', 'hosted by']
         for keyword in organizer_keywords:
-            pattern = rf'{keyword}[:\s]*([^\n.,;]+)'
+            pattern = rf'{keyword}[:\s]*([^.\n,;]{5,50})'
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 event_data['organizer'] = match.group(1).strip()
                 break
         
         # Try to extract URLs (registration links)
-        url_pattern = r'https?://[^\s]+'
+        url_pattern = r'https?://[^\s<>"\'()]+'
         urls = re.findall(url_pattern, text)
         if urls:
             event_data['registration_link'] = urls[0]
@@ -1671,6 +1638,34 @@ def faculty_dashboard():
     st.sidebar.markdown(f"**User:** {st.session_state.name}")
     display_role_badge('faculty')
     
+    # Debug section in sidebar
+    with st.sidebar.expander("🔧 Debug OpenAI"):
+        if st.button("Test OpenAI Connection"):
+            try:
+                import openai
+                st.write(f"OpenAI version: {openai.__version__}")
+                
+                if hasattr(st, 'secrets'):
+                    if 'OPENAI_API_KEY' in st.secrets:
+                        api_key = st.secrets["OPENAI_API_KEY"]
+                        st.write(f"API key found: {api_key[:10]}...")
+                        
+                        # Test the API
+                        openai.api_key = api_key
+                        test_response = openai.ChatCompletion.create(
+                            model="gpt-3.5-turbo",
+                            messages=[{"role": "user", "content": "Say 'Hello'"}],
+                            max_tokens=10
+                        )
+                        st.success("✅ OpenAI connection successful!")
+                        st.write(f"Response: {test_response.choices[0].message.content}")
+                    else:
+                        st.error("OPENAI_API_KEY not found in secrets")
+                else:
+                    st.error("Secrets not available")
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+        
     # Navigation
     with st.sidebar:
         st.markdown("### Navigation")
@@ -1810,26 +1805,43 @@ def faculty_dashboard():
             3. Review and edit the generated event
             4. Click "Create Event" to save
             """)
-            
-            # Initialize AI Event Generator
-            ai_generator = AIEventGenerator()
-            
+    
             # Text input for AI processing
             event_text = st.text_area("Paste event text here:", 
-                                     placeholder="Example: Join us for a Python Workshop on 15th Dec 2023 at Seminar Hall. Organized by CSE Department...",
-                                     height=200)
-            
-            if st.button("🤖 Generate Event with AI", use_container_width=True, type="primary"):
+                             placeholder="Example: Join us for a Python Workshop on 15th Dec 2023 at Seminar Hall. Organized by CSE Department...",
+                             height=200,
+                             key="ai_text_input")
+    
+            if st.button("🤖 Generate Event with AI", use_container_width=True, type="primary", key="ai_generate_btn"):
                 if event_text:
-                    with st.spinner("AI is processing your event..."):
-                        # Extract event info using AI
-                        event_data = ai_generator.extract_event_info(event_text)
-                        
-                        # Store in session state for editing
-                        st.session_state.ai_generated_event = event_data
-                        
-                        # Display generated event
-                        st.success("✅ Event details extracted successfully!")
+                    # Initialize AI Event Generator
+                    ai_generator = AIEventGenerator()
+            
+                    # Extract event info using AI
+                    event_data = ai_generator.extract_event_info(event_text)
+            
+                    # Store in session state for editing
+                    st.session_state.ai_generated_event = event_data
+            
+                    # Show success message
+                    if event_data.get('ai_generated'):
+                        st.success("✅ Event details extracted successfully using AI!")
+                    else:
+                        st.info("⚠️ Using regex fallback for event extraction")
+            
+                    # Display preview
+                    st.subheader("📋 Generated Event Preview")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**Title:** {event_data.get('title')}")
+                        st.write(f"**Type:** {event_data.get('event_type')}")
+                        st.write(f"**Date:** {event_data.get('event_date')}")
+                    with col2:
+                        st.write(f"**Venue:** {event_data.get('venue')}")
+                        st.write(f"**Organizer:** {event_data.get('organizer')}")
+            
+                    with st.expander("📝 Description Preview"):
+                        st.write(event_data.get('description'))
                 else:
                     st.error("Please paste some event text first")
             
