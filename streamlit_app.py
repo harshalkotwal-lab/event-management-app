@@ -1442,63 +1442,63 @@ st.markdown("""
         border: 1px solid rgba(255,255,255,0.2);
     }
     
-    /* Compact Event Card */
-    .event-card-compact {
+    /* Improved Event Card */
+    .event-card {
         border: 1px solid #E5E7EB;
-        border-radius: 10px;
-        padding: 12px;
-        margin: 8px 0;
+        border-radius: 12px;
+        padding: 16px;
+        margin: 10px 0;
         background: white;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
-        transition: all 0.2s ease;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        transition: all 0.3s ease;
         border-left: 4px solid #3B82F6;
         position: relative;
         overflow: hidden;
     }
     
-    .event-card-compact:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+    .event-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 24px rgba(59, 130, 246, 0.15);
         border-color: #2563EB;
     }
     
-    .event-card-compact::before {
+    .event-card::before {
         content: '';
         position: absolute;
         top: 0;
         left: 0;
         right: 0;
-        height: 3px;
+        height: 4px;
         background: linear-gradient(90deg, #3B82F6, #8B5CF6);
     }
     
-    .card-title-compact {
-        font-size: 1.1rem;
+    .card-title {
+        font-size: 1.2rem;
         font-weight: 700;
         color: #1E293B;
-        margin-bottom: 4px;
-        line-height: 1.2;
+        margin-bottom: 6px;
+        line-height: 1.3;
     }
 
-    .registration-section-compact {
+    .registration-section {
         background: linear-gradient(135deg, #F0F9FF 0%, #E0F2FE 100%);
-        padding: 6px;
+        padding: 8px;
         border-radius: 6px;
-        margin-top: 6px;
-        border-left: 2px solid #3B82F6;
-        font-size: 0.85rem;
+        margin-top: 8px;
+        border-left: 3px solid #3B82F6;
+        font-size: 0.9rem;
     }
     
     .role-badge {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        padding: 4px 10px;
-        border-radius: 18px;
-        font-size: 0.8rem;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.85rem;
         font-weight: 700;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        border: 1px solid transparent;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border: 2px solid transparent;
     }
     
     .admin-badge {
@@ -1519,18 +1519,18 @@ st.markdown("""
         border-color: #6EE7B7;
     }
     
-    .mentor-badge-compact {
+    .mentor-badge {
         background: linear-gradient(135deg, #8B5CF6 0%, #A855F7 100%);
         color: white;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: 600;
+        padding: 0.3rem 0.8rem;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 700;
         display: inline-flex;
         align-items: center;
-        gap: 4px;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-        margin: 2px 0;
+        gap: 0.5rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        margin: 0.5rem 0;
     }
     
     .ai-badge {
@@ -1546,33 +1546,43 @@ st.markdown("""
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
     }
     
+    .social-container {
+        display: flex;
+        gap: 0.5rem;
+        margin: 1rem 0;
+        padding: 0.75rem;
+        background: #f8fafc;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+    }
+    
     .metric-card {
         background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-        border-radius: 10px;
-        padding: 1rem;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+        border-radius: 12px;
+        padding: 1.25rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
         border: 1px solid #E5E7EB;
         text-align: center;
-        transition: transform 0.2s ease;
+        transition: transform 0.3s ease;
     }
     
     .metric-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 3px 8px rgba(0, 0, 0, 0.08);
+        transform: translateY(-3px);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
     }
     
     .metric-value {
-        font-size: 1.8rem;
+        font-size: 2.2rem;
         font-weight: 800;
         background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        margin: 0.2rem 0;
+        margin: 0.3rem 0;
     }
     
     .metric-label {
         color: #64748b;
-        font-size: 0.8rem;
+        font-size: 0.85rem;
         text-transform: uppercase;
         letter-spacing: 0.05em;
         font-weight: 600;
@@ -1581,13 +1591,13 @@ st.markdown("""
     .status-badge {
         display: inline-flex;
         align-items: center;
-        gap: 4px;
-        padding: 3px 10px;
-        border-radius: 16px;
-        font-size: 0.8rem;
+        gap: 6px;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 0.85rem;
         font-weight: 600;
         text-transform: uppercase;
-        letter-spacing: 0.3px;
+        letter-spacing: 0.5px;
     }
     
     .status-upcoming {
@@ -1608,29 +1618,36 @@ st.markdown("""
         border: 1px solid #FECACA;
     }
     
-    .card-description-compact {
+    .card-description {
         color: #475569;
-        font-size: 0.9rem;
-        line-height: 1.4;
-        margin: 0.5rem 0;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        margin: 0.75rem 0;
+    }
+    
+    .filter-row {
+        background: #f8fafc;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-bottom: 1.5rem;
+        border: 1px solid #e2e8f0;
     }
     
     .nav-button {
         width: 100%;
-        margin: 0.2rem 0;
-        padding: 0.6rem;
+        margin: 0.25rem 0;
+        padding: 0.75rem;
         border-radius: 8px;
         border: 1px solid #e2e8f0;
         background: white;
         text-align: left;
         cursor: pointer;
         transition: all 0.2s;
-        font-size: 0.9rem;
     }
     
     .nav-button:hover {
         background: #f1f5f9;
-        transform: translateX(3px);
+        transform: translateX(4px);
     }
     
     .nav-button.active {
@@ -1640,40 +1657,159 @@ st.markdown("""
         font-weight: 600;
     }
 
-    /* Compact engagement buttons */
-    .engagement-button-compact {
-        font-size: 0.85rem;
-        padding: 4px 10px;
+    /* Engagement buttons - smaller */
+    .engagement-button {
         transition: all 0.2s ease;
+        font-size: 0.85rem !important;
+        padding: 0.4rem 0.8rem !important;
+        min-height: auto !important;
     }
     
-    /* Compact mentor info */
-    .mentor-info-compact {
+    .engagement-button:hover {
+        transform: scale(1.05);
+    }
+    
+    /* Liked state */
+    .liked-button {
+        background: linear-gradient(135deg, #FF6B6B 0%, #FF8E53 100%) !important;
+        color: white !important;
+    }
+    
+    /* Interested state */
+    .interested-button {
+        background: linear-gradient(135deg, #FFD93D 0%, #FF9F1C 100%) !important;
+        color: white !important;
+    }
+    
+    /* Engagement metrics */
+    .engagement-metric {
+        font-size: 0.9rem;
+        color: #64748b;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    /* Event links styling */
+    .event-links-container {
         background: #f8fafc;
-        padding: 6px;
-        border-radius: 6px;
-        margin: 4px 0;
+        padding: 12px;
+        border-radius: 8px;
+        margin: 12px 0;
         border: 1px solid #e2e8f0;
-        font-size: 0.85rem;
+    }
+    
+    .event-link-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px;
+        margin: 4px 0;
+        background: white;
+        border-radius: 6px;
+        border: 1px solid #e2e8f0;
+        transition: all 0.2s;
+    }
+    
+    .event-link-item:hover {
+        background: #f1f5f9;
+        border-color: #3B82F6;
+    }
+    
+    .event-link-icon {
+        font-size: 1.2rem;
+        min-width: 24px;
+    }
+    
+    .event-link-text {
+        flex: 1;
+        word-break: break-all;
+    }
+    
+    .event-link-text a {
+        color: #1E40AF;
+        text-decoration: none;
+        font-weight: 500;
+    }
+    
+    .event-link-text a:hover {
+        text-decoration: underline;
+        color: #1E3A8A;
+    }
+    
+    .event-link-badge {
+        background: #3B82F6;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.7rem;
+        font-weight: 600;
+    }
+    
+    .registration-badge {
+        background: #10B981;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 0.7rem;
+        font-weight: 600;
+    }
+    
+    /* Mentor info in event card */
+    .mentor-info {
+        background: linear-gradient(135deg, #F5F3FF 0%, #EDE9FE 100%);
+        padding: 0.75rem;
+        border-radius: 8px;
+        margin: 0.5rem 0;
+        border: 1px solid #E5E7EB;
+        border-left: 3px solid #8B5CF6;
+        font-size: 0.9rem;
+    }
+    
+    /* Smaller buttons */
+    .small-button {
+        font-size: 0.85rem !important;
+        padding: 0.4rem 0.8rem !important;
+        min-height: auto !important;
+    }
+    
+    /* Registration buttons */
+    .reg-button {
+        font-size: 0.9rem !important;
+        padding: 0.5rem 1rem !important;
+        min-height: auto !important;
     }
     
     /* Mobile responsive */
     @media (max-width: 768px) {
         .main-header {
-            font-size: 1.6rem;
+            font-size: 1.8rem;
         }
         
-        .event-card-compact {
-            padding: 10px;
-            margin: 6px 0;
+        .event-card {
+            padding: 12px;
+            margin: 8px 0;
         }
         
         .metric-card {
-            padding: 0.8rem;
+            padding: 1rem;
         }
         
         .metric-value {
-            font-size: 1.5rem;
+            font-size: 1.8rem;
+        }
+    }
+    
+    /* Print styles */
+    @media print {
+        .no-print {
+            display: none !important;
+        }
+        
+        .event-card {
+            break-inside: avoid;
+            box-shadow: none !important;
+            border: 1px solid #ccc !important;
         }
     }
 </style>
@@ -1724,6 +1860,38 @@ def get_event_status(event_date):
             return '<span class="status-badge status-past">🔴 Past</span>'
     except:
         return '<span class="status-badge">Unknown</span>'
+
+def save_flyer_image(uploaded_file):
+    """Save uploaded flyer image and return base64 string"""
+    if uploaded_file is None:
+        return None
+    
+    try:
+        # Read image file
+        image_bytes = uploaded_file.getvalue()
+        
+        # Convert to base64
+        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+        
+        # Get file extension
+        file_ext = os.path.splitext(uploaded_file.name)[1].lower()
+        
+        # Determine MIME type
+        mime_types = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp'
+        }
+        
+        mime_type = mime_types.get(file_ext, 'image/jpeg')
+        
+        # Return data URL
+        return f"data:{mime_type};base64,{image_base64}"
+    except Exception as e:
+        logger.error(f"Error processing flyer image: {e}")
+        return None
 
 # ============================================
 # PASSWORD RESET PAGE
@@ -1807,145 +1975,215 @@ def forgot_password_page():
         st.rerun()
 
 # ============================================
-# EVENT CARD DISPLAY (COMPACT VERSION)
+# EVENT CARD DISPLAY (IMPROVED VERSION)
 # ============================================
-def display_event_card_compact(event, current_user=None, show_mentor=True):
-    """Display compact event card"""
+def display_event_card(event, current_user=None):
+    """Display improved event card with flyer, mentor info, and registration links"""
     if not event or not event.get('id'):
         return
     
     event_id = event.get('id')
     
     with st.container():
-        st.markdown('<div class="event-card-compact">', unsafe_allow_html=True)
+        st.markdown('<div class="event-card">', unsafe_allow_html=True)
         
-        # Create horizontal layout
-        col_info = st.columns([1], gap="small")[0]
+        # Create two-column layout: image on left, details on right
+        col_img, col_info = st.columns([1, 3], gap="medium")
+        
+        with col_img:
+            # Display event flyer if available
+            flyer = event.get('flyer_path')
+            if flyer and flyer.startswith('data:image'):
+                try:
+                    st.image(flyer, use_column_width=True)
+                except:
+                    # Fallback if image fails to load
+                    st.markdown('<div style="width: 100%; height: 150px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; border-radius: 8px;"><span style="font-size: 32px; color: white;">🎯</span></div>', 
+                               unsafe_allow_html=True)
+            else:
+                # Default placeholder
+                st.markdown('<div style="width: 100%; height: 150px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; border-radius: 8px;"><span style="font-size: 32px; color: white;">🎯</span></div>', 
+                           unsafe_allow_html=True)
         
         with col_info:
-            # Header with title and badges
-            title = event.get('title', 'Untitled Event')
-            if len(title) > 50:
-                title = title[:47] + "..."
-            
-            # Title row with status
-            col_title, col_status = st.columns([3, 1])
+            # Header row with title and badges
+            col_title, col_badges = st.columns([3, 1])
             with col_title:
-                st.markdown(f'<div class="card-title-compact">{title}</div>', unsafe_allow_html=True)
+                title = event.get('title', 'Untitled Event')
+                if len(title) > 60:
+                    title = title[:57] + "..."
+                st.markdown(f'<div class="card-title">{title}</div>', unsafe_allow_html=True)
+            
+            with col_badges:
+                if event.get('ai_generated'):
+                    st.markdown('<span class="ai-badge">🤖 AI</span>', unsafe_allow_html=True)
+            
+            # Status and date row
+            col_status, col_date = st.columns([1, 2])
             with col_status:
                 event_date = event.get('event_date')
                 st.markdown(get_event_status(event_date), unsafe_allow_html=True)
+            with col_date:
+                st.caption(f"📅 {format_date(event_date)}")
             
-            # Event details in compact format
-            col_details = st.columns(3)
-            with col_details[0]:
+            # Event details row
+            row1_col1, row1_col2, row1_col3 = st.columns(3)
+            with row1_col1:
                 venue = event.get('venue', 'TBD')
-                if len(venue) > 20:
-                    venue = venue[:17] + "..."
+                if len(venue) > 25:
+                    venue = venue[:22] + "..."
                 st.caption(f"📍 {venue}")
-            with col_details[1]:
+            with row1_col2:
                 event_type = event.get('event_type', 'Event')
                 st.caption(f"🏷️ {event_type}")
-            with col_details[2]:
-                st.caption(f"📅 {format_date(event_date).split(',')[0]}")
+            with row1_col3:
+                max_participants = event.get('max_participants', 100)
+                current_participants = event.get('current_participants', 0)
+                st.caption(f"👥 {current_participants}/{max_participants}")
             
-            # Mentor information (compact)
-            if show_mentor and event.get('mentor_id'):
+            # Mentor information (if assigned)
+            if event.get('mentor_id'):
                 mentor = db.get_mentor_by_id(event['mentor_id'])
                 if mentor:
                     with st.container():
-                        st.markdown('<div class="mentor-info-compact">', unsafe_allow_html=True)
-                        col_mentor1, col_mentor2 = st.columns(2)
-                        with col_mentor1:
+                        st.markdown('<div class="mentor-info">', unsafe_allow_html=True)
+                        col_m1, col_m2 = st.columns(2)
+                        with col_m1:
                             st.markdown(f"**Mentor:** {mentor['full_name']}")
-                        with col_mentor2:
+                        with col_m2:
                             st.markdown(f"**Contact:** {mentor['contact']}")
                         st.markdown('</div>', unsafe_allow_html=True)
             
-            # Engagement metrics
+            # Engagement metrics and buttons
             likes_count = db.get_event_likes_count(event_id)
             interested_count = db.get_event_interested_count(event_id)
             
-            if likes_count > 0 or interested_count > 0:
-                engagement_col1, engagement_col2 = st.columns(2)
-                with engagement_col1:
-                    st.caption(f"❤️ {likes_count}")
-                with engagement_col2:
-                    st.caption(f"⭐ {interested_count}")
+            # Engagement row
+            col_eng_metrics, col_eng_buttons = st.columns([1, 2])
+            with col_eng_metrics:
+                st.caption(f"❤️ {likes_count} Likes")
+                st.caption(f"⭐ {interested_count} Interested")
             
-            # Like and Interested buttons (if user is logged in)
-            if current_user:
-                col_like, col_interested = st.columns(2)
-                
-                with col_like:
-                    is_liked = db.is_event_liked(event_id, current_user)
-                    like_text = "❤️ Liked" if is_liked else "🤍 Like"
-                    like_type = "secondary" if is_liked else "primary"
+            with col_eng_buttons:
+                if current_user:
+                    col_like, col_interested, col_spacer = st.columns(3)
                     
-                    if st.button(like_text, key=f"like_{event_id}", 
-                               use_container_width=True, type=like_type, 
-                               help="Like this event"):
-                        if is_liked:
-                            if db.remove_like(event_id, current_user):
-                                st.rerun()
-                        else:
-                            if db.add_like(event_id, current_user):
-                                st.rerun()
-                
-                with col_interested:
-                    is_interested = db.is_event_interested(event_id, current_user)
-                    interested_text = "⭐ Interested" if is_interested else "☆ Interested"
-                    interested_type = "secondary" if is_interested else "primary"
+                    with col_like:
+                        is_liked = db.is_event_liked(event_id, current_user)
+                        like_text = "❤️ Liked" if is_liked else "🤍 Like"
+                        like_type = "secondary" if is_liked else "primary"
+                        
+                        if st.button(like_text, key=f"like_{event_id}", 
+                                   use_container_width=True, type=like_type, 
+                                   help="Like this event"):
+                            if is_liked:
+                                if db.remove_like(event_id, current_user):
+                                    st.rerun()
+                            else:
+                                if db.add_like(event_id, current_user):
+                                    st.rerun()
                     
-                    if st.button(interested_text, key=f"interested_{event_id}", 
-                               use_container_width=True, type=interested_type,
-                               help="Mark as interested"):
-                        if is_interested:
-                            if db.remove_interested(event_id, current_user):
-                                st.rerun()
-                        else:
-                            if db.add_interested(event_id, current_user):
-                                st.rerun()
+                    with col_interested:
+                        is_interested = db.is_event_interested(event_id, current_user)
+                        interested_text = "⭐ Interested" if is_interested else "☆ Interested"
+                        interested_type = "secondary" if is_interested else "primary"
+                        
+                        if st.button(interested_text, key=f"interested_{event_id}", 
+                                   use_container_width=True, type=interested_type,
+                                   help="Mark as interested"):
+                            if is_interested:
+                                if db.remove_interested(event_id, current_user):
+                                    st.rerun()
+                            else:
+                                if db.add_interested(event_id, current_user):
+                                    st.rerun()
             
-            # Description preview
+            # Event links (if available)
+            event_link = event.get('event_link', '')
+            registration_link = event.get('registration_link', '')
+            
+            if event_link or registration_link:
+                with st.expander("🔗 Event Links", expanded=False):
+                    if event_link:
+                        st.markdown(f"**🌐 Event Page:** [Click here]({event_link})")
+                    if registration_link:
+                        st.markdown(f"**📝 Registration:** [Click here]({registration_link})")
+            
+            # Description (collapsible)
             desc = event.get('description', '')
             if desc:
-                if len(desc) > 80:
+                if len(desc) > 150:
                     with st.expander("📝 Description", expanded=False):
                         st.write(desc)
                 else:
-                    st.caption(desc[:80])
+                    st.caption(desc)
         
-        # Registration section (for students)
+        # ============================================
+        # REGISTRATION SECTION (For students only)
+        # ============================================
         if current_user and st.session_state.role == 'student':
-            st.markdown('<div class="registration-section-compact">', unsafe_allow_html=True)
+            st.markdown('<div class="registration-section">', unsafe_allow_html=True)
             
             is_registered = db.is_student_registered(event_id, current_user)
             
             if is_registered:
-                st.success("✅ Registered")
+                st.success("✅ You are already registered for this event")
+                
+                # Show "I Have Registered Externally" button
+                if registration_link:
+                    if st.button("✅ I Have Registered Externally", 
+                               key=f"ext_reg_{event_id}",
+                               use_container_width=True,
+                               type="secondary",
+                               help="Mark that you have registered externally"):
+                        # Update registration status
+                        cursor = db.conn.cursor()
+                        cursor.execute("UPDATE registrations SET status = 'confirmed' WHERE event_id = ? AND student_username = ?",
+                                     (event_id, current_user))
+                        db.conn.commit()
+                        st.success("✅ External registration recorded!")
+                        st.rerun()
             else:
-                if st.button("📝 Register", key=f"reg_{event_id}", 
-                           use_container_width=True, type="primary"):
-                    student = db.get_user(current_user)
-                    if student:
-                        reg_data = {
-                            'id': str(uuid.uuid4()),
-                            'event_id': event_id,
-                            'event_title': event.get('title'),
-                            'student_username': current_user,
-                            'student_name': student.get('name', current_user),
-                            'student_roll': student.get('roll_no', 'N/A'),
-                            'student_dept': student.get('department', 'N/A')
-                        }
-                        reg_id, message = db.add_registration(reg_data)
-                        if reg_id:
-                            st.success("✅ Registered!")
-                            st.rerun()
-                        else:
-                            st.error(message)
+                # Registration options
+                col_reg1, col_reg2 = st.columns([1, 1])
+                
+                with col_reg1:
+                    # Register in App button
+                    if st.button("📱 Register in App", 
+                               key=f"app_reg_{event_id}",
+                               use_container_width=True,
+                               type="primary"):
+                        student = db.get_user(current_user)
+                        if student:
+                            reg_data = {
+                                'id': str(uuid.uuid4()),
+                                'event_id': event_id,
+                                'event_title': event.get('title'),
+                                'student_username': current_user,
+                                'student_name': student.get('name', current_user),
+                                'student_roll': student.get('roll_no', 'N/A'),
+                                'student_dept': student.get('department', 'N/A')
+                            }
+                            reg_id, message = db.add_registration(reg_data)
+                            if reg_id:
+                                st.success("✅ Registered in college system!")
+                                st.rerun()
+                            else:
+                                st.error(message)
+                
+                with col_reg2:
+                    # External registration link button (if available)
+                    if registration_link:
+                        st.markdown(f"[🌐 Register Externally]({registration_link})")
+                        st.caption("Click to register on external site")
+                    else:
+                        st.info("No external registration link available")
             
             st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Creator info
+        created_by = event.get('created_by_name', 'Unknown')
+        st.caption(f"👤 Created by: {created_by}")
         
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -2267,7 +2505,7 @@ def student_dashboard():
         # Display events
         if filtered_events:
             for event in filtered_events:
-                display_event_card_compact(event, st.session_state.username)
+                display_event_card(event, st.session_state.username)
         else:
             st.info("No events found matching your criteria.")
 
@@ -2303,13 +2541,13 @@ def student_dashboard():
         # Display registrations
         for reg in registrations:
             with st.container():
-                st.markdown('<div class="event-card-compact">', unsafe_allow_html=True)
+                st.markdown('<div class="event-card">', unsafe_allow_html=True)
                 
                 col1, col2 = st.columns([3, 1])
                 
                 with col1:
                     event_title = reg.get('event_title', 'Unknown Event')
-                    st.markdown(f'<div class="card-title-compact">{event_title}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="card-title">{event_title}</div>', unsafe_allow_html=True)
                     
                     # Event details
                     event_date = reg.get('event_date')
@@ -2359,14 +2597,14 @@ def student_dashboard():
         with tab1:
             st.caption(f"Total liked events: {len(liked_events)}")
             for event in liked_events:
-                display_event_card_compact(event, st.session_state.username)
+                display_event_card(event, st.session_state.username)
         
         with tab2:
             upcoming = [e for e in liked_events if e.get('status') == 'upcoming']
             if upcoming:
                 st.caption(f"Upcoming liked events: {len(upcoming)}")
                 for event in upcoming:
-                    display_event_card_compact(event, st.session_state.username)
+                    display_event_card(event, st.session_state.username)
             else:
                 st.info("No upcoming liked events.")
         
@@ -2375,7 +2613,7 @@ def student_dashboard():
             if past:
                 st.caption(f"Past liked events: {len(past)}")
                 for event in past:
-                    display_event_card_compact(event, st.session_state.username)
+                    display_event_card(event, st.session_state.username)
             else:
                 st.info("No past liked events.")
     
@@ -2403,14 +2641,14 @@ def student_dashboard():
         with tab1:
             st.caption(f"Total interested events: {len(interested_events)}")
             for event in interested_events:
-                display_event_card_compact(event, st.session_state.username)
+                display_event_card(event, st.session_state.username)
         
         with tab2:
             upcoming = [e for e in interested_events if e.get('status') == 'upcoming']
             if upcoming:
                 st.caption(f"Upcoming interested events: {len(upcoming)}")
                 for event in upcoming:
-                    display_event_card_compact(event, st.session_state.username)
+                    display_event_card(event, st.session_state.username)
             else:
                 st.info("No upcoming interested events.")
         
@@ -2419,7 +2657,7 @@ def student_dashboard():
             if past:
                 st.caption(f"Past interested events: {len(past)}")
                 for event in past:
-                    display_event_card_compact(event, st.session_state.username)
+                    display_event_card(event, st.session_state.username)
             else:
                 st.info("No past interested events.")
     
@@ -2546,47 +2784,7 @@ def mentor_dashboard():
         # Display events
         st.subheader("📋 Event Details")
         for event in events:
-            with st.container():
-                st.markdown('<div class="event-card-compact">', unsafe_allow_html=True)
-                
-                col1, col2 = st.columns([3, 1])
-                
-                with col1:
-                    title = event.get('title', 'Untitled Event')
-                    st.markdown(f'<div class="card-title-compact">{title}</div>', unsafe_allow_html=True)
-                    
-                    # Event details
-                    col_details = st.columns(3)
-                    with col_details[0]:
-                        st.caption(f"📅 {format_date(event.get('event_date'))}")
-                    with col_details[1]:
-                        st.caption(f"📍 {event.get('venue', 'TBD')}")
-                    with col_details[2]:
-                        st.caption(f"🏷️ {event.get('event_type', 'Event')}")
-                    
-                    # Description
-                    desc = event.get('description', '')
-                    if desc:
-                        if len(desc) > 100:
-                            with st.expander("📝 Description", expanded=False):
-                                st.write(desc)
-                        else:
-                            st.caption(desc)
-                
-                with col2:
-                    # Status
-                    event_status = event.get('status', 'unknown')
-                    if event_status == 'upcoming':
-                        st.success("🟢 Upcoming")
-                    elif event_status == 'ongoing':
-                        st.warning("🟡 Ongoing")
-                    else:
-                        st.error("🔴 Past")
-                    
-                    # Creator info
-                    st.caption(f"👤 {event.get('created_by_name', 'Unknown')}")
-                
-                st.markdown('</div>', unsafe_allow_html=True)
+            display_event_card(event, None)
     
     elif selected == "Student Engagement":
         st.markdown('<h1 class="main-header">📊 Student Engagement</h1>', unsafe_allow_html=True)
@@ -2745,7 +2943,7 @@ def faculty_dashboard():
         st.subheader("📅 My Recent Events")
         if events:
             for event in events[-3:]:
-                display_event_card_compact(event, None)
+                display_event_card(event, None)
         else:
             st.info("No events created yet. Create your first event!")
     
@@ -2784,6 +2982,12 @@ def faculty_dashboard():
                     else:
                         st.info("No active mentors available. Admin can add mentors.")
                         selected_mentor = "None"
+                    
+                    # Flyer upload
+                    st.subheader("Event Flyer (Optional)")
+                    flyer = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif', 'webp'], key="faculty_flyer")
+                    if flyer:
+                        st.image(flyer, width=200)
                 
                 description = st.text_area("Event Description *", height=150)
                 
@@ -2801,6 +3005,9 @@ def faculty_dashboard():
                             if mentor:
                                 mentor_id = mentor['id']
                         
+                        # Save flyer
+                        flyer_path = save_flyer_image(flyer)
+                        
                         # Combine date and time
                         event_datetime = datetime.combine(event_date, event_time)
                         
@@ -2814,6 +3021,7 @@ def faculty_dashboard():
                             'event_link': event_link,
                             'registration_link': registration_link,
                             'max_participants': max_participants,
+                            'flyer_path': flyer_path,
                             'created_by': st.session_state.username,
                             'created_by_name': st.session_state.name,
                             'ai_generated': False,
@@ -2911,6 +3119,7 @@ def faculty_dashboard():
                     with col2:
                         ai_venue = st.text_input("Venue", value=event_data.get('venue', 'G H Raisoni College'))
                         ai_organizer = st.text_input("Organizer", value=event_data.get('organizer', 'G H Raisoni College'))
+                        ai_event_link = st.text_input("Event Website", value=event_data.get('event_link', ''))
                         ai_reg_link = st.text_input("Registration Link", value=event_data.get('registration_link', ''))
                         
                         # Mentor selection for AI-generated events
@@ -2927,6 +3136,12 @@ def faculty_dashboard():
                                                 value=event_data.get('description', ''),
                                                 height=150)
                     
+                    # Flyer upload for AI events
+                    st.subheader("Event Flyer (Optional)")
+                    ai_flyer = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif', 'webp'], key="ai_flyer")
+                    if ai_flyer:
+                        st.image(ai_flyer, width=200)
+                    
                     ai_submit = st.form_submit_button("✅ Create AI-Generated Event", use_container_width=True)
                     
                     if ai_submit:
@@ -2941,6 +3156,9 @@ def faculty_dashboard():
                                 if mentor:
                                     ai_mentor_id = mentor['id']
                             
+                            # Save flyer
+                            flyer_path = save_flyer_image(ai_flyer)
+                            
                             # Combine date and time
                             event_datetime = datetime.combine(ai_date, ai_time)
                             
@@ -2951,8 +3169,10 @@ def faculty_dashboard():
                                 'event_date': event_datetime.isoformat(),
                                 'venue': ai_venue,
                                 'organizer': ai_organizer,
+                                'event_link': ai_event_link,
                                 'registration_link': ai_reg_link,
                                 'max_participants': ai_max_participants,
+                                'flyer_path': flyer_path,
                                 'created_by': st.session_state.username,
                                 'created_by_name': st.session_state.name,
                                 'ai_generated': True,
@@ -3000,7 +3220,7 @@ def faculty_dashboard():
             upcoming = [e for e in events if e.get('status') == 'upcoming']
             if upcoming:
                 for event in upcoming:
-                    display_event_card_compact(event, None)
+                    display_event_card(event, None)
             else:
                 st.info("No upcoming events.")
         
@@ -3008,7 +3228,7 @@ def faculty_dashboard():
             ongoing = [e for e in events if e.get('status') == 'ongoing']
             if ongoing:
                 for event in ongoing:
-                    display_event_card_compact(event, None)
+                    display_event_card(event, None)
             else:
                 st.info("No ongoing events.")
         
@@ -3016,7 +3236,7 @@ def faculty_dashboard():
             past = [e for e in events if e.get('status') == 'past']
             if past:
                 for event in past:
-                    display_event_card_compact(event, None)
+                    display_event_card(event, None)
             else:
                 st.info("No past events.")
     
@@ -3136,7 +3356,7 @@ def admin_dashboard():
         st.subheader("📅 Recent Events")
         if events:
             for event in events[:5]:
-                display_event_card_compact(event, None)
+                display_event_card(event, None)
         else:
             st.info("No events found.")
     
@@ -3151,7 +3371,7 @@ def admin_dashboard():
                     col_view, col_actions = st.columns([3, 1])
                     
                     with col_view:
-                        display_event_card_compact(event, None)
+                        display_event_card(event, None)
                     
                     with col_actions:
                         st.markdown("### Actions")
@@ -3345,7 +3565,7 @@ def admin_dashboard():
             
             for mentor in filtered_mentors:
                 with st.container():
-                    st.markdown('<div class="event-card-compact">', unsafe_allow_html=True)
+                    st.markdown('<div class="event-card">', unsafe_allow_html=True)
                     
                     col_info, col_actions = st.columns([3, 1])
                     
@@ -3354,7 +3574,7 @@ def admin_dashboard():
                         status_color = "🟢" if mentor.get('is_active') else "🔴"
                         status_text = "Active" if mentor.get('is_active') else "Inactive"
                         
-                        st.markdown(f'<div class="card-title-compact">{mentor.get("full_name")} {status_color}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="card-title">{mentor.get("full_name")} {status_color}</div>', unsafe_allow_html=True)
                         st.caption(f"**Department:** {mentor.get('department')}")
                         st.caption(f"**Email:** {mentor.get('email')}")
                         st.caption(f"**Contact:** {mentor.get('contact')}")
