@@ -1977,6 +1977,9 @@ def forgot_password_page():
 # ============================================
 # EVENT CARD DISPLAY (IMPROVED VERSION)
 # ============================================
+# ============================================
+# EVENT CARD DISPLAY (IMPROVED VERSION)
+# ============================================
 def display_event_card(event, current_user=None):
     """Display improved event card with flyer, mentor info, and registration links"""
     if not event or not event.get('id'):
@@ -1988,6 +1991,19 @@ def display_event_card(event, current_user=None):
         st.markdown('<div class="event-card">', unsafe_allow_html=True)
         
         # Create two-column layout: image on left, details on right
+        # Use HTML/CSS instead of st.columns to avoid nesting issues
+        st.markdown("""
+        <div style="display: flex; gap: 20px; margin-bottom: 15px;">
+            <div style="flex: 1; min-width: 150px;">
+                <!-- Image will be inserted here -->
+            </div>
+            <div style="flex: 3;">
+                <!-- Content will be inserted here -->
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Create columns using streamlit but handle nesting
         col_img, col_info = st.columns([1, 3], gap="medium")
         
         with col_img:
@@ -2006,40 +2022,27 @@ def display_event_card(event, current_user=None):
                            unsafe_allow_html=True)
         
         with col_info:
-            # Header row with title and badges
-            col_title, col_badges = st.columns([3, 1])
-            with col_title:
-                title = event.get('title', 'Untitled Event')
-                if len(title) > 60:
-                    title = title[:57] + "..."
-                st.markdown(f'<div class="card-title">{title}</div>', unsafe_allow_html=True)
-            
-            with col_badges:
-                if event.get('ai_generated'):
-                    st.markdown('<span class="ai-badge">🤖 AI</span>', unsafe_allow_html=True)
+            # Header with title and badges - use HTML for layout
+            st.markdown(f'<div class="card-title">{event.get("title", "Untitled Event")}</div>', unsafe_allow_html=True)
             
             # Status and date row
-            col_status, col_date = st.columns([1, 2])
-            with col_status:
+            col1, col2 = st.columns([1, 1])
+            with col1:
                 event_date = event.get('event_date')
                 st.markdown(get_event_status(event_date), unsafe_allow_html=True)
-            with col_date:
+            with col2:
                 st.caption(f"📅 {format_date(event_date)}")
             
-            # Event details row
-            row1_col1, row1_col2, row1_col3 = st.columns(3)
-            with row1_col1:
-                venue = event.get('venue', 'TBD')
-                if len(venue) > 25:
-                    venue = venue[:22] + "..."
-                st.caption(f"📍 {venue}")
-            with row1_col2:
-                event_type = event.get('event_type', 'Event')
-                st.caption(f"🏷️ {event_type}")
-            with row1_col3:
-                max_participants = event.get('max_participants', 100)
-                current_participants = event.get('current_participants', 0)
-                st.caption(f"👥 {current_participants}/{max_participants}")
+            # Event details - use single row
+            venue = event.get('venue', 'TBD')
+            if len(venue) > 25:
+                venue = venue[:22] + "..."
+            
+            event_type = event.get('event_type', 'Event')
+            max_participants = event.get('max_participants', 100)
+            current_participants = event.get('current_participants', 0)
+            
+            st.caption(f"📍 {venue} | 🏷️ {event_type} | 👥 {current_participants}/{max_participants}")
             
             # Mentor information (if assigned)
             if event.get('mentor_id'):
@@ -2047,56 +2050,49 @@ def display_event_card(event, current_user=None):
                 if mentor:
                     with st.container():
                         st.markdown('<div class="mentor-info">', unsafe_allow_html=True)
-                        col_m1, col_m2 = st.columns(2)
-                        with col_m1:
-                            st.markdown(f"**Mentor:** {mentor['full_name']}")
-                        with col_m2:
-                            st.markdown(f"**Contact:** {mentor['contact']}")
+                        st.markdown(f"**Mentor:** {mentor['full_name']} | **Contact:** {mentor['contact']}")
                         st.markdown('</div>', unsafe_allow_html=True)
             
-            # Engagement metrics and buttons
+            # Engagement metrics
             likes_count = db.get_event_likes_count(event_id)
             interested_count = db.get_event_interested_count(event_id)
             
-            # Engagement row
-            col_eng_metrics, col_eng_buttons = st.columns([1, 2])
-            with col_eng_metrics:
-                st.caption(f"❤️ {likes_count} Likes")
-                st.caption(f"⭐ {interested_count} Interested")
+            # Engagement row - use HTML for layout
+            if current_user:
+                col_like, col_interested = st.columns(2)
+                
+                with col_like:
+                    is_liked = db.is_event_liked(event_id, current_user)
+                    like_text = "❤️ Liked" if is_liked else "🤍 Like"
+                    like_type = "secondary" if is_liked else "primary"
+                    
+                    if st.button(like_text, key=f"like_{event_id}", 
+                               use_container_width=True, type=like_type, 
+                               help="Like this event"):
+                        if is_liked:
+                            if db.remove_like(event_id, current_user):
+                                st.rerun()
+                        else:
+                            if db.add_like(event_id, current_user):
+                                st.rerun()
+                
+                with col_interested:
+                    is_interested = db.is_event_interested(event_id, current_user)
+                    interested_text = "⭐ Interested" if is_interested else "☆ Interested"
+                    interested_type = "secondary" if is_interested else "primary"
+                    
+                    if st.button(interested_text, key=f"interested_{event_id}", 
+                               use_container_width=True, type=interested_type,
+                               help="Mark as interested"):
+                        if is_interested:
+                            if db.remove_interested(event_id, current_user):
+                                st.rerun()
+                        else:
+                            if db.add_interested(event_id, current_user):
+                                st.rerun()
             
-            with col_eng_buttons:
-                if current_user:
-                    col_like, col_interested, col_spacer = st.columns(3)
-                    
-                    with col_like:
-                        is_liked = db.is_event_liked(event_id, current_user)
-                        like_text = "❤️ Liked" if is_liked else "🤍 Like"
-                        like_type = "secondary" if is_liked else "primary"
-                        
-                        if st.button(like_text, key=f"like_{event_id}", 
-                                   use_container_width=True, type=like_type, 
-                                   help="Like this event"):
-                            if is_liked:
-                                if db.remove_like(event_id, current_user):
-                                    st.rerun()
-                            else:
-                                if db.add_like(event_id, current_user):
-                                    st.rerun()
-                    
-                    with col_interested:
-                        is_interested = db.is_event_interested(event_id, current_user)
-                        interested_text = "⭐ Interested" if is_interested else "☆ Interested"
-                        interested_type = "secondary" if is_interested else "primary"
-                        
-                        if st.button(interested_text, key=f"interested_{event_id}", 
-                                   use_container_width=True, type=interested_type,
-                                   help="Mark as interested"):
-                            if is_interested:
-                                if db.remove_interested(event_id, current_user):
-                                    st.rerun()
-                            else:
-                                if db.add_interested(event_id, current_user):
-                                    st.rerun()
+            # Show engagement counts
+            st.caption(f"❤️ {likes_count} Likes | ⭐ {interested_count} Interested")
             
             # Event links (if available)
             event_link = event.get('event_link', '')
@@ -2116,7 +2112,7 @@ def display_event_card(event, current_user=None):
                     with st.expander("📝 Description", expanded=False):
                         st.write(desc)
                 else:
-                    st.caption(desc)
+                    st.caption(desc[:150] + "..." if len(desc) > 150 else desc)
         
         # ============================================
         # REGISTRATION SECTION (For students only)
@@ -2186,7 +2182,6 @@ def display_event_card(event, current_user=None):
         st.caption(f"👤 Created by: {created_by}")
         
         st.markdown('</div>', unsafe_allow_html=True)
-
 # ============================================
 # LANDING PAGE WITH LOGIN
 # ============================================
