@@ -1407,6 +1407,34 @@ class DatabaseManager:
             logger.error(f"Error getting student interested events: {e}")
             return []
 
+    def set_remember_token(self, username, token, expiry):
+        """Set remember me token"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("UPDATE users SET reset_token = ?, reset_token_expiry = ? WHERE username = ?", 
+                          (token, expiry, username))
+            self.conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error setting remember token: {e}")
+            return False
+    
+    def verify_remember_token(self, username, token):
+        """Verify remember me token"""
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT reset_token, reset_token_expiry FROM users WHERE username = ?", (username,))
+            result = cursor.fetchone()
+            if result and result[0] and result[1]:
+                stored_token = result[0]
+                expiry = datetime.fromisoformat(result[1])
+                if stored_token == token and datetime.now() < expiry:
+                    return True
+            return False
+        except Exception as e:
+            logger.error(f"Error verifying remember token: {e}")
+            return False
+
 # Initialize database
 db = DatabaseManager()
 
@@ -1893,6 +1921,28 @@ def save_flyer_image(uploaded_file):
         logger.error(f"Error processing flyer image: {e}")
         return None
 
+def check_remember_me_cookie():
+    """Check for remember me cookie and auto-login"""
+    if 'remember_me' not in st.session_state:
+        st.session_state.remember_me = False
+    
+    # Check for cookie in query parameters
+    query_params = st.query_params
+    if 'remember_token' in query_params and 'remember_user' in query_params:
+        token = query_params['remember_token']
+        username = query_params['remember_user']
+        
+        if db.verify_remember_token(username, token):
+            user = db.get_user(username)
+            if user:
+                st.session_state.role = user.get('role')
+                st.session_state.username = username
+                st.session_state.name = user.get('name', username)
+                st.session_state.session_start = datetime.now()
+                st.session_state.remember_me = True
+                st.success(f"Welcome back, {st.session_state.name}!")
+                st.rerun()
+
 # ============================================
 # PASSWORD RESET PAGE
 # ============================================
@@ -1974,9 +2024,7 @@ def forgot_password_page():
         st.session_state.page = "login"
         st.rerun()
 
-# ============================================
-# EVENT CARD DISPLAY (IMPROVED VERSION)
-# ============================================
+
 # ============================================
 # EVENT CARD DISPLAY (IMPROVED VERSION)
 # ============================================
@@ -2198,6 +2246,7 @@ def landing_page():
         - 🤖 **AI-Powered:** Generate events from text using AI
         - 📊 **Analytics:** Track your event participation
         - 📱 **Mobile-Friendly:** Access from any device
+        - 🔐 **Remember Me:** Stay logged in on this device
         
         **User Roles:**
         - **👑 Admin:** Full system control, manage users and events
@@ -2208,9 +2257,13 @@ def landing_page():
         **Getting Started:**
         1. Select your role from the dropdown
         2. Enter your credentials
-        3. Students can register for new accounts
-        4. Start exploring events!
+        3. Check "Remember Me" to stay logged in
+        4. Students can register for new accounts
+        5. Start exploring events!
         """)
+
+    # Check for remember me cookie
+    check_remember_me_cookie()
     
     # Login Section
     st.markdown("---")
@@ -2231,6 +2284,10 @@ def landing_page():
         
         with col2:
             password = st.text_input("Password", type="password", key="login_password")
+
+        # Remember me checkbox
+        remember_me = st.checkbox("Remember Me", 
+                                 help="Stay logged in on this device for 30 days")
         
         # Forgot password link
         col_forgot = st.columns([2, 1])[1]
@@ -2262,6 +2319,19 @@ def landing_page():
                         st.session_state.username = username
                         st.session_state.name = user.get('name', username)
                         st.session_state.session_start = datetime.now()
+                        st.session_state.remember_me = remember_me
+                        
+                        # Set remember me token if requested
+                        if remember_me:
+                            token = secrets.token_urlsafe(32)
+                            expiry = datetime.now() + timedelta(days=30)
+                            if db.set_remember_token(username, token, expiry.isoformat()):
+                                # Set query parameters for auto-login
+                                st.query_params = {
+                                    "remember_token": token,
+                                    "remember_user": username
+                                }
+                        
                         st.success("Login successful!")
                         st.rerun()
                     else:
@@ -2308,6 +2378,11 @@ def student_registration_page():
         
         # Terms and conditions
         terms = st.checkbox("I agree to the Terms & Conditions *", value=False)
+
+        # Remember me checkbox for registration
+        remember_me = st.checkbox("Remember Me on this device", 
+                                 value=True,
+                                 help="Stay logged in after registration")
         
         col_submit, col_back = st.columns(2)
         with col_submit:
@@ -2371,10 +2446,29 @@ def student_registration_page():
                     
                     success, message = db.add_user(user_data)
                     if success:
-                        st.success("✅ Registration successful! Please login.")
+                        st.success("✅ Registration successful!")
+                        
+                        # Auto-login after registration
+                        st.session_state.role = 'student'
+                        st.session_state.username = username
+                        st.session_state.name = name
+                        st.session_state.session_start = datetime.now()
+                        st.session_state.remember_me = remember_me
+                        
+                        # Set remember me token if requested
+                        if remember_me:
+                            token = secrets.token_urlsafe(32)
+                            expiry = datetime.now() + timedelta(days=30)
+                            if db.set_remember_token(username, token, expiry.isoformat()):
+                                # Set query parameters for auto-login
+                                st.query_params = {
+                                    "remember_token": token,
+                                    "remember_user": username
+                                }
+                        
                         st.balloons()
+                        st.info("You have been automatically logged in. Redirecting to dashboard...")
                         time.sleep(2)
-                        st.session_state.page = "login"
                         st.rerun()
                     else:
                         st.error(f"Registration failed: {message}")
@@ -2431,6 +2525,14 @@ def student_dashboard():
         
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True, type="secondary"):
+            # Clear remember me token from database
+            if st.session_state.username:
+                db.clear_reset_token(st.session_state.username)
+            
+            # Clear query parameters
+            st.query_params = {}
+            
+            # Clear session state
             for key in list(st.session_state.keys()):
                 if key != 'rerun_count':
                     del st.session_state[key]
@@ -2722,6 +2824,14 @@ def mentor_dashboard():
         
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True, type="secondary"):
+            # Clear remember me token from database
+            if st.session_state.username:
+                db.clear_reset_token(st.session_state.username)
+            
+            # Clear query parameters
+            st.query_params = {}
+            
+            # Clear session state
             for key in list(st.session_state.keys()):
                 if key != 'rerun_count':
                     del st.session_state[key]
@@ -2899,7 +3009,15 @@ def faculty_dashboard():
                 st.rerun()
         
         st.markdown("---")
-        if st.button("Logout", type="secondary", use_container_width=True):
+        if st.button("🚪 Logout", use_container_width=True, type="secondary"):
+            # Clear remember me token from database
+            if st.session_state.username:
+                db.clear_reset_token(st.session_state.username)
+            
+            # Clear query parameters
+            st.query_params = {}
+            
+            # Clear session state
             for key in list(st.session_state.keys()):
                 if key != 'rerun_count':
                     del st.session_state[key]
@@ -3303,7 +3421,15 @@ def admin_dashboard():
                 st.rerun()
         
         st.markdown("---")
-        if st.button("Logout", type="secondary", use_container_width=True):
+        if st.button("🚪 Logout", use_container_width=True, type="secondary"):
+            # Clear remember me token from database
+            if st.session_state.username:
+                db.clear_reset_token(st.session_state.username)
+            
+            # Clear query parameters
+            st.query_params = {}
+            
+            # Clear session state
             for key in list(st.session_state.keys()):
                 if key != 'rerun_count':
                     del st.session_state[key]
@@ -3707,6 +3833,9 @@ def admin_dashboard():
 # ============================================
 def main():
     """Main application"""
+    # Check for remember me cookie first
+    if 'role' not in st.session_state or st.session_state.role is None:
+        check_remember_me_cookie()
     
     # Initialize session state
     if 'role' not in st.session_state:
@@ -3718,11 +3847,17 @@ def main():
     if 'page' not in st.session_state:
         st.session_state.page = "login"
     
-    # Session timeout check
-    if st.session_state.role and 'session_start' in st.session_state:
+    # Session timeout check (skip if remember me is enabled)
+    if (st.session_state.role and 'session_start' in st.session_state and 
+        not st.session_state.remember_me):
         session_duration = datetime.now() - st.session_state.session_start
         if session_duration.total_seconds() > SESSION_TIMEOUT_MINUTES * 60:
             st.warning("Session timed out. Please login again.")
+            # Clear remember me token
+            if st.session_state.username:
+                db.clear_reset_token(st.session_state.username)
+            st.query_params = {}
+            
             for key in list(st.session_state.keys()):
                 if key != 'rerun_count':
                     del st.session_state[key]
