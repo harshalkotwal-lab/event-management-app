@@ -1967,11 +1967,10 @@ def check_remember_me_cookie():
     if 'remember_me' not in st.session_state:
         st.session_state.remember_me = False
     
-    # Check for cookie in query parameters
-    query_params = st.query_params
-    if 'remember_token' in query_params and 'remember_user' in query_params:
-        token = query_params['remember_token']
-        username = query_params['remember_user']
+    # Check for remember me in session state first
+    if 'remember_token' in st.session_state and 'remember_user' in st.session_state:
+        token = st.session_state.remember_token
+        username = st.session_state.remember_user
         
         if db.verify_remember_token(username, token):
             user = db.get_user(username)
@@ -1983,6 +1982,28 @@ def check_remember_me_cookie():
                 st.session_state.remember_me = True
                 st.success(f"Welcome back, {st.session_state.name}!")
                 st.rerun()
+    
+    # Alternative: Check URL parameters (for newer Streamlit versions)
+    try:
+        # Try the new query_params API
+        if hasattr(st, 'query_params'):
+            query_params = st.query_params
+            if 'remember_token' in query_params and 'remember_user' in query_params:
+                token = query_params['remember_token']
+                username = query_params['remember_user']
+                
+                if db.verify_remember_token(username, token):
+                    user = db.get_user(username)
+                    if user:
+                        st.session_state.role = user.get('role')
+                        st.session_state.username = username
+                        st.session_state.name = user.get('name', username)
+                        st.session_state.session_start = datetime.now()
+                        st.session_state.remember_me = True
+                        st.success(f"Welcome back, {st.session_state.name}!")
+                        st.rerun()
+    except:
+        pass  # Fall back to session state method
 
 # ============================================
 # PASSWORD RESET PAGE
@@ -2353,7 +2374,6 @@ def landing_page():
                 db_role = role_map[role]
                 
                 if db.verify_credentials(username, password, db_role):
-                    # Get user details
                     user = db.get_user(username)
                     if user:
                         st.session_state.role = db_role
@@ -2361,18 +2381,16 @@ def landing_page():
                         st.session_state.name = user.get('name', username)
                         st.session_state.session_start = datetime.now()
                         st.session_state.remember_me = remember_me
-                        
+                
                         # Set remember me token if requested
                         if remember_me:
                             token = secrets.token_urlsafe(32)
                             expiry = datetime.now() + timedelta(days=30)
                             if db.set_remember_token(username, token, expiry.isoformat()):
-                                # Set query parameters for auto-login
-                                st.query_params = {
-                                    "remember_token": token,
-                                    "remember_user": username
-                                }
-                        
+                                # Store in session state instead of query_params
+                                st.session_state.remember_token = token
+                                st.session_state.remember_user = username
+                
                         st.success("Login successful!")
                         st.rerun()
                     else:
@@ -2569,11 +2587,14 @@ def student_dashboard():
             # Clear remember me token from database
             if st.session_state.username:
                 db.clear_reset_token(st.session_state.username)
-            
-            # Clear query parameters
-            st.query_params = {}
-            
-            # Clear session state
+    
+            # Clear session state tokens
+            if 'remember_token' in st.session_state:
+                del st.session_state.remember_token
+            if 'remember_user' in st.session_state:
+                del st.session_state.remember_user
+    
+            # Clear all session state
             for key in list(st.session_state.keys()):
                 if key != 'rerun_count':
                     del st.session_state[key]
@@ -2868,11 +2889,14 @@ def mentor_dashboard():
             # Clear remember me token from database
             if st.session_state.username:
                 db.clear_reset_token(st.session_state.username)
-            
-            # Clear query parameters
-            st.query_params = {}
-            
-            # Clear session state
+    
+            # Clear session state tokens
+            if 'remember_token' in st.session_state:
+                del st.session_state.remember_token
+            if 'remember_user' in st.session_state:
+                del st.session_state.remember_user
+    
+            # Clear all session state
             for key in list(st.session_state.keys()):
                 if key != 'rerun_count':
                     del st.session_state[key]
@@ -3054,11 +3078,14 @@ def faculty_dashboard():
             # Clear remember me token from database
             if st.session_state.username:
                 db.clear_reset_token(st.session_state.username)
-            
-            # Clear query parameters
-            st.query_params = {}
-            
-            # Clear session state
+    
+            # Clear session state tokens
+            if 'remember_token' in st.session_state:
+                del st.session_state.remember_token
+            if 'remember_user' in st.session_state:
+                del st.session_state.remember_user
+    
+            # Clear all session state
             for key in list(st.session_state.keys()):
                 if key != 'rerun_count':
                     del st.session_state[key]
@@ -3466,11 +3493,14 @@ def admin_dashboard():
             # Clear remember me token from database
             if st.session_state.username:
                 db.clear_reset_token(st.session_state.username)
-            
-            # Clear query parameters
-            st.query_params = {}
-            
-            # Clear session state
+    
+            # Clear session state tokens
+            if 'remember_token' in st.session_state:
+                del st.session_state.remember_token
+            if 'remember_user' in st.session_state:
+                del st.session_state.remember_user
+    
+            # Clear all session state
             for key in list(st.session_state.keys()):
                 if key != 'rerun_count':
                     del st.session_state[key]
