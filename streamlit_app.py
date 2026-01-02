@@ -36,6 +36,47 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+def safe_database_migration():
+    """Migrate database without losing any data"""
+    try:
+        db_path = "data/event_management.db"
+        
+        if not os.path.exists(db_path):
+            # First time setup
+            os.makedirs("data", exist_ok=True)
+            return
+        
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Check current schema
+        cursor.execute("PRAGMA table_info(users)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        # Add new columns if missing
+        changes_made = False
+        if 'reset_token' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN reset_token TEXT")
+            changes_made = True
+            print("✅ Added reset_token column")
+        
+        if 'reset_token_expiry' not in columns:
+            cursor.execute("ALTER TABLE users ADD COLUMN reset_token_expiry TIMESTAMP")
+            changes_made = True
+            print("✅ Added reset_token_expiry column")
+        
+        if changes_made:
+            conn.commit()
+            print("✅ Database migrated successfully - All student data preserved")
+        
+        conn.close()
+        
+    except Exception as e:
+        print(f"⚠️ Migration note: {e}")
+
+# Run migration immediately
+safe_database_migration()
+
 # ============================================
 # SECURITY CONFIGURATION
 # ============================================
