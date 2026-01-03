@@ -206,13 +206,22 @@ class SupabaseClient:
                     self.key = st.secrets.SUPABASE.get('key')
                     
                     if self.url and self.key:
+                        # Ensure URL has https:// scheme
+                        if not self.url.startswith(('http://', 'https://')):
+                            self.url = f'https://{self.url}'
+                        
+                        # Remove trailing slash if present
+                        self.url = self.url.rstrip('/')
+                        
                         self.headers = {
                             'apikey': self.key,
                             'Authorization': f'Bearer {self.key}',
-                            'Content-Type': 'application/json'
+                            'Content-Type': 'application/json',
+                            'Prefer': 'return=minimal'
                         }
                         self.is_configured = True
                         logger.info("✅ Supabase configured successfully")
+                        logger.info(f"Supabase URL: {self.url}")
                     else:
                         logger.warning("⚠️ Supabase credentials incomplete")
                 else:
@@ -226,6 +235,7 @@ class SupabaseClient:
     def execute_query(self, table, method='GET', data=None, filters=None, limit=1000):
         """Execute REST API query to Supabase"""
         if not self.is_configured:
+            logger.error("Supabase not configured")
             return None
         
         try:
@@ -234,35 +244,44 @@ class SupabaseClient:
             url = f"{self.url}/rest/v1/{table}"
             
             # Add filters
+            params = []
             if filters:
-                filter_str = '&'.join([f"{k}=eq.{v}" for k, v in filters.items()])
-                url = f"{url}?{filter_str}"
+                for k, v in filters.items():
+                    # URL encode the value
+                    import urllib.parse
+                    encoded_value = urllib.parse.quote(str(v))
+                    params.append(f"{k}=eq.{encoded_value}")
             
             # Add limit
-            if '?' in url:
-                url = f"{url}&limit={limit}"
-            else:
-                url = f"{url}?limit={limit}"
+            params.append(f"limit={limit}")
+            
+            # Combine params
+            if params:
+                url = f"{url}?{'&'.join(params)}"
             
             # Make request
             if method == 'GET':
-                response = requests.get(url, headers=self.headers)
+                response = requests.get(url, headers=self.headers, timeout=10)
             elif method == 'POST':
-                response = requests.post(url, headers=self.headers, json=data)
+                response = requests.post(url, headers=self.headers, json=data, timeout=10)
             elif method == 'PATCH':
-                response = requests.patch(url, headers=self.headers, json=data)
+                response = requests.patch(url, headers=self.headers, json=data, timeout=10)
             elif method == 'DELETE':
-                response = requests.delete(url, headers=self.headers)
+                response = requests.delete(url, headers=self.headers, timeout=10)
             
             response.raise_for_status()
             
             if method == 'GET':
-                return response.json()
+                return response.json() if response.text else []
             else:
                 return response.status_code in [200, 201, 204]
                 
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             logger.error(f"Supabase API error: {e}")
+            logger.error(f"URL attempted: {url[:100]}...")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error in Supabase query: {e}")
             return None
     
     def insert(self, table, data):
@@ -655,12 +674,29 @@ class DatabaseManager:
                 st.warning("⚠️ Supabase not configured. Falling back to SQLite.")
                 self.use_supabase = False
                 self.client = SQLiteClient()
+            else:
+                # Test connection
+                if not self._test_supabase_connection():
+                    st.warning("⚠️ Supabase connection test failed. Falling back to SQLite.")
+                    self.use_supabase = False
+                    self.client = SQLiteClient()
         else:
             self.client = SQLiteClient()
         
         # Initialize database
         self._initialize_database()
         self._add_default_users()
+    
+    def _test_supabase_connection(self):
+        """Test Supabase connection"""
+        try:
+            # Try a simple query to test connection
+            result = self.client.execute_query('users', limit=1)
+            logger.info("✅ Supabase connection test successful")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Supabase connection test failed: {e}")
+            return False
     
     def _initialize_database(self):
         """Initialize database tables"""
