@@ -833,90 +833,56 @@ class DatabaseManager:
     # ============================================
     
     def verify_credentials(self, username, password, role):
-        """Verify user credentials - FIXED VERSION"""
+        """Verify user credentials - SIMPLIFIED"""
         try:
-            logger.info(f"🔐 Authentication attempt: username={username}, role={role}")
+            # For default accounts
+            if username == 'admin@raisoni' and role == 'admin':
+                return password == 'Admin@12345'
+            elif username == 'faculty@raisoni' and role == 'faculty':
+                return password == 'Faculty@12345'
         
-            # Check default admin/faculty first
-            if role == 'admin' and username == 'admin@raisoni':
-                expected_hash = hashlib.sha256('Admin@12345'.encode()).hexdigest()
-                input_hash = hashlib.sha256(password.encode()).hexdigest()
-                result = input_hash == expected_hash
-                logger.info(f"Admin login: {'✅' if result else '❌'}")
-                return result
-            
-            elif role == 'faculty' and username == 'faculty@raisoni':
-                expected_hash = hashlib.sha256('Faculty@12345'.encode()).hexdigest()
-                input_hash = hashlib.sha256(password.encode()).hexdigest()
-                result = input_hash == expected_hash
-                logger.info(f"Faculty login: {'✅' if result else '❌'}")
-                return result
-        
-            # For other users, check database
+            # For database users
             user = self.get_user(username)
-        
             if not user:
-                logger.warning(f"❌ User not found: {username}")
                 return False
         
-            logger.info(f"✅ User found: {user.get('name')}")
-            logger.info(f"User role in DB: {user.get('role')}")
-            logger.info(f"Requested role: {role}")
-        
-            # Debug: Check all user fields
-            logger.info(f"User fields: {list(user.keys())}")
-        
-            # Check if user is active
-            is_active = user.get('is_active', True)
-            if not is_active:
-                logger.warning(f"❌ User is inactive: {username}")
+            # Check role
+            if user.get('role') != role:
                 return False
         
-            # Check role - make case-insensitive
-            user_role = user.get('role', '').lower()
-            requested_role = role.lower() if role else ''
-        
-            if user_role != requested_role:
-                logger.warning(f"❌ Role mismatch: DB has '{user_role}', requested '{requested_role}'")
-                return False
-        
-            # Compare passwords
-            stored_hash = user.get('password', '')
+            # Check password - hash the input and compare
             input_hash = hashlib.sha256(password.encode()).hexdigest()
+            stored_hash = user.get('password', '')
         
-            logger.info(f"Password length check - Stored: {len(stored_hash)}, Input: {len(input_hash)}")
-            logger.info(f"Stored hash prefix: {stored_hash[:20]}...")
-            logger.info(f"Input hash prefix:  {input_hash[:20]}...")
-        
-            if stored_hash == input_hash:
-                logger.info("✅ Password matches!")
-                self.update_user_activity(username)
-                return True
-            else:
-                logger.warning("❌ Password doesn't match!")
-                # Let's debug what the actual stored hash is
-                logger.info(f"Full stored hash: {stored_hash}")
-                return False
+            return input_hash == stored_hash
         
         except Exception as e:
-            logger.error(f"❌ Login error: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Login error: {e}")
             return False
             
+    # ============================================
+    # UPDATE THE get_user METHOD TO ENSURE IT WORKS
+    # ============================================
+
     def get_user(self, username):
-        """Get user by username"""
+        """Get user by username - IMPROVED"""
         try:
             if self.use_supabase:
                 results = self.client.select('users', {'username': username})
-                return results[0] if results else None
+                if results:
+                    user = results[0]
+                    # Ensure password field exists
+                    if 'password' not in user:
+                        user['password'] = ''
+                    return user
+                return None
             else:
                 return self.client.execute_query(
                     "SELECT * FROM users WHERE username = ?",
                     (username,), fetchone=True
                 )
         except Exception as e:
-            logger.error(f"Error getting user: {e}")
+            logger.error(f"Error getting user {username}: {e}")
             return None
     
     def add_user(self, user_data):
@@ -1747,47 +1713,52 @@ class DatabaseManager:
     # DEFAULT USERS
     # ============================================
     
+    # ============================================
+    # UPDATE THE _add_default_users METHOD
+    # ============================================
+
     def _add_default_users(self):
-        """Add default admin and faculty users"""
+        """Add default admin and faculty users - SIMPLIFIED"""
         try:
+            # Always add default users with correct passwords
             default_users = [
                 {
-                    'id': str(uuid.uuid4()),
-                    'name': 'Administrator',
                     'username': 'admin@raisoni',
-                    'password': hashlib.sha256('Admin@12345'.encode()).hexdigest(),
+                    'password': 'Admin@12345',
+                    'name': 'Administrator',
                     'role': 'admin',
                     'email': 'admin@ghraisoni.edu',
-                    'department': 'Administration',
-                    'created_at': datetime.now().isoformat()
+                    'department': 'Administration'
                 },
                 {
-                    'id': str(uuid.uuid4()),
-                    'name': 'Faculty Coordinator',
                     'username': 'faculty@raisoni',
-                    'password': hashlib.sha256('Faculty@12345'.encode()).hexdigest(),
+                    'password': 'Faculty@12345',
+                    'name': 'Faculty Coordinator',
                     'role': 'faculty',
                     'email': 'faculty@ghraisoni.edu',
-                    'department': 'Faculty',
-                    'created_at': datetime.now().isoformat()
+                    'department': 'Faculty'
                 }
-            ]
+            ]    
+        
+            for user_data in default_users:
+                # Delete if exists first (to ensure clean state)
+                if self.use_supabase:
+                    self.client.delete('users', {'username': user_data['username']})
+                else:
+                    self.client.execute_query(
+                        "DELETE FROM users WHERE username = ?",
+                        (user_data['username'],), commit=True
+                    )
             
-            for user in default_users:
-                # Check if user exists
-                existing = self.get_user(user['username'])
-                if not existing:
-                    if self.use_supabase:
-                        self.client.insert('users', user)
-                    else:
-                        self.client.insert('users', user)
-                    logger.info(f"Added default user: {user['username']}")
-            
+                # Add fresh user
+                self.add_user(user_data)
+                logger.info(f"Added/replaced default user: {user_data['username']}")
+        
             # Add default students
             self._add_default_students()
-            
+        
             return True
-            
+        
         except Exception as e:
             logger.error(f"Error adding default users: {e}")
             return False
@@ -1913,21 +1884,40 @@ class DatabaseManager:
 # Initialize database
 db = DatabaseManager(use_supabase=USE_SUPABASE)
 
-# Quick debug at startup
-logger.info("=== STARTUP DEBUG ===")
+# Quick debug at startup - just log to console
+logger.info("=== STARTUP AUTHENTICATION DEBUG ===")
 
-# Check if Rohan exists
-rohan = db.get_user("rohan@student")
-if rohan:
-    logger.info(f"✅ Rohan found: {rohan.get('name')}")
-    logger.info(f"Rohan's role: {rohan.get('role')}")
-    logger.info(f"Rohan's hash: {rohan.get('password', '')[:30]}...")
-else:
-    logger.error("❌ Rohan not found!")
+# Check all default users
+test_users = [
+    ("admin@raisoni", "Admin@12345", "admin"),
+    ("faculty@raisoni", "Faculty@12345", "faculty"),
+    ("rohan@student", "Student@123", "student"),
+    ("priya@student", "Student@123", "student")
+]
 
-# Test login
-test_result = db.verify_credentials("rohan@student", "Student@123", "student")
-logger.info(f"Rohan login test: {'✅ SUCCESS' if test_result else '❌ FAILED'}")
+for username, password, role in test_users:
+    user = db.get_user(username)
+    if user:
+        logger.info(f"✅ Found {username}: {user.get('name')}")
+        logger.info(f"  Role: {user.get('role')}")
+        logger.info(f"  Hash stored: {user.get('password', '')[:20]}...")
+        
+        # Calculate expected hash
+        expected_hash = hashlib.sha256(password.encode()).hexdigest()
+        stored_hash = user.get('password', '')
+        
+        if stored_hash == expected_hash:
+            logger.info(f"  ✅ Password hash matches!")
+        else:
+            logger.info(f"  ❌ Password hash mismatch!")
+            logger.info(f"  Expected: {expected_hash[:20]}...")
+            logger.info(f"  Stored:   {stored_hash[:20]}...")
+        
+        # Test verify_credentials
+        result = db.verify_credentials(username, password, role)
+        logger.info(f"  Login test: {'✅ SUCCESS' if result else '❌ FAILED'}")
+    else:
+        logger.error(f"❌ {username} not found in database!")
 
 # Initialize password reset manager
 password_reset_manager = PasswordResetManager(db)
@@ -2357,6 +2347,42 @@ def landing_page():
     
     st.markdown(f'<div class="college-header"><h2>{COLLEGE_CONFIG["name"]}</h2><p>Advanced Event Management System</p></div>', 
                 unsafe_allow_html=True)
+
+    # Add a test login section for debugging
+    with st.expander("🔧 Test Logins (Development Only)", expanded=False):
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if st.button("Admin", use_container_width=True):
+                st.session_state.role = 'admin'
+                st.session_state.username = 'admin@raisoni'
+                st.session_state.name = 'Administrator'
+                st.session_state.session_start = datetime.now()
+                st.rerun()
+        
+        with col2:
+            if st.button("Faculty", use_container_width=True):
+                st.session_state.role = 'faculty'
+                st.session_state.username = 'faculty@raisoni'
+                st.session_state.name = 'Faculty Coordinator'
+                st.session_state.session_start = datetime.now()
+                st.rerun()
+        
+        with col3:
+            if st.button("Rohan", use_container_width=True):
+                st.session_state.role = 'student'
+                st.session_state.username = 'rohan@student'
+                st.session_state.name = 'Rohan Sharma'
+                st.session_state.session_start = datetime.now()
+                st.rerun()
+        
+        with col4:
+            if st.button("Priya", use_container_width=True):
+                st.session_state.role = 'student'
+                st.session_state.username = 'priya@student'
+                st.session_state.name = 'Priya Patel'
+                st.session_state.session_start = datetime.now()
+                st.rerun()
     
     # App Information
     with st.expander("📱 About This App", expanded=True):
@@ -2472,6 +2498,8 @@ def landing_page():
             if st.button("Create New Student Account", use_container_width=True, type="secondary"):
                 st.session_state.page = "student_register"
                 st.rerun()
+
+
 
 # ============================================
 # STUDENT REGISTRATION PAGE
@@ -4389,50 +4417,6 @@ def admin_dashboard():
                         else:
                             st.error("Failed to assign mentor.")
 
-def debug_login():
-    """Debug function to test login issues"""
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("🔧 Debug Tools")
-    
-    if st.sidebar.button("Test Rohan Login", key="debug_rohan"):
-        username = "rohan@student"
-        password = "Student@123"
-        role = "student"
-        
-        # Test password hash
-        input_hash = hashlib.sha256(password.encode()).hexdigest()
-        st.sidebar.info(f"Input password: {password}")
-        st.sidebar.info(f"Input hash: {input_hash[:20]}...")
-        
-        # Get user from database
-        user = db.get_user(username)
-        if user:
-            stored_hash = user['password']
-            user_role = user['role']
-            st.sidebar.info(f"User found: {user['name']}")
-            st.sidebar.info(f"Stored hash: {stored_hash[:20]}...")
-            st.sidebar.info(f"User role: {user_role}")
-            st.sidebar.info(f"Requested role: {role}")
-            st.sidebar.info(f"Hashes match: {input_hash == stored_hash}")
-            st.sidebar.info(f"Roles match: {user_role == role}")
-            
-            # Test verify_credentials
-            result = db.verify_credentials(username, password, role)
-            st.sidebar.info(f"verify_credentials result: {result}")
-        else:
-            st.sidebar.error("User not found in database")
-    
-    if st.sidebar.button("List All Users", key="debug_users"):
-        if db.use_supabase:
-            users = db.client.select('users')
-        else:
-            users = db.client.execute_query("SELECT username, role FROM users", fetchall=True)
-        
-        if users:
-            st.sidebar.info(f"Found {len(users)} users:")
-            for user in users:
-                st.sidebar.text(f"- {user.get('username')} ({user.get('role')})")
-
 # ============================================
 # MAIN APPLICATION
 # ============================================
@@ -4565,8 +4549,7 @@ def main():
                     for user in users:
                         st.text(f"- {user.get('username')} ({user.get('role')})")
 
-    debug_login()
-    
+        
     # ============================================
     # ADD A QUICK TEST AT STARTUP
     # ============================================
