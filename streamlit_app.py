@@ -833,26 +833,26 @@ class DatabaseManager:
     # ============================================
     
     def verify_credentials(self, username, password, role):
-        """Verify user credentials - IMPROVED DEBUGGING"""
+        """Verify user credentials - FIXED VERSION"""
         try:
             logger.info(f"🔐 Authentication attempt: username={username}, role={role}")
         
-            # Check default admin/faculty first (case-sensitive)
+            # Check default admin/faculty first
             if role == 'admin' and username == 'admin@raisoni':
                 expected_hash = hashlib.sha256('Admin@12345'.encode()).hexdigest()
                 input_hash = hashlib.sha256(password.encode()).hexdigest()
                 result = input_hash == expected_hash
-                logger.info(f"Admin check: {result}")
+                logger.info(f"Admin login: {'✅' if result else '❌'}")
                 return result
             
             elif role == 'faculty' and username == 'faculty@raisoni':
                 expected_hash = hashlib.sha256('Faculty@12345'.encode()).hexdigest()
                 input_hash = hashlib.sha256(password.encode()).hexdigest()
                 result = input_hash == expected_hash
-                logger.info(f"Faculty check: {result}")
+                logger.info(f"Faculty login: {'✅' if result else '❌'}")
                 return result
         
-            # Check database
+            # For other users, check database
             user = self.get_user(username)
         
             if not user:
@@ -860,25 +860,33 @@ class DatabaseManager:
                 return False
         
             logger.info(f"✅ User found: {user.get('name')}")
-            logger.info(f"User role: {user.get('role')}")
+            logger.info(f"User role in DB: {user.get('role')}")
             logger.info(f"Requested role: {role}")
         
-            # Check role
-            if user.get('role') != role:
-                logger.warning(f"❌ Role mismatch: User has {user.get('role')}, requested {role}")
+            # Debug: Check all user fields
+            logger.info(f"User fields: {list(user.keys())}")
+        
+            # Check if user is active
+            is_active = user.get('is_active', True)
+            if not is_active:
+                logger.warning(f"❌ User is inactive: {username}")
                 return False
         
-            # Check if active
-            if not user.get('is_active', True):
-                logger.warning(f"❌ User inactive: {username}")
+            # Check role - make case-insensitive
+            user_role = user.get('role', '').lower()
+            requested_role = role.lower() if role else ''
+        
+            if user_role != requested_role:
+                logger.warning(f"❌ Role mismatch: DB has '{user_role}', requested '{requested_role}'")
                 return False
         
             # Compare passwords
             stored_hash = user.get('password', '')
             input_hash = hashlib.sha256(password.encode()).hexdigest()
         
-            logger.info(f"Stored hash: {stored_hash[:20]}...")
-            logger.info(f"Input hash:  {input_hash[:20]}...")
+            logger.info(f"Password length check - Stored: {len(stored_hash)}, Input: {len(input_hash)}")
+            logger.info(f"Stored hash prefix: {stored_hash[:20]}...")
+            logger.info(f"Input hash prefix:  {input_hash[:20]}...")
         
             if stored_hash == input_hash:
                 logger.info("✅ Password matches!")
@@ -886,10 +894,13 @@ class DatabaseManager:
                 return True
             else:
                 logger.warning("❌ Password doesn't match!")
+                # Let's debug what the actual stored hash is
+                logger.info(f"Full stored hash: {stored_hash}")
                 return False
         
         except Exception as e:
             logger.error(f"❌ Login error: {e}")
+            import traceback
             traceback.print_exc()
             return False
             
@@ -954,6 +965,35 @@ class DatabaseManager:
             logger.error(f"❌ Error adding user: {e}")
             traceback.print_exc()
             return False, f"Registration failed: {str(e)}"
+
+    # ============================================
+    # ADD A DEBUG FUNCTION TO CHECK USER DATA
+    # ============================================
+
+    def debug_user_data():
+        """Debug function to check user data in database"""
+        # Check Rohan's data
+        rohan = db.get_user("rohan@student")
+        if rohan:
+            st.sidebar.markdown("---")
+            st.sidebar.subheader("🔍 Debug: Rohan's Data")
+            st.sidebar.write(f"Name: {rohan.get('name')}")
+            st.sidebar.write(f"Username: {rohan.get('username')}")
+            st.sidebar.write(f"Role: {rohan.get('role')}")
+            st.sidebar.write(f"Password hash length: {len(rohan.get('password', ''))}")
+            st.sidebar.write(f"Password hash prefix: {rohan.get('password', '')[:20]}...")
+        
+            # Test password
+            test_password = "Student@123"
+            test_hash = hashlib.sha256(test_password.encode()).hexdigest()
+            st.sidebar.write(f"Test hash: {test_hash[:20]}...")
+            st.sidebar.write(f"Match: {test_hash == rohan.get('password', '')}")
+        
+            # Test verify_credentials
+            result = db.verify_credentials("rohan@student", "Student@123", "student")
+            st.sidebar.write(f"Login test: {'✅ Success' if result else '❌ Failed'}")
+        else:
+            st.sidebar.error("Rohan not found in database!")
     
     def update_user_activity(self, username):
         """Update user's last activity"""
@@ -1872,9 +1912,6 @@ class DatabaseManager:
 
 # Initialize database
 db = DatabaseManager(use_supabase=USE_SUPABASE)
-
-# Run authentication test
-test_authentication()
 
 # Initialize password reset manager
 password_reset_manager = PasswordResetManager(db)
@@ -4380,34 +4417,6 @@ def debug_login():
             for user in users:
                 st.sidebar.text(f"- {user.get('username')} ({user.get('role')})")
 
-def test_authentication():
-    """Test authentication after database initialization"""
-    # Test password hash
-    test_password = "Student@123"
-    test_hash = hashlib.sha256(test_password.encode()).hexdigest()
-    logger.info(f"Test password: {test_password}")
-    logger.info(f"Test hash: {test_hash}")
-    logger.info(f"Expected hash length: {len(test_hash)}")
-    
-    # Test get_user for rohan
-    rohan = db.get_user("rohan@student")
-    if rohan:
-        logger.info(f"✅ Found Rohan: {rohan['name']}")
-        logger.info(f"Rohan's stored hash: {rohan['password'][:20]}...")
-        logger.info(f"Test hash: {test_hash[:20]}...")
-        logger.info(f"Hash match: {test_hash == rohan['password']}")
-        logger.info(f"Rohan's role: {rohan.get('role')}")
-    else:
-        logger.error("❌ Rohan not found in database!")
-    
-    # Test verify_credentials
-    result = db.verify_credentials("rohan@student", "Student@123", "student")
-    logger.info(f"Verify credentials result: {result}")
-    
-    # Test admin login
-    admin_result = db.verify_credentials("admin@raisoni", "Admin@12345", "admin")
-    logger.info(f"Admin login test: {admin_result}")
-
 # ============================================
 # MAIN APPLICATION
 # ============================================
@@ -4498,6 +4507,25 @@ def main():
         student_dashboard()
 
     debug_login()
+    debug_user_data()
+    # ============================================
+    # ADD A QUICK TEST AT STARTUP
+    # ============================================
+
+    # Quick test after db initialization
+    logger.info("=== STARTUP AUTHENTICATION TEST ===")
+
+    # Test Rohan login
+    test_result = db.verify_credentials("rohan@student", "Student@123", "student")
+    logger.info(f"Rohan login test: {'✅ SUCCESS' if test_result else '❌ FAILED'}")
+
+    # Test admin login
+    admin_result = db.verify_credentials("admin@raisoni", "Admin@12345", "admin")
+    logger.info(f"Admin login test: {'✅ SUCCESS' if admin_result else '❌ FAILED'}")
+
+    # Test faculty login
+    faculty_result = db.verify_credentials("faculty@raisoni", "Faculty@12345", "faculty")
+    logger.info(f"Faculty login test: {'✅ SUCCESS' if faculty_result else '❌ FAILED'}")
 
 # ============================================
 # RUN APPLICATION
