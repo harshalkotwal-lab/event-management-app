@@ -1913,6 +1913,22 @@ class DatabaseManager:
 # Initialize database
 db = DatabaseManager(use_supabase=USE_SUPABASE)
 
+# Quick debug at startup
+logger.info("=== STARTUP DEBUG ===")
+
+# Check if Rohan exists
+rohan = db.get_user("rohan@student")
+if rohan:
+    logger.info(f"✅ Rohan found: {rohan.get('name')}")
+    logger.info(f"Rohan's role: {rohan.get('role')}")
+    logger.info(f"Rohan's hash: {rohan.get('password', '')[:30]}...")
+else:
+    logger.error("❌ Rohan not found!")
+
+# Test login
+test_result = db.verify_credentials("rohan@student", "Student@123", "student")
+logger.info(f"Rohan login test: {'✅ SUCCESS' if test_result else '❌ FAILED'}")
+
 # Initialize password reset manager
 password_reset_manager = PasswordResetManager(db)
 
@@ -4506,8 +4522,51 @@ def main():
     elif st.session_state.role == 'student':
         student_dashboard()
 
+    # ============================================
+    # ADD DEBUG TOOL TO SIDEBAR (ONLY IN DEVELOPMENT)
+    # ============================================
+    
+    # Only show debug tools if not in production and user is logged in
+    import os
+    if os.environ.get('STREAMLIT_ENVIRONMENT', 'development') == 'development':
+        with st.sidebar:
+            st.markdown("---")
+            st.subheader("🔧 Debug Tools")
+            
+            if st.button("Check Rohan's Data", key="debug_rohan"):
+                # Check Rohan's data
+                rohan = db.get_user("rohan@student")
+                if rohan:
+                    st.info(f"✅ Found Rohan: {rohan.get('name')}")
+                    st.write(f"Username: {rohan.get('username')}")
+                    st.write(f"Role: {rohan.get('role')}")
+                    st.write(f"Password hash: {rohan.get('password', '')[:30]}...")
+                    
+                    # Test password
+                    test_password = "Student@123"
+                    test_hash = hashlib.sha256(test_password.encode()).hexdigest()
+                    st.write(f"Test hash: {test_hash[:30]}...")
+                    st.write(f"Match: {test_hash == rohan.get('password', '')}")
+                    
+                    # Test login
+                    result = db.verify_credentials("rohan@student", "Student@123", "student")
+                    st.write(f"Login test: {'✅ Success' if result else '❌ Failed'}")
+                else:
+                    st.error("❌ Rohan not found in database!")
+            
+            if st.button("List All Users", key="debug_users"):
+                if db.use_supabase:
+                    users = db.client.select('users', limit=10)
+                else:
+                    users = db.client.execute_query("SELECT username, role FROM users LIMIT 10", fetchall=True)
+                
+                if users:
+                    st.info(f"Found {len(users)} users:")
+                    for user in users:
+                        st.text(f"- {user.get('username')} ({user.get('role')})")
+
     debug_login()
-    debug_user_data()
+    
     # ============================================
     # ADD A QUICK TEST AT STARTUP
     # ============================================
