@@ -827,6 +827,26 @@ class DatabaseManager:
         
         for sql in tables_sql:
             self.client.execute_query(sql, commit=True)
+
+    # ============================================
+    # ADD THIS RIGHT AFTER db = DatabaseManager()
+    # ============================================
+
+    # Test password hash
+    test_password = "Student@123"
+    test_hash = hashlib.sha256(test_password.encode()).hexdigest()
+    logger.info(f"Test password: {test_password}")
+    logger.info(f"Test hash: {test_hash}")
+    logger.info(f"Expected hash length: {len(test_hash)}")
+
+    # Test get_user for rohan
+    rohan = db.get_user("rohan@student")
+    if rohan:
+        logger.info(f"Found Rohan: {rohan['name']}")
+        logger.info(f"Rohan's stored hash: {rohan['password']}")
+        logger.info(f"Test hash matches stored: {test_hash == rohan['password']}")
+    else:
+        logger.error("Rohan not found in database!")
     
     # ============================================
     # USER MANAGEMENT METHODS
@@ -4328,6 +4348,50 @@ def admin_dashboard():
                         else:
                             st.error("Failed to assign mentor.")
 
+def debug_login():
+    """Debug function to test login issues"""
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🔧 Debug Tools")
+    
+    if st.sidebar.button("Test Rohan Login", key="debug_rohan"):
+        username = "rohan@student"
+        password = "Student@123"
+        role = "student"
+        
+        # Test password hash
+        input_hash = hashlib.sha256(password.encode()).hexdigest()
+        st.sidebar.info(f"Input password: {password}")
+        st.sidebar.info(f"Input hash: {input_hash[:20]}...")
+        
+        # Get user from database
+        user = db.get_user(username)
+        if user:
+            stored_hash = user['password']
+            user_role = user['role']
+            st.sidebar.info(f"User found: {user['name']}")
+            st.sidebar.info(f"Stored hash: {stored_hash[:20]}...")
+            st.sidebar.info(f"User role: {user_role}")
+            st.sidebar.info(f"Requested role: {role}")
+            st.sidebar.info(f"Hashes match: {input_hash == stored_hash}")
+            st.sidebar.info(f"Roles match: {user_role == role}")
+            
+            # Test verify_credentials
+            result = db.verify_credentials(username, password, role)
+            st.sidebar.info(f"verify_credentials result: {result}")
+        else:
+            st.sidebar.error("User not found in database")
+    
+    if st.sidebar.button("List All Users", key="debug_users"):
+        if db.use_supabase:
+            users = db.client.select('users')
+        else:
+            users = db.client.execute_query("SELECT username, role FROM users", fetchall=True)
+        
+        if users:
+            st.sidebar.info(f"Found {len(users)} users:")
+            for user in users:
+                st.sidebar.text(f"- {user.get('username')} ({user.get('role')})")
+
 # ============================================
 # MAIN APPLICATION
 # ============================================
@@ -4416,6 +4480,8 @@ def main():
         mentor_dashboard()
     elif st.session_state.role == 'student':
         student_dashboard()
+
+    debug_login()
 
 # ============================================
 # RUN APPLICATION
