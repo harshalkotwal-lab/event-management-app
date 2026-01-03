@@ -1753,61 +1753,61 @@ class DatabaseManager:
             return False
     
     def _add_default_students(self):
-    """Add default student accounts - FIXED VERSION"""
-    try:
-        default_students = [
-            {
-                'name': 'Rohan Sharma',
-                'username': 'rohan@student',
-                'password': 'Student@123',  # Plain text, will be hashed
-                'roll_no': 'CSE2023001',
-                'department': 'Computer Science & Engineering',
-                'year': 'III',
-                'email': 'rohan.sharma@ghraisoni.edu',
-                'mobile': '9876543210'
-            },
-            {
-                'name': 'Priya Patel',
-                'username': 'priya@student',
-                'password': 'Student@123',
-                'roll_no': 'AIML2023002',
-                'department': 'Artificial Intelligence & Machine Learning',
-                'year': 'II',
-                'email': 'priya.patel@ghraisoni.edu',
-                'mobile': '9876543211'
-            }
-        ]
-        
-        for student in default_students:
-            existing = self.get_user(student['username'])
-            if not existing:
-                # Create user data with plain password
-                user_data = {
-                    'name': student['name'],
-                    'username': student['username'],
-                    'password': student['password'],  # Plain text
-                    'roll_no': student['roll_no'],
-                    'department': student['department'],
-                    'year': student['year'],
-                    'email': student['email'],
-                    'mobile': student['mobile'],
-                    'role': 'student'
+        """Add default student accounts - FIXED VERSION"""
+        try:
+            default_students = [
+                {
+                    'name': 'Rohan Sharma',
+                    'username': 'rohan@student',
+                    'password': 'Student@123',  # Plain text, will be hashed
+                    'roll_no': 'CSE2023001',
+                    'department': 'Computer Science & Engineering',
+                    'year': 'III',
+                    'email': 'rohan.sharma@ghraisoni.edu',
+                    'mobile': '9876543210'
+                },
+                {
+                    'name': 'Priya Patel',
+                    'username': 'priya@student',
+                    'password': 'Student@123',
+                    'roll_no': 'AIML2023002',
+                    'department': 'Artificial Intelligence & Machine Learning',
+                    'year': 'II',
+                    'email': 'priya.patel@ghraisoni.edu',
+                    'mobile': '9876543211'
                 }
+            ]
+        
+            for student in default_students:
+                existing = self.get_user(student['username'])
+                if not existing:
+                    # Create user data with plain password
+                    user_data = {
+                        'name': student['name'],
+                        'username': student['username'],
+                        'password': student['password'],  # Plain text
+                        'roll_no': student['roll_no'],
+                        'department': student['department'],
+                        'year': student['year'],
+                        'email': student['email'],
+                        'mobile': student['mobile'],
+                        'role': 'student'
+                    }
                 
-                success, message = self.add_user(user_data)
-                if success:
-                    logger.info(f"✅ Added default student: {student['name']}")
+                    success, message = self.add_user(user_data)
+                    if success:
+                        logger.info(f"✅ Added default student: {student['name']}")
+                    else:
+                        logger.error(f"❌ Failed to add student {student['name']}: {message}")
                 else:
-                    logger.error(f"❌ Failed to add student {student['name']}: {message}")
-            else:
-                logger.info(f"Student already exists: {student['name']}")
+                    logger.info(f"Student already exists: {student['name']}")
         
-        return True
+            return True
         
-    except Exception as e:
-        logger.error(f"Error adding default students: {e}")
-        traceback.print_exc()
-        return False
+        except Exception as e:
+            logger.error(f"Error adding default students: {e}")
+            traceback.print_exc()
+            return False
     
     # ============================================
     # SYSTEM STATISTICS
