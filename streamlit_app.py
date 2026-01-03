@@ -1924,7 +1924,7 @@ def fix_existing_passwords(db_instance):
                         all(c in '0123456789abcdef' for c in stored_pass.lower()))
             
             if not is_hashed and stored_pass:
-                    logger.info(f"⚠️ Plain text password found for {username}: '{stored_pass[:20]}...'")
+                logger.info(f"⚠️ Plain text password found for {username}: '{stored_pass[:20]}...'")
                 
                 # Hash the password
                 new_hash = hashlib.sha256(stored_pass.encode()).hexdigest().lower()
