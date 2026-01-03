@@ -1885,27 +1885,55 @@ def save_flyer_image(uploaded_file):
         logger.error(f"Error processing flyer image: {e}")
         return None
 
+# ============================================
+# Update the check_remember_me_cookie function
+# ============================================
+
 def check_remember_me_cookie():
     """Check for remember me cookie and auto-login"""
     if 'remember_me' not in st.session_state:
         st.session_state.remember_me = False
     
     # Check for cookie in query parameters
-    query_params = st.query_params
-    if 'remember_token' in query_params and 'remember_user' in query_params:
-        token = query_params['remember_token']
-        username = query_params['remember_user']
+    # In Streamlit, we use st.query_params.get() or check the URL parameters
+    try:
+        # Try to get query parameters from URL
+        if hasattr(st, 'query_params'):
+            # Streamlit 1.28+ way
+            params = st.query_params.to_dict()
+        else:
+            # Fallback for older Streamlit versions
+            # Try to parse from URL manually
+            params = {}
+            import urllib.parse
+            from urllib.parse import urlparse, parse_qs
+            
+            # Get current URL from st (if available)
+            if hasattr(st, 'get_current_url'):
+                url = st.get_current_url()
+                parsed = urlparse(url)
+                params = parse_qs(parsed.query)
+                # Convert list values to single values
+                params = {k: v[0] if len(v) == 1 else v for k, v in params.items()}
         
-        if db.verify_remember_token(username, token):
-            user = db.get_user(username)
-            if user:
-                st.session_state.role = user.get('role')
-                st.session_state.username = username
-                st.session_state.name = user.get('name', username)
-                st.session_state.session_start = datetime.now()
-                st.session_state.remember_me = True
-                st.success(f"Welcome back, {st.session_state.name}!")
-                st.rerun()
+        if 'remember_token' in params and 'remember_user' in params:
+            token = params['remember_token']
+            username = params['remember_user']
+            
+            if db.verify_remember_token(username, token):
+                user = db.get_user(username)
+                if user:
+                    st.session_state.role = user.get('role')
+                    st.session_state.username = username
+                    st.session_state.name = user.get('name', username)
+                    st.session_state.session_start = datetime.now()
+                    st.session_state.remember_me = True
+                    st.success(f"Welcome back, {st.session_state.name}!")
+                    st.rerun()
+                    
+    except Exception as e:
+        logger.debug(f"Error checking remember me cookie: {e}")
+        # Silently fail - this is normal for first-time users
 
 # ============================================
 # EVENT CARD DISPLAY (IMPROVED VERSION)
@@ -2301,10 +2329,11 @@ def landing_page():
                             expiry = datetime.now() + timedelta(days=30)
                             if db.set_remember_token(username, token, expiry.isoformat()):
                                 # Set query parameters for auto-login
-                                st.query_params = {
-                                    "remember_token": token,
-                                    "remember_user": username
-                                }
+                                if hasattr(st, 'query_params'):
+                                    # Clear existing params and set new ones
+                                    st.query_params.clear()
+                                    st.query_params["remember_token"] = token
+                                    st.query_params["remember_user"] = username
                         
                         st.success("Login successful!")
                         st.rerun()
@@ -2435,10 +2464,11 @@ def student_registration_page():
                             expiry = datetime.now() + timedelta(days=30)
                             if db.set_remember_token(username, token, expiry.isoformat()):
                                 # Set query parameters for auto-login
-                                st.query_params = {
-                                    "remember_token": token,
-                                    "remember_user": username
-                                }
+                                if hasattr(st, 'query_params'):
+                                    # Clear existing params and set new ones
+                                    st.query_params.clear()
+                                    st.query_params["remember_token"] = token
+                                    st.query_params["remember_user"] = username
                         
                         st.balloons()
                         st.info("You have been automatically logged in. Redirecting to dashboard...")
@@ -2906,10 +2936,11 @@ def student_dashboard():
             # Clear remember me token from database
             if st.session_state.username:
                 db.clear_reset_token(st.session_state.username)
-            
+    
             # Clear query parameters
-            st.query_params = {}
-            
+            if hasattr(st, 'query_params'):
+                st.query_params.clear()
+    
             # Clear session state
             for key in list(st.session_state.keys()):
                 if key != 'rerun_count':
@@ -3202,10 +3233,11 @@ def mentor_dashboard():
             # Clear remember me token from database
             if st.session_state.username:
                 db.clear_reset_token(st.session_state.username)
-            
+    
             # Clear query parameters
-            st.query_params = {}
-            
+            if hasattr(st, 'query_params'):
+                st.query_params.clear()
+    
             # Clear session state
             for key in list(st.session_state.keys()):
                 if key != 'rerun_count':
@@ -3381,14 +3413,15 @@ def faculty_dashboard():
                 st.rerun()
         
         st.markdown("---")
-        if st.button("Logout", type="secondary", use_container_width=True):
+        if st.button("🚪 Logout", use_container_width=True, type="secondary"):
             # Clear remember me token from database
             if st.session_state.username:
                 db.clear_reset_token(st.session_state.username)
-            
+    
             # Clear query parameters
-            st.query_params = {}
-            
+            if hasattr(st, 'query_params'):
+                st.query_params.clear()
+    
             # Clear session state
             for key in list(st.session_state.keys()):
                 if key != 'rerun_count':
@@ -3790,14 +3823,15 @@ def admin_dashboard():
                 st.rerun()
         
         st.markdown("---")
-        if st.button("Logout", type="secondary", use_container_width=True):
+        if st.button("🚪 Logout", use_container_width=True, type="secondary"):
             # Clear remember me token from database
             if st.session_state.username:
                 db.clear_reset_token(st.session_state.username)
-            
+    
             # Clear query parameters
-            st.query_params = {}
-            
+            if hasattr(st, 'query_params'):
+                st.query_params.clear()
+    
             # Clear session state
             for key in list(st.session_state.keys()):
                 if key != 'rerun_count':
