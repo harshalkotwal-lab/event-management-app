@@ -833,65 +833,65 @@ class DatabaseManager:
     # ============================================
     
     def verify_credentials(self, username, password, role):
-    """Verify user credentials - IMPROVED DEBUGGING"""
-    try:
-        logger.info(f"🔐 Authentication attempt: username={username}, role={role}")
+        """Verify user credentials - IMPROVED DEBUGGING"""
+        try:
+            logger.info(f"🔐 Authentication attempt: username={username}, role={role}")
         
-        # Check default admin/faculty first (case-sensitive)
-        if role == 'admin' and username == 'admin@raisoni':
-            expected_hash = hashlib.sha256('Admin@12345'.encode()).hexdigest()
-            input_hash = hashlib.sha256(password.encode()).hexdigest()
-            result = input_hash == expected_hash
-            logger.info(f"Admin check: {result}")
-            return result
+            # Check default admin/faculty first (case-sensitive)
+            if role == 'admin' and username == 'admin@raisoni':
+                expected_hash = hashlib.sha256('Admin@12345'.encode()).hexdigest()
+                input_hash = hashlib.sha256(password.encode()).hexdigest()
+                result = input_hash == expected_hash
+                logger.info(f"Admin check: {result}")
+                return result
             
-        elif role == 'faculty' and username == 'faculty@raisoni':
-            expected_hash = hashlib.sha256('Faculty@12345'.encode()).hexdigest()
+            elif role == 'faculty' and username == 'faculty@raisoni':
+                expected_hash = hashlib.sha256('Faculty@12345'.encode()).hexdigest()
+                input_hash = hashlib.sha256(password.encode()).hexdigest()
+                result = input_hash == expected_hash
+                logger.info(f"Faculty check: {result}")
+                return result
+        
+            # Check database
+            user = self.get_user(username)
+        
+            if not user:
+                logger.warning(f"❌ User not found: {username}")
+                return False
+        
+            logger.info(f"✅ User found: {user.get('name')}")
+            logger.info(f"User role: {user.get('role')}")
+            logger.info(f"Requested role: {role}")
+        
+            # Check role
+            if user.get('role') != role:
+                logger.warning(f"❌ Role mismatch: User has {user.get('role')}, requested {role}")
+                return False
+        
+            # Check if active
+            if not user.get('is_active', True):
+                logger.warning(f"❌ User inactive: {username}")
+                return False
+        
+            # Compare passwords
+            stored_hash = user.get('password', '')
             input_hash = hashlib.sha256(password.encode()).hexdigest()
-            result = input_hash == expected_hash
-            logger.info(f"Faculty check: {result}")
-            return result
         
-        # Check database
-        user = self.get_user(username)
+            logger.info(f"Stored hash: {stored_hash[:20]}...")
+            logger.info(f"Input hash:  {input_hash[:20]}...")
         
-        if not user:
-            logger.warning(f"❌ User not found: {username}")
+            if stored_hash == input_hash:
+                logger.info("✅ Password matches!")
+                self.update_user_activity(username)
+                return True
+            else:
+                logger.warning("❌ Password doesn't match!")
+                return False
+        
+        except Exception as e:
+            logger.error(f"❌ Login error: {e}")
+            traceback.print_exc()
             return False
-        
-        logger.info(f"✅ User found: {user.get('name')}")
-        logger.info(f"User role: {user.get('role')}")
-        logger.info(f"Requested role: {role}")
-        
-        # Check role
-        if user.get('role') != role:
-            logger.warning(f"❌ Role mismatch: User has {user.get('role')}, requested {role}")
-            return False
-        
-        # Check if active
-        if not user.get('is_active', True):
-            logger.warning(f"❌ User inactive: {username}")
-            return False
-        
-        # Compare passwords
-        stored_hash = user.get('password', '')
-        input_hash = hashlib.sha256(password.encode()).hexdigest()
-        
-        logger.info(f"Stored hash: {stored_hash[:20]}...")
-        logger.info(f"Input hash:  {input_hash[:20]}...")
-        
-        if stored_hash == input_hash:
-            logger.info("✅ Password matches!")
-            self.update_user_activity(username)
-            return True
-        else:
-            logger.warning("❌ Password doesn't match!")
-            return False
-        
-    except Exception as e:
-        logger.error(f"❌ Login error: {e}")
-        traceback.print_exc()
-        return False
             
     def get_user(self, username):
         """Get user by username"""
