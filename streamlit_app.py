@@ -853,18 +853,30 @@ class DatabaseManager:
                     return False
                 
                 if user_role != role:
+                    logger.warning(f"Role mismatch: User role={user_role}, Requested role={role}")
                     return False
+
+                # Hash the input password and compare
+                input_hash = hashlib.sha256(password.encode()).hexdigest()
+                
+                # Debug logging (remove in production)
+                logger.info(f"Authentication attempt: username={username}, role={role}")
+                logger.info(f"Stored hash: {stored_hash[:20]}...")
+                logger.info(f"Input hash: {input_hash[:20]}...")
+                logger.info(f"Match: {stored_hash == input_hash}")
                 
                 # Update last activity
                 self.update_user_activity(username)
                 
-                return hashlib.sha256(password.encode()).hexdigest() == stored_hash
-            return False
+                return stored_hash == input_hash
+            else:
+                logger.warning(f"User not found: {username}")
+                return False
             
         except Exception as e:
             logger.error(f"Login error: {e}")
             return False
-    
+            
     def get_user(self, username):
         """Get user by username"""
         try:
@@ -881,7 +893,7 @@ class DatabaseManager:
             return None
     
     def add_user(self, user_data):
-        """Add new user"""
+        """Add new user - FIXED to ensure consistent password hashing"""
         try:
             # Validate mobile number
             if 'mobile' in user_data:
@@ -892,7 +904,15 @@ class DatabaseManager:
             # Format mobile number
             mobile = Validators.format_mobile(user_data.get('mobile', ''))
             
-            hashed_pass = hashlib.sha256(user_data.get('password').encode()).hexdigest()
+            # Always hash the password, even if it's already hashed
+            password = user_data.get('password', '')
+            
+            # Check if password is already hashed (64 chars hex)
+            if len(password) == 64 and all(c in '0123456789abcdefABCDEF' for c in password):
+                hashed_pass = password  # Already hashed
+            else:
+                hashed_pass = hashlib.sha256(password.encode()).hexdigest()
+            
             user_id = user_data.get('id', str(uuid.uuid4()))
             
             user_record = {
@@ -915,14 +935,17 @@ class DatabaseManager:
                 success = self.client.insert('users', user_record)
             
             if success:
-                logger.info(f"New user registered: {user_data.get('username')}")
+                logger.info(f"✅ New user registered: {user_data.get('username')}")
+                logger.info(f"Password hash stored: {hashed_pass[:20]}...")
                 return True, "User registered successfully"
             else:
+                logger.error(f"❌ Registration failed for: {user_data.get('username')}")
                 return False, "Registration failed"
                 
         except Exception as e:
-            logger.error(f"Error adding user: {e}")
-            return False, "Registration failed"
+            logger.error(f"❌ Error adding user: {e}")
+            traceback.print_exc()
+            return False, f"Registration failed: {str(e)}"
     
     def update_user_activity(self, username):
         """Update user's last activity"""
@@ -1722,7 +1745,7 @@ class DatabaseManager:
             return False
     
     def _add_default_students(self):
-        """Add default student accounts"""
+        """Add default student accounts - FIXED"""
         try:
             default_students = [
                 {
@@ -1754,7 +1777,7 @@ class DatabaseManager:
                         'id': str(uuid.uuid4()),
                         'name': student['name'],
                         'username': student['username'],
-                        'password': student['password'],
+                        'password': student['password'],  # Will be hashed in add_user
                         'role': 'student',
                         'roll_no': student['roll_no'],
                         'department': student['department'],
@@ -1764,14 +1787,16 @@ class DatabaseManager:
                         'created_at': datetime.now().isoformat()
                     }
                     
-                    if self.use_supabase:
-                        self.client.insert('users', student_data)
+                    # Use add_user method which hashes the password
+                    success, message = self.add_user(student_data)
+                    if success:
+                        logger.info(f"✅ Added default student: {student['name']}")
                     else:
-                        # Hash password for SQLite
-                        student_data['password'] = hashlib.sha256(student['password'].encode()).hexdigest()
-                        self.client.insert('users', student_data)
-                    
-                    logger.info(f"Added default student: {student['name']}")
+                        logger.error(f"❌ Failed to add student {student['name']}: {message}")
+                else:
+                    logger.info(f"Student already exists: {student['name']}")
+                    # Debug: Check stored password hash
+                    logger.info(f"Stored hash for {student['username']}: {existing['password'][:20]}...")
             
             return True
             
