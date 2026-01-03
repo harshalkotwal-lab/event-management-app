@@ -832,8 +832,12 @@ class DatabaseManager:
     # USER MANAGEMENT METHODS
     # ============================================
     
+    # ============================================
+    # FIX THE verify_credentials METHOD
+    # ============================================
+
     def verify_credentials(self, username, password, role):
-        """Verify user credentials - SIMPLIFIED"""
+        """Verify user credentials - FIXED FOR PLAIN TEXT PASSWORDS"""
         try:
             # For default accounts
             if username == 'admin@raisoni' and role == 'admin':
@@ -844,21 +848,94 @@ class DatabaseManager:
             # For database users
             user = self.get_user(username)
             if not user:
+                logger.warning(f"User not found: {username}")
                 return False
         
             # Check role
             if user.get('role') != role:
+                logger.warning(f"Role mismatch: {user.get('role')} != {role}")
                 return False
         
-            # Check password - hash the input and compare
-            input_hash = hashlib.sha256(password.encode()).hexdigest()
-            stored_hash = user.get('password', '')
+            stored_password = user.get('password', '')
         
-            return input_hash == stored_hash
+            # Check if stored password is already hashed (64 hex chars)
+            if len(stored_password) == 64 and all(c in '0123456789abcdefABCDEF' for c in stored_password):
+                # Compare hashes
+                input_hash = hashlib.sha256(password.encode()).hexdigest().lower()
+                stored_hash = stored_password.lower()
+                result = input_hash == stored_hash
+                logger.info(f"Comparing hashes - Input: {input_hash[:20]}..., Stored: {stored_hash[:20]}..., Match: {result}")
+            else:
+                # Compare plain text (for backward compatibility)
+                result = password == stored_password
+                logger.info(f"Comparing plain text - Match: {result}")
+        
+            return result
         
         except Exception as e:
             logger.error(f"Login error: {e}")
             return False
+
+    # ============================================
+    # ADD A FUNCTION TO FIX EXISTING PASSWORDS
+    # ============================================
+
+    def fix_existing_passwords():
+        """Fix existing passwords by hashing any plain text passwords"""
+        logger.info("=== FIXING EXISTING PASSWORDS ===")
+    
+        # Get all users
+        if db.use_supabase:
+            users = db.client.select('users')
+        else:
+            users = db.client.execute_query("SELECT * FROM users", fetchall=True)
+    
+        if users:
+            logger.info(f"Found {len(users)} users to check")
+        
+            for user in users:
+                username = user.get('username')
+                stored_pass = user.get('password', '')
+            
+                # Check if password needs hashing (not 64 hex chars)
+                if stored_pass and (len(stored_pass) != 64 or not all(c in '0123456789abcdefABCDEF' for c in stored_pass)):
+                    logger.info(f"Fixing password for {username} - Currently: '{stored_pass[:20]}...'")
+                
+                    # Try common passwords to identify what it might be
+                    common_passwords = ['Student@123', 'Admin@12345', 'Faculty@12345']
+                    matched = False
+                
+                    for common_pass in common_passwords:
+                        if stored_pass == common_pass:
+                            # Found a plain text password that matches common ones
+                            new_hash = hashlib.sha256(common_pass.encode()).hexdigest().lower()
+                        
+                            # Update in database
+                            if db.use_supabase:
+                                success = db.client.update('users', {'username': username}, {'password': new_hash})
+                            else:
+                                success = db.client.update('users', {'username': username}, {'password': new_hash})
+                        
+                            if success:
+                                logger.info(f"✅ Fixed {username}: Hashed '{common_pass}' to {new_hash[:20]}...")
+                                matched = True
+                                break
+                
+                    if not matched:
+                        # Hash whatever is stored
+                        new_hash = hashlib.sha256(stored_pass.encode()).hexdigest().lower()
+                    
+                        if db.use_supabase:
+                            success = db.client.update('users', {'username': username}, {'password': new_hash})
+                        else:
+                            success = db.client.update('users', {'username': username}, {'password': new_hash})
+                    
+                        if success:
+                            logger.info(f"✅ Hashed unknown password for {username}")
+                else:
+                    logger.info(f"✅ {username} already has hashed password: {stored_pass[:20]}...")
+    
+        logger.info("=== PASSWORD FIX COMPLETE ===")
             
     # ============================================
     # UPDATE THE get_user METHOD TO ENSURE IT WORKS
@@ -886,51 +963,57 @@ class DatabaseManager:
             return None
     
     def add_user(self, user_data):
-        """Add new user - SIMPLIFIED VERSION"""
+        """Add new user - ENSURES PASSWORD HASHING"""
         try:
-            # Validate required fields
-            required_fields = ['name', 'username', 'password']
-            for field in required_fields:
-                if field not in user_data or not user_data[field]:
-                    return False, f"Missing required field: {field}"
+            # Extract password
+            password = user_data.get('password', '')
         
-            # Hash the password
-            plain_password = user_data['password']
-            hashed_password = hashlib.sha256(plain_password.encode()).hexdigest()
+            # ALWAYS hash the password
+            if password:
+                # Check if it's already a hash (64 hex chars)
+                if len(password) == 64 and all(c in '0123456789abcdefABCDEF' for c in password):
+                    hashed_pass = password.lower()  # Use as-is, ensure lowercase
+                else:
+                    # Hash the plain text password
+                    hashed_pass = hashlib.sha256(password.encode()).hexdigest().lower()
+            else:
+                return False, "Password is required"
         
-            # Create user record
+            logger.info(f"Password processing - Original: {password[:10]}..., Hashed: {hashed_pass[:20]}...")
+        
+            user_id = user_data.get('id', str(uuid.uuid4()))
+        
             user_record = {
-                'id': str(uuid.uuid4()),
-                'name': user_data['name'],
-                'username': user_data['username'],
-                'password': hashed_password,
+                'id': user_id,
+                'name': user_data.get('name'),
+                'username': user_data.get('username'),
+                'password': hashed_pass,  # Always store hashed
                 'role': user_data.get('role', 'student'),
-                'roll_no': user_data.get('roll_no', ''),
-                'department': user_data.get('department', ''),
-                'year': user_data.get('year', ''),
-                'email': user_data.get('email', ''),
-                'mobile': user_data.get('mobile', ''),
+                'roll_no': user_data.get('roll_no'),
+                'department': user_data.get('department'),
+                'year': user_data.get('year'),
+                'email': user_data.get('email'),
+                'mobile': Validators.format_mobile(user_data.get('mobile', '')),
                 'created_at': datetime.now().isoformat()
             }
         
-            # Insert into database
             if self.use_supabase:
                 success = self.client.insert('users', user_record)
             else:
                 success = self.client.insert('users', user_record)
         
             if success:
-                logger.info(f"✅ User registered: {user_data['username']}")
-                logger.info(f"Password hash: {hashed_password[:20]}...")
+                logger.info(f"✅ User '{user_data.get('username')}' added with hashed password")
                 return True, "User registered successfully"
             else:
-                logger.error(f"❌ Registration failed for: {user_data['username']}")
+                logger.error(f"❌ Failed to add user: {user_data.get('username')}")
                 return False, "Registration failed"
             
         except Exception as e:
             logger.error(f"❌ Error adding user: {e}")
+            import traceback
             traceback.print_exc()
-            return False, f"Registration failed: {str(e)}"
+            return False, str(e)
 
     # ============================================
     # ADD A DEBUG FUNCTION TO CHECK USER DATA
@@ -1883,6 +1966,9 @@ class DatabaseManager:
 
 # Initialize database
 db = DatabaseManager(use_supabase=USE_SUPABASE)
+
+# Fix existing passwords
+fix_existing_passwords()
 
 # Quick debug at startup - just log to console
 logger.info("=== STARTUP AUTHENTICATION DEBUG ===")
@@ -4417,6 +4503,8 @@ def admin_dashboard():
                         else:
                             st.error("Failed to assign mentor.")
 
+    
+
 # ============================================
 # MAIN APPLICATION
 # ============================================
@@ -4454,6 +4542,34 @@ def main():
                 if key != 'rerun_count':
                     del st.session_state[key]
             st.rerun()
+
+    # Add debug tools to sidebar
+    with st.sidebar:
+        if st.session_state.role:  # Only show if logged in
+            st.markdown("---")
+            st.subheader("🔧 Admin Tools")
+            
+            if st.button("Rehash All Passwords", key="rehash_passwords"):
+                fix_existing_passwords()
+                st.success("All passwords rehashed!")
+                st.rerun()
+            
+            if st.button("Test Rohan Login", key="test_rohan"):
+                result = db.verify_credentials("rohan@student", "Student@123", "student")
+                if result:
+                    st.success("✅ Rohan login works!")
+                else:
+                    st.error("❌ Rohan login failed")
+                    
+                # Show debug info
+                rohan = db.get_user("rohan@student")
+                if rohan:
+                    stored = rohan.get('password', '')
+                    expected = hashlib.sha256("Student@123".encode()).hexdigest().lower()
+                    st.write(f"Stored: {stored[:30]}...")
+                    st.write(f"Expected: {expected[:30]}...")
+                    st.write(f"Length: {len(stored)} chars")
+                    st.write(f"Is hex: {len(stored) == 64 and all(c in '0123456789abcdef' for c in stored.lower())}")
     
     # Display database info in sidebar
     if db.use_supabase:
