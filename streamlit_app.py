@@ -829,73 +829,69 @@ class DatabaseManager:
             self.client.execute_query(sql, commit=True)
 
     # ============================================
-    # ADD THIS RIGHT AFTER db = DatabaseManager()
-    # ============================================
-
-    # Test password hash
-    test_password = "Student@123"
-    test_hash = hashlib.sha256(test_password.encode()).hexdigest()
-    logger.info(f"Test password: {test_password}")
-    logger.info(f"Test hash: {test_hash}")
-    logger.info(f"Expected hash length: {len(test_hash)}")
-
-    # Test get_user for rohan
-    rohan = db.get_user("rohan@student")
-    if rohan:
-        logger.info(f"Found Rohan: {rohan['name']}")
-        logger.info(f"Rohan's stored hash: {rohan['password']}")
-        logger.info(f"Test hash matches stored: {test_hash == rohan['password']}")
-    else:
-        logger.error("Rohan not found in database!")
-    
-    # ============================================
     # USER MANAGEMENT METHODS
     # ============================================
     
     def verify_credentials(self, username, password, role):
-        """Verify user credentials"""
-        try:
-            # Check default admin/faculty first
-            if role == 'admin' and username == 'admin@raisoni':
-                return hashlib.sha256(password.encode()).hexdigest() == hashlib.sha256('Admin@12345'.encode()).hexdigest()
-            elif role == 'faculty' and username == 'faculty@raisoni':
-                return hashlib.sha256(password.encode()).hexdigest() == hashlib.sha256('Faculty@12345'.encode()).hexdigest()
+    """Verify user credentials - IMPROVED DEBUGGING"""
+    try:
+        logger.info(f"🔐 Authentication attempt: username={username}, role={role}")
+        
+        # Check default admin/faculty first (case-sensitive)
+        if role == 'admin' and username == 'admin@raisoni':
+            expected_hash = hashlib.sha256('Admin@12345'.encode()).hexdigest()
+            input_hash = hashlib.sha256(password.encode()).hexdigest()
+            result = input_hash == expected_hash
+            logger.info(f"Admin check: {result}")
+            return result
             
-            # Check database
-            user = self.get_user(username)
-            
-            if user:
-                stored_hash = user['password']
-                user_role = user['role']
-                is_active = user.get('is_active', True)
-                
-                if not is_active:
-                    return False
-                
-                if user_role != role:
-                    logger.warning(f"Role mismatch: User role={user_role}, Requested role={role}")
-                    return False
-
-                # Hash the input password and compare
-                input_hash = hashlib.sha256(password.encode()).hexdigest()
-                
-                # Debug logging (remove in production)
-                logger.info(f"Authentication attempt: username={username}, role={role}")
-                logger.info(f"Stored hash: {stored_hash[:20]}...")
-                logger.info(f"Input hash: {input_hash[:20]}...")
-                logger.info(f"Match: {stored_hash == input_hash}")
-                
-                # Update last activity
-                self.update_user_activity(username)
-                
-                return stored_hash == input_hash
-            else:
-                logger.warning(f"User not found: {username}")
-                return False
-            
-        except Exception as e:
-            logger.error(f"Login error: {e}")
+        elif role == 'faculty' and username == 'faculty@raisoni':
+            expected_hash = hashlib.sha256('Faculty@12345'.encode()).hexdigest()
+            input_hash = hashlib.sha256(password.encode()).hexdigest()
+            result = input_hash == expected_hash
+            logger.info(f"Faculty check: {result}")
+            return result
+        
+        # Check database
+        user = self.get_user(username)
+        
+        if not user:
+            logger.warning(f"❌ User not found: {username}")
             return False
+        
+        logger.info(f"✅ User found: {user.get('name')}")
+        logger.info(f"User role: {user.get('role')}")
+        logger.info(f"Requested role: {role}")
+        
+        # Check role
+        if user.get('role') != role:
+            logger.warning(f"❌ Role mismatch: User has {user.get('role')}, requested {role}")
+            return False
+        
+        # Check if active
+        if not user.get('is_active', True):
+            logger.warning(f"❌ User inactive: {username}")
+            return False
+        
+        # Compare passwords
+        stored_hash = user.get('password', '')
+        input_hash = hashlib.sha256(password.encode()).hexdigest()
+        
+        logger.info(f"Stored hash: {stored_hash[:20]}...")
+        logger.info(f"Input hash:  {input_hash[:20]}...")
+        
+        if stored_hash == input_hash:
+            logger.info("✅ Password matches!")
+            self.update_user_activity(username)
+            return True
+        else:
+            logger.warning("❌ Password doesn't match!")
+            return False
+        
+    except Exception as e:
+        logger.error(f"❌ Login error: {e}")
+        traceback.print_exc()
+        return False
             
     def get_user(self, username):
         """Get user by username"""
@@ -913,59 +909,51 @@ class DatabaseManager:
             return None
     
     def add_user(self, user_data):
-        """Add new user - FIXED to ensure consistent password hashing"""
-        try:
-            # Validate mobile number
-            if 'mobile' in user_data:
-                is_valid, msg = Validators.validate_mobile(user_data['mobile'])
-                if not is_valid:
-                    return False, msg
+    """Add new user - SIMPLIFIED VERSION"""
+    try:
+        # Validate required fields
+        required_fields = ['name', 'username', 'password']
+        for field in required_fields:
+            if field not in user_data or not user_data[field]:
+                return False, f"Missing required field: {field}"
+        
+        # Hash the password
+        plain_password = user_data['password']
+        hashed_password = hashlib.sha256(plain_password.encode()).hexdigest()
+        
+        # Create user record
+        user_record = {
+            'id': str(uuid.uuid4()),
+            'name': user_data['name'],
+            'username': user_data['username'],
+            'password': hashed_password,
+            'role': user_data.get('role', 'student'),
+            'roll_no': user_data.get('roll_no', ''),
+            'department': user_data.get('department', ''),
+            'year': user_data.get('year', ''),
+            'email': user_data.get('email', ''),
+            'mobile': user_data.get('mobile', ''),
+            'created_at': datetime.now().isoformat()
+        }
+        
+        # Insert into database
+        if self.use_supabase:
+            success = self.client.insert('users', user_record)
+        else:
+            success = self.client.insert('users', user_record)
+        
+        if success:
+            logger.info(f"✅ User registered: {user_data['username']}")
+            logger.info(f"Password hash: {hashed_password[:20]}...")
+            return True, "User registered successfully"
+        else:
+            logger.error(f"❌ Registration failed for: {user_data['username']}")
+            return False, "Registration failed"
             
-            # Format mobile number
-            mobile = Validators.format_mobile(user_data.get('mobile', ''))
-            
-            # Always hash the password, even if it's already hashed
-            password = user_data.get('password', '')
-            
-            # Check if password is already hashed (64 chars hex)
-            if len(password) == 64 and all(c in '0123456789abcdefABCDEF' for c in password):
-                hashed_pass = password  # Already hashed
-            else:
-                hashed_pass = hashlib.sha256(password.encode()).hexdigest()
-            
-            user_id = user_data.get('id', str(uuid.uuid4()))
-            
-            user_record = {
-                'id': user_id,
-                'name': user_data.get('name'),
-                'username': user_data.get('username'),
-                'password': hashed_pass,
-                'role': user_data.get('role', 'student'),
-                'roll_no': user_data.get('roll_no'),
-                'department': user_data.get('department'),
-                'year': user_data.get('year'),
-                'email': user_data.get('email'),
-                'mobile': mobile,
-                'created_at': datetime.now().isoformat()
-            }
-            
-            if self.use_supabase:
-                success = self.client.insert('users', user_record)
-            else:
-                success = self.client.insert('users', user_record)
-            
-            if success:
-                logger.info(f"✅ New user registered: {user_data.get('username')}")
-                logger.info(f"Password hash stored: {hashed_pass[:20]}...")
-                return True, "User registered successfully"
-            else:
-                logger.error(f"❌ Registration failed for: {user_data.get('username')}")
-                return False, "Registration failed"
-                
-        except Exception as e:
-            logger.error(f"❌ Error adding user: {e}")
-            traceback.print_exc()
-            return False, f"Registration failed: {str(e)}"
+    except Exception as e:
+        logger.error(f"❌ Error adding user: {e}")
+        traceback.print_exc()
+        return False, f"Registration failed: {str(e)}"
     
     def update_user_activity(self, username):
         """Update user's last activity"""
@@ -1765,64 +1753,61 @@ class DatabaseManager:
             return False
     
     def _add_default_students(self):
-        """Add default student accounts - FIXED"""
-        try:
-            default_students = [
-                {
-                    'name': 'Rohan Sharma',
-                    'username': 'rohan@student',
-                    'password': 'Student@123',
-                    'roll_no': 'CSE2023001',
-                    'department': 'Computer Science & Engineering',
-                    'year': 'III',
-                    'email': 'rohan.sharma@ghraisoni.edu',
-                    'mobile': '9876543210'
-                },
-                {
-                    'name': 'Priya Patel',
-                    'username': 'priya@student',
-                    'password': 'Student@123',
-                    'roll_no': 'AIML2023002',
-                    'department': 'Artificial Intelligence & Machine Learning',
-                    'year': 'II',
-                    'email': 'priya.patel@ghraisoni.edu',
-                    'mobile': '9876543211'
+    """Add default student accounts - FIXED VERSION"""
+    try:
+        default_students = [
+            {
+                'name': 'Rohan Sharma',
+                'username': 'rohan@student',
+                'password': 'Student@123',  # Plain text, will be hashed
+                'roll_no': 'CSE2023001',
+                'department': 'Computer Science & Engineering',
+                'year': 'III',
+                'email': 'rohan.sharma@ghraisoni.edu',
+                'mobile': '9876543210'
+            },
+            {
+                'name': 'Priya Patel',
+                'username': 'priya@student',
+                'password': 'Student@123',
+                'roll_no': 'AIML2023002',
+                'department': 'Artificial Intelligence & Machine Learning',
+                'year': 'II',
+                'email': 'priya.patel@ghraisoni.edu',
+                'mobile': '9876543211'
+            }
+        ]
+        
+        for student in default_students:
+            existing = self.get_user(student['username'])
+            if not existing:
+                # Create user data with plain password
+                user_data = {
+                    'name': student['name'],
+                    'username': student['username'],
+                    'password': student['password'],  # Plain text
+                    'roll_no': student['roll_no'],
+                    'department': student['department'],
+                    'year': student['year'],
+                    'email': student['email'],
+                    'mobile': student['mobile'],
+                    'role': 'student'
                 }
-            ]
-            
-            for student in default_students:
-                existing = self.get_user(student['username'])
-                if not existing:
-                    student_data = {
-                        'id': str(uuid.uuid4()),
-                        'name': student['name'],
-                        'username': student['username'],
-                        'password': student['password'],  # Will be hashed in add_user
-                        'role': 'student',
-                        'roll_no': student['roll_no'],
-                        'department': student['department'],
-                        'year': student['year'],
-                        'email': student['email'],
-                        'mobile': student['mobile'],
-                        'created_at': datetime.now().isoformat()
-                    }
-                    
-                    # Use add_user method which hashes the password
-                    success, message = self.add_user(student_data)
-                    if success:
-                        logger.info(f"✅ Added default student: {student['name']}")
-                    else:
-                        logger.error(f"❌ Failed to add student {student['name']}: {message}")
+                
+                success, message = self.add_user(user_data)
+                if success:
+                    logger.info(f"✅ Added default student: {student['name']}")
                 else:
-                    logger.info(f"Student already exists: {student['name']}")
-                    # Debug: Check stored password hash
-                    logger.info(f"Stored hash for {student['username']}: {existing['password'][:20]}...")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error adding default students: {e}")
-            return False
+                    logger.error(f"❌ Failed to add student {student['name']}: {message}")
+            else:
+                logger.info(f"Student already exists: {student['name']}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error adding default students: {e}")
+        traceback.print_exc()
+        return False
     
     # ============================================
     # SYSTEM STATISTICS
@@ -1887,6 +1872,9 @@ class DatabaseManager:
 
 # Initialize database
 db = DatabaseManager(use_supabase=USE_SUPABASE)
+
+# Run authentication test
+test_authentication()
 
 # Initialize password reset manager
 password_reset_manager = PasswordResetManager(db)
@@ -4391,6 +4379,34 @@ def debug_login():
             st.sidebar.info(f"Found {len(users)} users:")
             for user in users:
                 st.sidebar.text(f"- {user.get('username')} ({user.get('role')})")
+
+def test_authentication():
+    """Test authentication after database initialization"""
+    # Test password hash
+    test_password = "Student@123"
+    test_hash = hashlib.sha256(test_password.encode()).hexdigest()
+    logger.info(f"Test password: {test_password}")
+    logger.info(f"Test hash: {test_hash}")
+    logger.info(f"Expected hash length: {len(test_hash)}")
+    
+    # Test get_user for rohan
+    rohan = db.get_user("rohan@student")
+    if rohan:
+        logger.info(f"✅ Found Rohan: {rohan['name']}")
+        logger.info(f"Rohan's stored hash: {rohan['password'][:20]}...")
+        logger.info(f"Test hash: {test_hash[:20]}...")
+        logger.info(f"Hash match: {test_hash == rohan['password']}")
+        logger.info(f"Rohan's role: {rohan.get('role')}")
+    else:
+        logger.error("❌ Rohan not found in database!")
+    
+    # Test verify_credentials
+    result = db.verify_credentials("rohan@student", "Student@123", "student")
+    logger.info(f"Verify credentials result: {result}")
+    
+    # Test admin login
+    admin_result = db.verify_credentials("admin@raisoni", "Admin@12345", "admin")
+    logger.info(f"Admin login test: {admin_result}")
 
 # ============================================
 # MAIN APPLICATION
