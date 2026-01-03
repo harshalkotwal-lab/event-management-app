@@ -342,6 +342,184 @@ class SQLiteClient:
         except:
             return False
 
+class AIEventGenerator:
+    """Generate structured event data from unstructured text - Compatible with OpenAI v0.28"""
+    
+    def __init__(self):
+        # Initialize OpenAI client
+        self.api_key = None
+        self.is_configured = False
+        
+        try:
+            # Get API key from secrets
+            if hasattr(st, 'secrets'):
+                # Try different possible secret names
+                if 'OPENAI_API_KEY' in st.secrets:
+                    self.api_key = st.secrets["OPENAI_API_KEY"]
+                elif 'openai' in st.secrets and 'api_key' in st.secrets.openai:
+                    self.api_key = st.secrets.openai.api_key
+                
+                if self.api_key and self.api_key.startswith("sk-"):
+                    import openai
+                    # For OpenAI v0.28.x, set the API key directly
+                    openai.api_key = self.api_key
+                    self.is_configured = True
+                    logger.info("✅ OpenAI configured successfully")
+                elif self.api_key:
+                    logger.warning(f"⚠️ Invalid OpenAI API key format")
+                    self.is_configured = False
+                else:
+                    logger.warning("⚠️ OpenAI API key not found in secrets")
+                    self.is_configured = False
+            else:
+                logger.warning("⚠️ Streamlit secrets not available")
+                self.is_configured = False
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Could not initialize OpenAI: {str(e)[:100]}")
+            self.is_configured = False
+    
+    def extract_event_info(self, text):
+        """Extract event information from text using AI or regex fallback"""
+        
+        # Try OpenAI first if available
+        if self.is_configured and self.api_key:
+            try:
+                with st.spinner("🤖 AI is processing your event..."):
+                    return self._extract_with_openai(text)
+            except Exception as e:
+                logger.warning(f"AI extraction failed: {str(e)[:100]}. Using regex fallback.")
+        
+        # Fallback to regex extraction
+        return self._extract_with_regex(text)
+    
+    def _extract_with_openai(self, text):
+        """Use OpenAI to extract structured event data"""
+        prompt = f"""
+        Extract event information from the following text and return as JSON with these fields:
+        - title: Event title (string)
+        - description: Detailed event description (string)
+        - event_type: Type of event (workshop, hackathon, competition, bootcamp, seminar, conference, webinar)
+        - event_date: Event date in YYYY-MM-DD format (extract from text or use reasonable default)
+        - venue: Event venue/location (string)
+        - organizer: Event organizer (string)
+        - event_link: Event website/URL if mentioned (string or null)
+        - registration_link: Registration URL if mentioned (string or null)
+        - max_participants: Maximum participants if mentioned (integer or 100)
+        
+        Text: {text}
+        
+        Return only valid JSON, no other text.
+        """
+        
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are an expert at extracting structured event information from text. Always return valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.1,
+                max_tokens=600
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            
+            # Clean response (remove markdown code blocks if present)
+            result_text = re.sub(r'```json\s*', '', result_text)
+            result_text = re.sub(r'\s*```', '', result_text)
+            result_text = re.sub(r'^json\s*', '', result_text, flags=re.IGNORECASE)
+            
+            # Parse JSON
+            event_data = json.loads(result_text)
+            
+            # Validate required fields
+            required_fields = ['title', 'description', 'event_type', 'event_date', 'venue', 'organizer']
+            for field in required_fields:
+                if field not in event_data:
+                    event_data[field] = ""
+            
+            # Add AI metadata
+            event_data['ai_generated'] = True
+            event_data['ai_prompt'] = text
+            event_data['ai_extracted_at'] = datetime.now().isoformat()
+            
+            return event_data
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse AI response as JSON: {str(e)[:100]}")
+            return self._extract_with_regex(text)
+        except Exception as e:
+            logger.error(f"OpenAI API error: {str(e)[:100]}")
+            return self._extract_with_regex(text)
+    
+    def _extract_with_regex(self, text):
+        """Fallback regex-based extraction"""
+        event_data = {
+            'title': 'New Event',
+            'description': text[:200] + '...' if len(text) > 200 else text,
+            'event_type': 'workshop',
+            'event_date': (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d'),
+            'venue': 'G H Raisoni College',
+            'organizer': 'College Department',
+            'event_link': None,
+            'registration_link': None,
+            'max_participants': 100,
+            'ai_generated': False,
+            'ai_prompt': text
+        }
+        
+        # Try to extract title (first line or sentence)
+        lines = text.strip().split('\n')
+        if lines and lines[0].strip():
+            first_line = lines[0].strip()
+            if len(first_line) < 100:  # Reasonable title length
+                event_data['title'] = first_line
+        
+        # Try to extract date patterns
+        date_patterns = [
+            r'(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})',  # DD-MM-YYYY
+            r'(\d{2,4}[-/]\d{1,2}[-/]\d{1,2})',  # YYYY-MM-DD
+            r'(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})',
+        ]
+        
+        for pattern in date_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                event_data['event_date'] = match.group(1)
+                break
+        
+        # Try to extract venue
+        venue_keywords = ['at', 'venue', 'location', 'place', 'hall', 'room']
+        for keyword in venue_keywords:
+            pattern = rf'{keyword}[:\s]*([^.\n,;]{5,50})'
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                event_data['venue'] = match.group(1).strip()
+                break
+        
+        # Try to extract organizer
+        organizer_keywords = ['by', 'organizer', 'organized by', 'conducted by', 'hosted by']
+        for keyword in organizer_keywords:
+            pattern = rf'{keyword}[:\s]*([^.\n,;]{5,50})'
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                event_data['organizer'] = match.group(1).strip()
+                break
+        
+        # Try to extract URLs (registration links)
+        url_pattern = r'https?://[^\s<>"\'()]+'
+        urls = re.findall(url_pattern, text)
+        
+        if urls:
+            # Use first URL as event link
+            event_data['event_link'] = urls[0]
+            # If there's a second URL, use it as registration link
+            if len(urls) > 1:
+                event_data['registration_link'] = urls[1]
+        
+        return event_data
+
 # ============================================
 # UNIFIED DATABASE MANAGER
 # ============================================
