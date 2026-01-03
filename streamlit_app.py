@@ -832,14 +832,6 @@ class DatabaseManager:
     # USER MANAGEMENT METHODS
     # ============================================
     
-    # ============================================
-    # FIX THE verify_credentials METHOD
-    # ============================================
-
-    # ============================================
-    # UPDATE THE verify_credentials METHOD (SIMPLIFIED)
-    # ============================================
-
     def verify_credentials(self, username, password, role):
         """Verify user credentials - SIMPLE AND RELIABLE"""
         try:
@@ -874,16 +866,6 @@ class DatabaseManager:
             logger.error(f"Login error: {e}")
             return False
 
-    # ============================================
-    # ADD A FUNCTION TO FIX EXISTING PASSWORDS
-    # ============================================
-
-    
-            
-    # ============================================
-    # UPDATE THE get_user METHOD TO ENSURE IT WORKS
-    # ============================================
-
     def get_user(self, username):
         """Get user by username - IMPROVED"""
         try:
@@ -904,10 +886,6 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting user {username}: {e}")
             return None
-    
-    # ============================================
-    # UPDATE THE add_user METHOD (SIMPLIFIED)
-    # ============================================
 
     def add_user(self, user_data):
         """Add new user - ALWAYS HASHES PASSWORD"""
@@ -949,35 +927,6 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"❌ Error adding user: {e}")
             return False, str(e)
-
-    # ============================================
-    # ADD A DEBUG FUNCTION TO CHECK USER DATA
-    # ============================================
-
-    def debug_user_data():
-        """Debug function to check user data in database"""
-        # Check Rohan's data
-        rohan = db.get_user("rohan@student")
-        if rohan:
-            st.sidebar.markdown("---")
-            st.sidebar.subheader("🔍 Debug: Rohan's Data")
-            st.sidebar.write(f"Name: {rohan.get('name')}")
-            st.sidebar.write(f"Username: {rohan.get('username')}")
-            st.sidebar.write(f"Role: {rohan.get('role')}")
-            st.sidebar.write(f"Password hash length: {len(rohan.get('password', ''))}")
-            st.sidebar.write(f"Password hash prefix: {rohan.get('password', '')[:20]}...")
-        
-            # Test password
-            test_password = "Student@123"
-            test_hash = hashlib.sha256(test_password.encode()).hexdigest()
-            st.sidebar.write(f"Test hash: {test_hash[:20]}...")
-            st.sidebar.write(f"Match: {test_hash == rohan.get('password', '')}")
-        
-            # Test verify_credentials
-            result = db.verify_credentials("rohan@student", "Student@123", "student")
-            st.sidebar.write(f"Login test: {'✅ Success' if result else '❌ Failed'}")
-        else:
-            st.sidebar.error("Rohan not found in database!")
     
     def update_user_activity(self, username):
         """Update user's last activity"""
@@ -1565,7 +1514,7 @@ class DatabaseManager:
             return False
     
     # ============================================
-    # LIKES & INTEREST METHODS
+    # LIKES & INTEREST METHODS (FIXED)
     # ============================================
     
     def add_like(self, event_id, student_username):
@@ -1701,38 +1650,75 @@ class DatabaseManager:
             return 0
     
     def get_student_liked_events(self, student_username):
-        """Get all events liked by a student"""
+        """Get all events liked by a student - FIXED"""
         try:
             if self.use_supabase:
-                # This is complex with REST API, simplified version
-                return []
+                # For Supabase, we need to get liked events first, then get event details
+                likes = self.client.select('event_likes', {'student_username': student_username})
+                if not likes:
+                    return []
+                
+                # Get all event IDs that the student liked
+                event_ids = [like['event_id'] for like in likes]
+                
+                # Get event details for each event ID
+                liked_events = []
+                for event_id in event_ids:
+                    event = self.client.select('events', {'id': event_id})
+                    if event:
+                        liked_events.append(event[0])
+                
+                # Sort by liked date (most recent first)
+                liked_events.sort(key=lambda x: next(
+                    (like['liked_at'] for like in likes if like['event_id'] == x['id']),
+                    ''), reverse=True)
+                
+                return liked_events
             else:
                 return self.client.execute_query(
                     "SELECT e.* FROM events e JOIN event_likes l ON e.id = l.event_id WHERE l.student_username = ? ORDER BY l.liked_at DESC",
                     (student_username,), fetchall=True
                 )
-        except:
+        except Exception as e:
+            logger.error(f"Error getting liked events: {e}")
             return []
     
     def get_student_interested_events(self, student_username):
-        """Get all events student is interested in"""
+        """Get all events student is interested in - FIXED"""
         try:
             if self.use_supabase:
-                return []
+                # For Supabase, we need to get interested events first, then get event details
+                interests = self.client.select('event_interested', {'student_username': student_username})
+                if not interests:
+                    return []
+                
+                # Get all event IDs that the student is interested in
+                event_ids = [interest['event_id'] for interest in interests]
+                
+                # Get event details for each event ID
+                interested_events = []
+                for event_id in event_ids:
+                    event = self.client.select('events', {'id': event_id})
+                    if event:
+                        interested_events.append(event[0])
+                
+                # Sort by interested date (most recent first)
+                interested_events.sort(key=lambda x: next(
+                    (interest['interested_at'] for interest in interests if interest['event_id'] == x['id']),
+                    ''), reverse=True)
+                
+                return interested_events
             else:
                 return self.client.execute_query(
                     "SELECT e.* FROM events e JOIN event_interested i ON e.id = i.event_id WHERE i.student_username = ? ORDER BY i.interested_at DESC",
                     (student_username,), fetchall=True
                 )
-        except:
+        except Exception as e:
+            logger.error(f"Error getting interested events: {e}")
             return []
     
     # ============================================
     # DEFAULT USERS
-    # ============================================
-    
-    # ============================================
-    # UPDATE THE _add_default_users METHOD
     # ============================================
 
     def _add_default_users(self):
@@ -2025,17 +2011,12 @@ def save_flyer_image(uploaded_file):
         logger.error(f"Error processing flyer image: {e}")
         return None
 
-# ============================================
-# Update the check_remember_me_cookie function
-# ============================================
-
 def check_remember_me_cookie():
     """Check for remember me cookie and auto-login"""
     if 'remember_me' not in st.session_state:
         st.session_state.remember_me = False
     
     # Check for cookie in query parameters
-    # In Streamlit, we use st.query_params.get() or check the URL parameters
     try:
         # Try to get query parameters from URL
         if hasattr(st, 'query_params'):
@@ -2073,10 +2054,9 @@ def check_remember_me_cookie():
                     
     except Exception as e:
         logger.debug(f"Error checking remember me cookie: {e}")
-        # Silently fail - this is normal for first-time users
 
 # ============================================
-# EVENT CARD DISPLAY (IMPROVED VERSION)
+# EVENT CARD DISPLAY (IMPROVED VERSION WITH SHARE BUTTON)
 # ============================================
 def display_event_card(event, current_user=None):
     """Display improved event card with flyer, mentor info, and registration links"""
@@ -2147,7 +2127,7 @@ def display_event_card(event, current_user=None):
             
             # Engagement row - use HTML for layout
             if current_user:
-                col_like, col_interested = st.columns(2)
+                col_like, col_interested, col_share = st.columns(3)
                 
                 with col_like:
                     is_liked = db.is_event_liked(event_id, current_user)
@@ -2178,6 +2158,19 @@ def display_event_card(event, current_user=None):
                         else:
                             if db.add_interested(event_id, current_user):
                                 st.rerun()
+                
+                with col_share:
+                    # Share button to promote the app
+                    if st.button("📤 Share", key=f"share_{event_id}",
+                               use_container_width=True, type="secondary",
+                               help="Share this event with friends"):
+                        # Create a share message
+                        event_title = event.get('title', 'Cool Event')
+                        share_text = f"Check out '{event_title}' at G H Raisoni College Event Manager! 🎓\n\nJoin the platform to discover more events: [Event Manager App]"
+                        
+                        # Copy to clipboard
+                        st.code(share_text)
+                        st.success("📋 Share message copied! Share with your friends.")
             
             # Show engagement counts
             st.caption(f"❤️ {likes_count} Likes | ⭐ {interested_count} Interested")
@@ -2376,42 +2369,6 @@ def landing_page():
     st.markdown(f'<div class="college-header"><h2>{COLLEGE_CONFIG["name"]}</h2><p>Advanced Event Management System</p></div>', 
                 unsafe_allow_html=True)
 
-    # Add a test login section for debugging
-    with st.expander("🔧 Test Logins (Development Only)", expanded=False):
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            if st.button("Admin", use_container_width=True):
-                st.session_state.role = 'admin'
-                st.session_state.username = 'admin@raisoni'
-                st.session_state.name = 'Administrator'
-                st.session_state.session_start = datetime.now()
-                st.rerun()
-        
-        with col2:
-            if st.button("Faculty", use_container_width=True):
-                st.session_state.role = 'faculty'
-                st.session_state.username = 'faculty@raisoni'
-                st.session_state.name = 'Faculty Coordinator'
-                st.session_state.session_start = datetime.now()
-                st.rerun()
-        
-        with col3:
-            if st.button("Rohan", use_container_width=True):
-                st.session_state.role = 'student'
-                st.session_state.username = 'rohan@student'
-                st.session_state.name = 'Rohan Sharma'
-                st.session_state.session_start = datetime.now()
-                st.rerun()
-        
-        with col4:
-            if st.button("Priya", use_container_width=True):
-                st.session_state.role = 'student'
-                st.session_state.username = 'priya@student'
-                st.session_state.name = 'Priya Patel'
-                st.session_state.session_start = datetime.now()
-                st.rerun()
-    
     # App Information
     with st.expander("📱 About This App", expanded=True):
         st.markdown("""
@@ -3021,6 +2978,12 @@ st.markdown("""
         font-size: 0.9rem !important;
         padding: 0.5rem 1rem !important;
         min-height: auto !important;
+    }
+    
+    /* Share button */
+    .share-button {
+        background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
+        color: white !important;
     }
     
     /* Mobile responsive */
@@ -4484,23 +4447,6 @@ def main():
                     del st.session_state[key]
             st.rerun()
 
-    # Simple debug in sidebar
-    if st.session_state.role == 'admin':
-        with st.sidebar:
-            st.markdown("---")
-            st.subheader("🔧 Quick Debug")
-            
-            if st.button("Check Rohan"):
-                rohan = db.get_user("rohan@student")
-                if rohan:
-                    st.write(f"Name: {rohan.get('name')}")
-                    st.write(f"Password stored: {rohan.get('password', '')[:30]}...")
-                    st.write(f"Is hashed: {len(rohan.get('password', '')) == 64}")
-                    
-                    # Test login
-                    result = db.verify_credentials("rohan@student", "Student@123", "student")
-                    st.write(f"Login test: {'✅ Success' if result else '❌ Failed'}")
-    
     # Display database info in sidebar
     if db.use_supabase:
         st.sidebar.success("✅ Using Supabase PostgreSQL")
@@ -4551,69 +4497,6 @@ def main():
         mentor_dashboard()
     elif st.session_state.role == 'student':
         student_dashboard()
-
-    # ============================================
-    # ADD DEBUG TOOL TO SIDEBAR (ONLY IN DEVELOPMENT)
-    # ============================================
-    
-    # Only show debug tools if not in production and user is logged in
-    import os
-    if os.environ.get('STREAMLIT_ENVIRONMENT', 'development') == 'development':
-        with st.sidebar:
-            st.markdown("---")
-            st.subheader("🔧 Debug Tools")
-            
-            if st.button("Check Rohan's Data", key="debug_rohan"):
-                # Check Rohan's data
-                rohan = db.get_user("rohan@student")
-                if rohan:
-                    st.info(f"✅ Found Rohan: {rohan.get('name')}")
-                    st.write(f"Username: {rohan.get('username')}")
-                    st.write(f"Role: {rohan.get('role')}")
-                    st.write(f"Password hash: {rohan.get('password', '')[:30]}...")
-                    
-                    # Test password
-                    test_password = "Student@123"
-                    test_hash = hashlib.sha256(test_password.encode()).hexdigest()
-                    st.write(f"Test hash: {test_hash[:30]}...")
-                    st.write(f"Match: {test_hash == rohan.get('password', '')}")
-                    
-                    # Test login
-                    result = db.verify_credentials("rohan@student", "Student@123", "student")
-                    st.write(f"Login test: {'✅ Success' if result else '❌ Failed'}")
-                else:
-                    st.error("❌ Rohan not found in database!")
-            
-            if st.button("List All Users", key="debug_users"):
-                if db.use_supabase:
-                    users = db.client.select('users', limit=10)
-                else:
-                    users = db.client.execute_query("SELECT username, role FROM users LIMIT 10", fetchall=True)
-                
-                if users:
-                    st.info(f"Found {len(users)} users:")
-                    for user in users:
-                        st.text(f"- {user.get('username')} ({user.get('role')})")
-
-        
-    # ============================================
-    # ADD A QUICK TEST AT STARTUP
-    # ============================================
-
-    # Quick test after db initialization
-    logger.info("=== STARTUP AUTHENTICATION TEST ===")
-
-    # Test Rohan login
-    test_result = db.verify_credentials("rohan@student", "Student@123", "student")
-    logger.info(f"Rohan login test: {'✅ SUCCESS' if test_result else '❌ FAILED'}")
-
-    # Test admin login
-    admin_result = db.verify_credentials("admin@raisoni", "Admin@12345", "admin")
-    logger.info(f"Admin login test: {'✅ SUCCESS' if admin_result else '❌ FAILED'}")
-
-    # Test faculty login
-    faculty_result = db.verify_credentials("faculty@raisoni", "Faculty@12345", "faculty")
-    logger.info(f"Faculty login test: {'✅ SUCCESS' if faculty_result else '❌ FAILED'}")
 
 # ============================================
 # RUN APPLICATION
