@@ -909,51 +909,51 @@ class DatabaseManager:
             return None
     
     def add_user(self, user_data):
-    """Add new user - SIMPLIFIED VERSION"""
-    try:
-        # Validate required fields
-        required_fields = ['name', 'username', 'password']
-        for field in required_fields:
-            if field not in user_data or not user_data[field]:
-                return False, f"Missing required field: {field}"
+        """Add new user - SIMPLIFIED VERSION"""
+        try:
+            # Validate required fields
+            required_fields = ['name', 'username', 'password']
+            for field in required_fields:
+                if field not in user_data or not user_data[field]:
+                    return False, f"Missing required field: {field}"
         
-        # Hash the password
-        plain_password = user_data['password']
-        hashed_password = hashlib.sha256(plain_password.encode()).hexdigest()
+            # Hash the password
+            plain_password = user_data['password']
+            hashed_password = hashlib.sha256(plain_password.encode()).hexdigest()
         
-        # Create user record
-        user_record = {
-            'id': str(uuid.uuid4()),
-            'name': user_data['name'],
-            'username': user_data['username'],
-            'password': hashed_password,
-            'role': user_data.get('role', 'student'),
-            'roll_no': user_data.get('roll_no', ''),
-            'department': user_data.get('department', ''),
-            'year': user_data.get('year', ''),
-            'email': user_data.get('email', ''),
-            'mobile': user_data.get('mobile', ''),
-            'created_at': datetime.now().isoformat()
-        }
+            # Create user record
+            user_record = {
+                'id': str(uuid.uuid4()),
+                'name': user_data['name'],
+                'username': user_data['username'],
+                'password': hashed_password,
+                'role': user_data.get('role', 'student'),
+                'roll_no': user_data.get('roll_no', ''),
+                'department': user_data.get('department', ''),
+                'year': user_data.get('year', ''),
+                'email': user_data.get('email', ''),
+                'mobile': user_data.get('mobile', ''),
+                'created_at': datetime.now().isoformat()
+            }
         
-        # Insert into database
-        if self.use_supabase:
-            success = self.client.insert('users', user_record)
-        else:
-            success = self.client.insert('users', user_record)
+            # Insert into database
+            if self.use_supabase:
+                success = self.client.insert('users', user_record)
+            else:
+                success = self.client.insert('users', user_record)
         
-        if success:
-            logger.info(f"✅ User registered: {user_data['username']}")
-            logger.info(f"Password hash: {hashed_password[:20]}...")
-            return True, "User registered successfully"
-        else:
-            logger.error(f"❌ Registration failed for: {user_data['username']}")
-            return False, "Registration failed"
+            if success:
+                logger.info(f"✅ User registered: {user_data['username']}")
+                logger.info(f"Password hash: {hashed_password[:20]}...")
+                return True, "User registered successfully"
+            else:
+                logger.error(f"❌ Registration failed for: {user_data['username']}")
+                return False, "Registration failed"
             
-    except Exception as e:
-        logger.error(f"❌ Error adding user: {e}")
-        traceback.print_exc()
-        return False, f"Registration failed: {str(e)}"
+        except Exception as e:
+            logger.error(f"❌ Error adding user: {e}")
+            traceback.print_exc()
+            return False, f"Registration failed: {str(e)}"
     
     def update_user_activity(self, username):
         """Update user's last activity"""
