@@ -2145,7 +2145,9 @@ def display_event_card(event, current_user=None):
                         like_text = "❤️ Liked" if is_liked else "🤍 Like"
                         like_type = "secondary" if is_liked else "primary"
                         
-                        if st.button(like_text, key=f"like_{event_id}", 
+                        import time
+                        unique_key = f"like_{event_id}_{int(time.time() * 1000) % 10000}"
+                        if st.button(like_text, key=unique_key, 
                                    use_container_width=True, type=like_type, 
                                    help="Like this event"):
                             if is_liked:
@@ -2160,9 +2162,10 @@ def display_event_card(event, current_user=None):
                         interested_text = "⭐ Interested" if is_interested else "☆ Interested"
                         interested_type = "secondary" if is_interested else "primary"
                         
-                        if st.button(interested_text, key=f"interested_{event_id}", 
-                                   use_container_width=True, type=interested_type,
-                                   help="Mark as interested"):
+                        unique_key_interested = f"interested_{event_id}_{int(time.time() * 1000) % 10000}"
+                        if st.button(interested_text, key=unique_key_interested, 
+                                    use_container_width=True, type=interested_type,
+                                    help="Mark as interested"):
                             if is_interested:
                                 if db.remove_interested(event_id, current_user):
                                     st.rerun()
@@ -2172,7 +2175,8 @@ def display_event_card(event, current_user=None):
                     
                     with button_col3:
                         # Share button to promote the app
-                        if st.button("📤 Share", key=f"share_{event_id}",
+                        unique_key_share = f"share_{event_id}_{int(time.time() * 1000) % 10000}"
+                        if st.button("📤 Share", key=unique_key_share,
                                    use_container_width=True, type="secondary",
                                    help="Share this event with friends"):
                             # Create a share message
@@ -2219,8 +2223,9 @@ def display_event_card(event, current_user=None):
                 
                 # Show "I Have Registered Externally" button
                 if registration_link:
+                    unique_key_ext_reg = f"ext_reg_{event_id}_{int(time.time() * 1000) % 10000}"
                     if st.button("✅ I Have Registered Externally", 
-                               key=f"ext_reg_{event_id}",
+                               key=unique_key_ext_reg,
                                use_container_width=True,
                                type="secondary",
                                help="Mark that you have registered externally"):
@@ -2245,10 +2250,11 @@ def display_event_card(event, current_user=None):
                 
                 with reg_col1:
                     # Register in App button
+                    unique_key_app_reg = f"app_reg_{event_id}_{int(time.time() * 1000) % 10000}"
                     if st.button("📱 Register in App", 
-                               key=f"app_reg_{event_id}",
-                               use_container_width=True,
-                               type="primary"):
+                                key=unique_key_app_reg,
+                                use_container_width=True,
+                                type="primary"):
                         student = db.get_user(current_user)
                         if student:
                             reg_data = {
