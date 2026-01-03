@@ -2255,8 +2255,7 @@ def display_event_card(event, current_user=None):
                 with col_reg2:
                     # External registration link button (if available)
                     if registration_link:
-                        st.markdown(f'<div style="margin-left: 8px;"><a href="{registration_link}" target="_blank" style="text-decoration: none; color: #3B82F6;">🌐 Register Externally</a>
-                        <br><small>Click to register on external site</small></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div style="margin-left: 8px;"><a href="{registration_link}" target="_blank" style="text-decoration: none; color: #3B82F6;">🌐 Register Externally</a><br><small>Click to register on external site</small></div>', unsafe_allow_html=True)
                     else:
                         st.info("No external registration link available")
             
