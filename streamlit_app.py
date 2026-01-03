@@ -1902,6 +1902,48 @@ class DatabaseManager:
 # Initialize database
 db = DatabaseManager(use_supabase=USE_SUPABASE)
 
+def fix_existing_passwords(db_instance):
+    """Fix existing passwords by hashing any plain text passwords"""
+    logger.info("=== FIXING EXISTING PASSWORDS ===")
+    
+    # Get all users
+    if db_instance.use_supabase:
+        users = db_instance.client.select('users')
+    else:
+        users = db_instance.client.execute_query("SELECT * FROM users", fetchall=True)
+    
+    if users:
+        logger.info(f"Found {len(users)} users to check")
+        
+        for user in users:
+            username = user.get('username')
+            stored_pass = user.get('password', '')
+            
+            # Skip if already hashed (64 hex chars, lowercase)
+            is_hashed = (len(stored_pass) == 64 and 
+                        all(c in '0123456789abcdef' for c in stored_pass.lower()))
+            
+            if not is_hashed and stored_pass:
+                    logger.info(f"⚠️ Plain text password found for {username}: '{stored_pass[:20]}...'")
+                
+                # Hash the password
+                new_hash = hashlib.sha256(stored_pass.encode()).hexdigest().lower()
+                
+                # Update in database
+                if db_instance.use_supabase:
+                    success = db_instance.client.update('users', {'username': username}, {'password': new_hash})
+                else:
+                    success = db_instance.client.update('users', {'username': username}, {'password': new_hash})
+                
+                if success:
+                    logger.info(f"✅ Fixed {username}: Hashed to {new_hash[:20]}...")
+                else:
+                    logger.error(f"❌ Failed to fix password for {username}")
+            else:
+                logger.info(f"✅ {username} already has hashed password")
+    
+    logger.info("=== PASSWORD FIX COMPLETE ===")
+
 # Fix existing passwords
 fix_existing_passwords(db)
 
@@ -4403,50 +4445,7 @@ def admin_dashboard():
                         else:
                             st.error("Failed to assign mentor.")
 
-    def fix_existing_passwords(db_instance):
-        """Fix existing passwords by hashing any plain text passwords"""
-        logger.info("=== FIXING EXISTING PASSWORDS ===")
     
-        # Get all users
-        if db_instance.use_supabase:
-            users = db_instance.client.select('users')
-        else:
-            users = db_instance.client.execute_query("SELECT * FROM users", fetchall=True)
-    
-        if users:
-            logger.info(f"Found {len(users)} users to check")
-        
-            for user in users:
-                username = user.get('username')
-                stored_pass = user.get('password', '')
-            
-                # Skip if already hashed (64 hex chars, lowercase)
-                is_hashed = (len(stored_pass) == 64 and 
-                        all(c in '0123456789abcdef' for c in stored_pass.lower()))
-            
-                if not is_hashed and stored_pass:
-                    logger.info(f"⚠️ Plain text password found for {username}: '{stored_pass[:20]}...'")
-                
-                    # Hash the password
-                    new_hash = hashlib.sha256(stored_pass.encode()).hexdigest().lower()
-                
-                    # Update in database
-                    if db_instance.use_supabase:
-                        success = db_instance.client.update('users', {'username': username}, {'password': new_hash})
-                    else:
-                        success = db_instance.client.update('users', {'username': username}, {'password': new_hash})
-                
-                    if success:
-                        logger.info(f"✅ Fixed {username}: Hashed to {new_hash[:20]}...")
-                    else:
-                        logger.error(f"❌ Failed to fix password for {username}")
-                else:
-                    logger.info(f"✅ {username} already has hashed password")
-    
-        logger.info("=== PASSWORD FIX COMPLETE ===")
-
-    
-
 # ============================================
 # MAIN APPLICATION
 # ============================================
