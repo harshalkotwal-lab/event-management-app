@@ -27,6 +27,7 @@ import secrets
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from typing import Dict, List, Tuple, Optional, Any
 from pathlib import Path
 import csv
 import sqlite3
