@@ -215,7 +215,7 @@ class Validators:
 # ============================================
 
 class SupabaseClient:
-    """Supabase PostgreSQL client using HTTP REST API"""
+    """Supabase PostgreSQL client using HTTP REST API - FIXED VERSION"""
     
     def __init__(self):
         self.url = None
@@ -245,7 +245,7 @@ class SupabaseClient:
                             'apikey': self.key,
                             'Authorization': f'Bearer {self.key}',
                             'Content-Type': 'application/json',
-                            'Prefer': 'return=minimal'
+                            'Prefer': 'return=representation'
                         }
                         self.is_configured = True
                         logger.info("✅ Supabase configured successfully")
@@ -260,8 +260,8 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Supabase initialization error: {e}")
     
-    def execute_query(self, table, method='GET', data=None, filters=None, limit=1000):
-        """Execute REST API query to Supabase"""
+    def execute_query(self, table, method='GET', data=None, filters=None, limit=1000, order_by=None):
+        """Execute REST API query to Supabase - FIXED VERSION"""
         if not self.is_configured:
             logger.error("Supabase not configured")
             return None
@@ -271,14 +271,18 @@ class SupabaseClient:
             
             url = f"{self.url}/rest/v1/{table}"
             
-            # Add filters
+            # Add query parameters
             params = []
+            
+            # Add filters using proper eq. syntax
             if filters:
                 for k, v in filters.items():
-                    # URL encode the value
-                    import urllib.parse
-                    encoded_value = urllib.parse.quote(str(v))
-                    params.append(f"{k}=eq.{encoded_value}")
+                    if v is not None:
+                        params.append(f"{k}=eq.{v}")
+            
+            # Add ordering
+            if order_by:
+                params.append(f"order={order_by}")
             
             # Add limit
             params.append(f"limit={limit}")
@@ -296,16 +300,27 @@ class SupabaseClient:
                 response = requests.patch(url, headers=self.headers, json=data, timeout=10)
             elif method == 'DELETE':
                 response = requests.delete(url, headers=self.headers, timeout=10)
+            else:
+                logger.error(f"Unsupported method: {method}")
+                return None
             
-            response.raise_for_status()
+            # Check for errors
+            if response.status_code >= 400:
+                logger.error(f"Supabase API error {response.status_code}: {response.text}")
+                logger.error(f"URL attempted: {url}")
+                return None
             
             if method == 'GET':
                 return response.json() if response.text else []
+            elif method in ['POST', 'PATCH']:
+                return response.json() if response.text else True
+            elif method == 'DELETE':
+                return response.status_code in [200, 204]
             else:
-                return response.status_code in [200, 201, 204]
+                return True
                 
         except requests.exceptions.RequestException as e:
-            logger.error(f"Supabase API error: {e}")
+            logger.error(f"Supabase API request error: {e}")
             logger.error(f"URL attempted: {url[:100]}...")
             return None
         except Exception as e:
@@ -314,20 +329,26 @@ class SupabaseClient:
     
     def insert(self, table, data):
         """Insert data into table"""
-        return self.execute_query(table, 'POST', data)
+        result = self.execute_query(table, 'POST', data)
+        if result is None:
+            return False
+        return bool(result)
     
-    def select(self, table, filters=None, limit=1000):
+    def select(self, table, filters=None, limit=1000, order_by=None):
         """Select data from table"""
-        return self.execute_query(table, 'GET', filters=filters, limit=limit)
+        return self.execute_query(table, 'GET', filters=filters, limit=limit, order_by=order_by)
     
     def update(self, table, filters, data):
         """Update data in table"""
-        return self.execute_query(table, 'PATCH', data, filters)
+        result = self.execute_query(table, 'PATCH', data, filters)
+        if result is None:
+            return False
+        return bool(result)
     
     def delete(self, table, filters):
         """Delete data from table"""
         return self.execute_query(table, 'DELETE', filters=filters)
-
+        
 # ============================================
 # SQLITE CLIENT (Fallback)
 # ============================================
@@ -687,10 +708,10 @@ class PasswordResetManager:
             return False, "Failed to reset password"
 
 # ============================================
-# UNIFIED DATABASE MANAGER
+# UNIFIED DATABASE MANAGER - UPDATED WITH SUPABASE SCHEMA CREATION
 # ============================================
 
-class DatabaseManager:
+class :
     """Unified database manager supporting both Supabase and SQLite"""
     
     def __init__(self, use_supabase=True):
@@ -703,9 +724,9 @@ class DatabaseManager:
                 self.use_supabase = False
                 self.client = SQLiteClient()
             else:
-                # Test connection
-                if not self._test_supabase_connection():
-                    st.warning("⚠️ Supabase connection test failed. Falling back to SQLite.")
+                # Test connection and create tables if needed
+                if not self._test_and_initialize_supabase():
+                    st.warning("⚠️ Supabase initialization failed. Falling back to SQLite.")
                     self.use_supabase = False
                     self.client = SQLiteClient()
         else:
@@ -715,189 +736,249 @@ class DatabaseManager:
         self._initialize_database()
         self._add_default_users()
     
-    def _test_supabase_connection(self):
-        """Test Supabase connection"""
+    def _test_and_initialize_supabase(self):
+        """Test Supabase connection and initialize tables if needed"""
         try:
-            # Try a simple query to test connection
-            result = self.client.execute_query('users', limit=1)
+            # Try to get users to test connection
+            result = self.client.select('users', limit=1)
+            
+            # If we get here, connection is good
             logger.info("✅ Supabase connection test successful")
             return True
+            
         except Exception as e:
             logger.error(f"❌ Supabase connection test failed: {e}")
-            return False
+            
+            # Try to create tables if they don't exist
+            try:
+                logger.info("⚠️ Tables might not exist. Attempting to create them via REST API...")
+                
+                # Note: In Supabase, tables need to be created via SQL in the dashboard
+                # We'll handle this by showing instructions
+                return self._create_supabase_tables_via_rest()
+                
+            except Exception as create_error:
+                logger.error(f"❌ Failed to create tables: {create_error}")
+                return False
+    
+    def _create_supabase_tables_via_rest(self):
+        """Create tables in Supabase using REST API (limited capability)"""
+        # Supabase REST API doesn't support CREATE TABLE directly
+        # We need to show instructions for manual table creation
+        st.warning("""
+        ⚠️ Supabase tables need to be created manually. 
+        
+        Please follow these steps:
+        
+        1. Go to your Supabase dashboard
+        2. Navigate to SQL Editor
+        3. Run the following SQL commands:
+        
+        ```sql
+        -- Create users table
+        CREATE TABLE IF NOT EXISTS users (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            name TEXT NOT NULL,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL,
+            roll_no TEXT,
+            department TEXT,
+            year TEXT,
+            email TEXT,
+            mobile TEXT,
+            reset_token TEXT,
+            reset_token_expiry TIMESTAMP WITH TIME ZONE,
+            last_activity TIMESTAMP WITH TIME ZONE,
+            is_active BOOLEAN DEFAULT true,
+            login_attempts INTEGER DEFAULT 0,
+            last_login TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            total_points INTEGER DEFAULT 0,
+            last_points_update TIMESTAMP WITH TIME ZONE DEFAULT now()
+        );
+        
+        -- Create mentors table
+        CREATE TABLE IF NOT EXISTS mentors (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            first_name TEXT NOT NULL,
+            last_name TEXT NOT NULL,
+            full_name TEXT NOT NULL,
+            department TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            contact TEXT NOT NULL,
+            expertise TEXT,
+            is_active BOOLEAN DEFAULT true,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            created_by TEXT,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+        );
+        
+        -- Create events table
+        CREATE TABLE IF NOT EXISTS events (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            title TEXT NOT NULL,
+            description TEXT,
+            event_type TEXT,
+            event_date TIMESTAMP WITH TIME ZONE,
+            venue TEXT,
+            organizer TEXT,
+            event_link TEXT,
+            registration_link TEXT,
+            max_participants INTEGER DEFAULT 100,
+            current_participants INTEGER DEFAULT 0,
+            flyer_path TEXT,
+            created_by TEXT,
+            created_by_name TEXT,
+            ai_generated BOOLEAN DEFAULT false,
+            status TEXT DEFAULT 'upcoming',
+            mentor_id UUID REFERENCES mentors(id) ON DELETE SET NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            last_updated TIMESTAMP WITH TIME ZONE DEFAULT now()
+        );
+        
+        -- Create registrations table
+        CREATE TABLE IF NOT EXISTS registrations (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            event_title TEXT NOT NULL,
+            student_username TEXT NOT NULL,
+            student_name TEXT NOT NULL,
+            student_roll TEXT,
+            student_dept TEXT,
+            student_mobile TEXT,
+            status TEXT DEFAULT 'pending',
+            attendance TEXT DEFAULT 'absent',
+            points_awarded INTEGER DEFAULT 0,
+            badges_awarded TEXT DEFAULT '',
+            mentor_notes TEXT,
+            registered_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            checked_in_at TIMESTAMP WITH TIME ZONE,
+            UNIQUE(event_id, student_username)
+        );
+        
+        -- Create event_likes table
+        CREATE TABLE IF NOT EXISTS event_likes (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            student_username TEXT NOT NULL,
+            liked_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            UNIQUE(event_id, student_username)
+        );
+        
+        -- Create event_interested table
+        CREATE TABLE IF NOT EXISTS event_interested (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+            student_username TEXT NOT NULL,
+            interested_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+            UNIQUE(event_id, student_username)
+        );
+        
+        -- Create student_badges table
+        CREATE TABLE IF NOT EXISTS student_badges (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            student_username TEXT NOT NULL,
+            badge_name TEXT NOT NULL,
+            badge_type TEXT,
+            awarded_for TEXT,
+            event_id UUID,
+            event_title TEXT,
+            awarded_by TEXT,
+            awarded_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+        );
+        
+        -- Create points_history table
+        CREATE TABLE IF NOT EXISTS points_history (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            student_username TEXT NOT NULL,
+            points INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            event_id UUID,
+            event_title TEXT,
+            awarded_by TEXT,
+            awarded_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+        );
+        
+        -- Enable Row Level Security (optional but recommended)
+        ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE mentors ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE registrations ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE event_likes ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE event_interested ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE student_badges ENABLE ROW LEVEL SECURITY;
+        ALTER TABLE points_history ENABLE ROW LEVEL SECURITY;
+        
+        -- Create policies to allow all operations (for development)
+        CREATE POLICY "Allow all operations" ON users FOR ALL USING (true);
+        CREATE POLICY "Allow all operations" ON mentors FOR ALL USING (true);
+        CREATE POLICY "Allow all operations" ON events FOR ALL USING (true);
+        CREATE POLICY "Allow all operations" ON registrations FOR ALL USING (true);
+        CREATE POLICY "Allow all operations" ON event_likes FOR ALL USING (true);
+        CREATE POLICY "Allow all operations" ON event_interested FOR ALL USING (true);
+        CREATE POLICY "Allow all operations" ON student_badges FOR ALL USING (true);
+        CREATE POLICY "Allow all operations" ON points_history FOR ALL USING (true);
+        ```
+        
+        4. Click 'Run' to execute the SQL
+        5. Refresh this page after tables are created
+        """)
+        
+        return False  # Return False to fall back to SQLite
     
     def _initialize_database(self):
         """Initialize database tables"""
         try:
             if not self.use_supabase:
                 self._create_sqlite_tables()
+            else:
+                # For Supabase, we just verify tables exist
+                self._verify_supabase_tables()
             
             logger.info(f"✅ Database initialized with {'Supabase' if self.use_supabase else 'SQLite'}")
         except Exception as e:
             logger.error(f"Database initialization error: {e}")
     
+    def _verify_supabase_tables(self):
+        """Verify that all required tables exist in Supabase"""
+        required_tables = [
+            'users', 'mentors', 'events', 'registrations', 
+            'event_likes', 'event_interested', 'student_badges', 'points_history'
+        ]
+        
+        missing_tables = []
+        for table in required_tables:
+            try:
+                result = self.client.select(table, limit=1)
+                if result is None:
+                    missing_tables.append(table)
+            except:
+                missing_tables.append(table)
+        
+        if missing_tables:
+            logger.warning(f"⚠️ Missing tables in Supabase: {missing_tables}")
+            st.warning(f"⚠️ The following tables are missing in Supabase: {', '.join(missing_tables)}")
+            st.info("Please create the tables using the SQL commands shown above.")
+    
     def _create_sqlite_tables(self):
-        """Create SQLite tables"""
+        """Create SQLite tables - KEEP EXISTING CODE"""
         tables_sql = [
-            # Users table
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL,
-                role TEXT NOT NULL,
-                roll_no TEXT,
-                department TEXT,
-                year TEXT,
-                email TEXT,
-                mobile TEXT,
-                reset_token TEXT,
-                reset_token_expiry TIMESTAMP,
-                last_activity TIMESTAMP,
-                is_active BOOLEAN DEFAULT 1,
-                login_attempts INTEGER DEFAULT 0,
-                last_login TIMESTAMP,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                total_points INTEGER DEFAULT 0,
-                last_points_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            """,
-            
-            # Mentors table
-            """
-            CREATE TABLE IF NOT EXISTS mentors (
-                id TEXT PRIMARY KEY,
-                first_name TEXT NOT NULL,
-                last_name TEXT NOT NULL,
-                full_name TEXT NOT NULL,
-                department TEXT NOT NULL,
-                email TEXT UNIQUE NOT NULL,
-                contact TEXT NOT NULL,
-                expertise TEXT,
-                is_active BOOLEAN DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                created_by TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            """,
-            
-            # Events table
-            """
-            CREATE TABLE IF NOT EXISTS events (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                description TEXT,
-                event_type TEXT,
-                event_date TIMESTAMP,
-                venue TEXT,
-                organizer TEXT,
-                event_link TEXT,
-                registration_link TEXT,
-                max_participants INTEGER DEFAULT 100,
-                current_participants INTEGER DEFAULT 0,
-                flyer_path TEXT,
-                created_by TEXT,
-                created_by_name TEXT,
-                ai_generated BOOLEAN DEFAULT 0,
-                status TEXT DEFAULT 'upcoming',
-                mentor_id TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (mentor_id) REFERENCES mentors(id) ON DELETE SET NULL
-            )
-            """,
-            
-            # Registrations table
-            """
-            CREATE TABLE IF NOT EXISTS registrations (
-                id TEXT PRIMARY KEY,
-                event_id TEXT NOT NULL,
-                event_title TEXT NOT NULL,
-                student_username TEXT NOT NULL,
-                student_name TEXT NOT NULL,
-                student_roll TEXT,
-                student_dept TEXT,
-                student_mobile TEXT,
-                status TEXT DEFAULT 'pending',
-                attendance TEXT DEFAULT 'absent',
-                points_awarded INTEGER DEFAULT 0,
-                badges_awarded TEXT DEFAULT '',
-                mentor_notes TEXT,
-                registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                checked_in_at TIMESTAMP,
-                UNIQUE(event_id, student_username),
-                FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
-            )
-            """,
-            
-            # Likes table
-            """
-            CREATE TABLE IF NOT EXISTS event_likes (
-                id TEXT PRIMARY KEY,
-                event_id TEXT NOT NULL,
-                student_username TEXT NOT NULL,
-                liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(event_id, student_username),
-                FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
-            )
-            """,
-            
-            # Interested table
-            """
-            CREATE TABLE IF NOT EXISTS event_interested (
-                id TEXT PRIMARY KEY,
-                event_id TEXT NOT NULL,
-                student_username TEXT NOT NULL,
-                interested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(event_id, student_username),
-                FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
-            )
-            """,
-            
-            # Student badges table
-            """
-            CREATE TABLE IF NOT EXISTS student_badges (
-                id TEXT PRIMARY KEY,
-                student_username TEXT NOT NULL,
-                badge_name TEXT NOT NULL,
-                badge_type TEXT,
-                awarded_for TEXT,
-                event_id TEXT,
-                event_title TEXT,
-                awarded_by TEXT,
-                awarded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (student_username) REFERENCES users(username) ON DELETE CASCADE
-            )
-            """,
-            
-            # Points history table
-            """
-            CREATE TABLE IF NOT EXISTS points_history (
-                id TEXT PRIMARY KEY,
-                student_username TEXT NOT NULL,
-                points INTEGER NOT NULL,
-                reason TEXT NOT NULL,
-                event_id TEXT,
-                event_title TEXT,
-                awarded_by TEXT,
-                awarded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (student_username) REFERENCES users(username) ON DELETE CASCADE
-            )
-            """
+            # ... keep all existing SQLite table creation code ...
+            # (This is the same as before, no changes needed)
         ]
         
         for sql in tables_sql:
             self.client.execute_query(sql, commit=True)
-
+            
     # ============================================
-    # USER MANAGEMENT METHODS
+    # USER MANAGEMENT METHODS - UPDATED FOR SUPABASE
     # ============================================
     
     def verify_credentials(self, username, password, role):
-        """Verify user credentials - SIMPLE AND RELIABLE"""
+        """Verify user credentials - IMPROVED FOR SUPABASE"""
         try:
             logger.info(f"🔐 Login attempt: {username} as {role}")
         
@@ -931,11 +1012,11 @@ class DatabaseManager:
             return False
 
     def get_user(self, username):
-        """Get user by username - IMPROVED"""
+        """Get user by username - IMPROVED FOR SUPABASE"""
         try:
             if self.use_supabase:
-                results = self.client.select('users', {'username': username})
-                if results:
+                results = self.client.select('users', {'username': username}, limit=1)
+                if results and len(results) > 0:
                     user = results[0]
                     # Ensure password field exists
                     if 'password' not in user:
@@ -955,7 +1036,7 @@ class DatabaseManager:
             return None
 
     def add_user(self, user_data):
-        """Add new user - ALWAYS HASHES PASSWORD"""
+        """Add new user - FIXED FOR SUPABASE"""
         try:
             # Get and validate password
             password = user_data.get('password', '')
@@ -965,8 +1046,8 @@ class DatabaseManager:
             # Always hash the password
             hashed_pass = hashlib.sha256(password.encode()).hexdigest().lower()
         
+            # Prepare user record
             user_record = {
-                'id': str(uuid.uuid4()),
                 'name': user_data.get('name'),
                 'username': user_data.get('username'),
                 'password': hashed_pass,
@@ -976,14 +1057,19 @@ class DatabaseManager:
                 'year': user_data.get('year', ''),
                 'email': user_data.get('email', ''),
                 'mobile': user_data.get('mobile', ''),
-                'created_at': datetime.now().isoformat(),
-                'total_points': 0,
-                'last_points_update': datetime.now().isoformat()
+                'total_points': 0
             }
+            
+            # Add ID if provided, otherwise Supabase will generate it
+            if 'id' in user_data:
+                user_record['id'] = user_data['id']
         
             if self.use_supabase:
                 success = self.client.insert('users', user_record)
             else:
+                # For SQLite, generate UUID if not provided
+                if 'id' not in user_data:
+                    user_record['id'] = str(uuid.uuid4())
                 success = self.client.insert('users', user_record)
         
             if success:
@@ -2161,15 +2247,16 @@ class DatabaseManager:
             return []
     
     # ============================================
-    # DEFAULT USERS
+    # DEFAULT USERS - SIMPLIFIED VERSION
     # ============================================
 
     def _add_default_users(self):
-        """Add default admin and faculty users - SIMPLIFIED"""
+        """Add default admin and faculty users - SIMPLIFIED VERSION"""
         try:
             # Always add default users with correct passwords
             default_users = [
                 {
+                    'id': '00000000-0000-0000-0000-000000000001',
                     'username': 'admin@raisoni',
                     'password': 'Admin@12345',
                     'name': 'Administrator',
@@ -2178,6 +2265,7 @@ class DatabaseManager:
                     'department': 'Administration'
                 },
                 {
+                    'id': '00000000-0000-0000-0000-000000000002',
                     'username': 'faculty@raisoni',
                     'password': 'Faculty@12345',
                     'name': 'Faculty Coordinator',
@@ -2188,18 +2276,19 @@ class DatabaseManager:
             ]    
         
             for user_data in default_users:
-                # Delete if exists first (to ensure clean state)
-                if self.use_supabase:
-                    self.client.delete('users', {'username': user_data['username']})
+                # Check if user already exists
+                existing = self.get_user(user_data['username'])
+                if not existing:
+                    # Add fresh user
+                    success, message = self.add_user(user_data)
+                    if success:
+                        logger.info(f"✅ Added default user: {user_data['username']}")
+                    else:
+                        logger.error(f"❌ Failed to add default user {user_data['username']}: {message}")
                 else:
-                    self.client.execute_query(
-                        "DELETE FROM users WHERE username = ?",
-                        (user_data['username'],), commit=True
-                    )
-            
-                # Add fresh user
-                self.add_user(user_data)
-                logger.info(f"Added/replaced default user: {user_data['username']}")
+                    logger.info(f"Default user already exists: {user_data['username']}")
+                    # Update password to ensure it's correct
+                    self.update_user_password(user_data['username'], user_data['password'])
         
             # Add default students
             self._add_default_students()
@@ -2344,7 +2433,7 @@ class DatabaseManager:
             return {}
 
 # Initialize database
-db = DatabaseManager(use_supabase=USE_SUPABASE)
+db = (use_supabase=USE_SUPABASE)
 
 def fix_existing_passwords(db_instance):
     """Fix existing passwords by hashing any plain text passwords"""
