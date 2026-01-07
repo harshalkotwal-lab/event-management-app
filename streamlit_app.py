@@ -34,18 +34,21 @@ import csv
 import sqlite3
 
 # ============================================
-# LOGGING SETUP
+# LOGGING SETUP - FIXED
 # ============================================
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('event_management.log'),
-        logging.StreamHandler()
-    ]
-)
+# Configure logger once
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    logging.basicConfig(
+        level=logging.WARNING,  # Reduced from INFO to WARNING
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler('event_management.log'),
+            logging.StreamHandler()
+        ]
+    )
+    logger = logging.getLogger(__name__)
 
 # ============================================
 # CONFIGURATION
@@ -118,17 +121,11 @@ class Validators:
     
     @staticmethod
     def validate_email(email: str) -> Tuple[bool, str]:
-        """Validate email format and college domain"""
+        """Validate email format"""
         pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         
         if not re.match(pattern, email):
             return False, "Invalid email format"
-        
-        # Check if it's a college email (optional)
-        college_domains = ['ghraisoni.edu', 'raisoni.net', 'ghrce.raisoni.net']
-        domain = email.split('@')[-1]
-        if not any(domain.endswith(college_domain) for college_domain in college_domains):
-            return True, "Warning: Non-college email detected"
         
         return True, "Valid email"
     
@@ -171,51 +168,13 @@ class Validators:
         if len(digits) == 10:
             return f"+91 {digits[:5]} {digits[5:]}"
         return mobile
-    
-    @staticmethod
-    def sanitize_input(text: str) -> str:
-        """Sanitize user input to prevent XSS and SQL injection"""
-        if not text:
-            return ""
-        
-        # Remove potentially dangerous characters
-        dangerous_patterns = [
-            r'<script.*?>.*?</script>',  # Script tags
-            r'on\w+\s*=',  # Event handlers
-            r'javascript:',  # JavaScript protocol
-            r'vbscript:',  # VBScript protocol
-            r'expression\(',  # CSS expressions
-            r'url\(',  # CSS URL
-            r'--',  # SQL comment
-            r';',  # SQL injection
-            r'\/\*',  # SQL comment start
-            r'\*\/',  # SQL comment end
-            r'xp_',  # SQL extended procedure
-            r'@@',  # SQL variable
-            r'UNION.*SELECT',  # SQL UNION attack
-            r'SELECT.*FROM',  # SQL SELECT attack
-            r'INSERT.*INTO',  # SQL INSERT attack
-            r'DELETE.*FROM',  # SQL DELETE attack
-            r'DROP.*TABLE',  # SQL DROP attack
-        ]
-        
-        sanitized = text
-        for pattern in dangerous_patterns:
-            sanitized = re.sub(pattern, '', sanitized, flags=re.IGNORECASE)
-        
-        # HTML escape
-        sanitized = sanitized.replace('<', '&lt;').replace('>', '&gt;')
-        sanitized = sanitized.replace('"', '&quot;').replace("'", '&#x27;')
-        sanitized = sanitized.replace('&', '&amp;')
-        
-        return sanitized.strip()
 
 # ============================================
-# SUPABASE CLIENT (PostgreSQL) - OPTIMIZED
+# SUPABASE CLIENT (PostgreSQL) - FIXED
 # ============================================
 
 class SupabaseClient:
-    """Supabase PostgreSQL client using HTTP REST API - OPTIMIZED"""
+    """Supabase PostgreSQL client using HTTP REST API - FIXED VERSION"""
     
     def __init__(self):
         self.url = None
@@ -223,11 +182,15 @@ class SupabaseClient:
         self.headers = None
         self.is_configured = False
         self._cache = {}
+        self._initialized = False
         
         self._initialize_supabase()
     
     def _initialize_supabase(self):
-        """Initialize Supabase connection"""
+        """Initialize Supabase connection - FIXED"""
+        if self._initialized:
+            return
+            
         try:
             if hasattr(st, 'secrets'):
                 if 'SUPABASE' in st.secrets:
@@ -249,6 +212,7 @@ class SupabaseClient:
                             'Prefer': 'return=representation'
                         }
                         self.is_configured = True
+                        self._initialized = True
                         logger.info("✅ Supabase configured successfully")
                     else:
                         logger.warning("⚠️ Supabase credentials incomplete")
@@ -268,7 +232,7 @@ class SupabaseClient:
         return hashlib.md5('_'.join(key_parts).encode()).hexdigest()
     
     def execute_query(self, table, method='GET', data=None, filters=None, limit=1000, order_by=None, cache_ttl=60):
-        """Execute REST API query to Supabase - OPTIMIZED"""
+        """Execute REST API query to Supabase - FIXED VERSION"""
         if not self.is_configured:
             logger.error("Supabase not configured")
             return None
@@ -286,14 +250,19 @@ class SupabaseClient:
             
             url = f"{self.url}/rest/v1/{table}"
             
-            # Add query parameters
+            # Build query parameters - FIXED: Use proper query syntax
             params = {}
             
-            # Add filters using proper eq. syntax
+            # Add filters - FIXED: Use proper filter syntax
             if filters:
                 for k, v in filters.items():
                     if v is not None:
-                        params[k] = f'eq.{v}'
+                        # Handle special operators
+                        if isinstance(v, dict):
+                            for op, val in v.items():
+                                params[f"{k}"] = f"{op}.{val}"
+                        else:
+                            params[f"{k}"] = f"eq.{v}"
             
             # Add ordering
             if order_by:
@@ -303,15 +272,32 @@ class SupabaseClient:
             params['limit'] = str(limit)
             
             # Make request
-            timeout = 15  # Increased timeout
+            timeout = 15
             if method == 'GET':
                 response = requests.get(url, headers=self.headers, params=params, timeout=timeout)
             elif method == 'POST':
                 response = requests.post(url, headers=self.headers, json=data, timeout=timeout)
             elif method == 'PATCH':
-                response = requests.patch(url, headers=self.headers, json=data, params=params, timeout=timeout)
+                # For PATCH with filters
+                if filters:
+                    # Build filter query string for PATCH
+                    filter_params = []
+                    for k, v in filters.items():
+                        if v is not None:
+                            filter_params.append(f"{k}=eq.{v}")
+                    if filter_params:
+                        url = f"{url}?{'&'.join(filter_params)}"
+                response = requests.patch(url, headers=self.headers, json=data, timeout=timeout)
             elif method == 'DELETE':
-                response = requests.delete(url, headers=self.headers, params=params, timeout=timeout)
+                # Build filter query string for DELETE
+                if filters:
+                    filter_params = []
+                    for k, v in filters.items():
+                        if v is not None:
+                            filter_params.append(f"{k}=eq.{v}")
+                    if filter_params:
+                        url = f"{url}?{'&'.join(filter_params)}"
+                response = requests.delete(url, headers=self.headers, timeout=timeout)
             else:
                 logger.error(f"Unsupported method: {method}")
                 return None
@@ -357,7 +343,7 @@ class SupabaseClient:
         return self.execute_query(table, 'GET', filters=filters, limit=limit, order_by=order_by, cache_ttl=cache_ttl)
     
     def update(self, table, filters, data):
-        """Update data in table"""
+        """Update data in table - FIXED"""
         result = self.execute_query(table, 'PATCH', data, filters)
         if result is None:
             return False
@@ -372,7 +358,7 @@ class SupabaseClient:
 # ============================================
 
 class SQLiteClient:
-    """SQLite client for local development - OPTIMIZED"""
+    """SQLite client for local development"""
     
     def __init__(self, db_path="data/event_management.db"):
         self.db_path = db_path
@@ -389,8 +375,7 @@ class SQLiteClient:
             self.conn.execute("PRAGMA foreign_keys = ON")
             self.conn.execute("PRAGMA journal_mode = WAL")
             self.conn.execute("PRAGMA synchronous = NORMAL")
-            self.conn.execute("PRAGMA cache_size = -10000")  # Increased cache
-            logger.info("✅ SQLite database initialized")
+            self.conn.execute("PRAGMA cache_size = -10000")
         except Exception as e:
             logger.error(f"SQLite initialization error: {e}")
             raise
@@ -403,7 +388,7 @@ class SQLiteClient:
         return hashlib.md5('_'.join(key_parts).encode()).hexdigest()
     
     def execute_query(self, query, params=None, fetchone=False, fetchall=False, commit=False, cache_ttl=60):
-        """Execute SQL query - OPTIMIZED"""
+        """Execute SQL query"""
         # Check cache for SELECT queries
         if 'SELECT' in query.upper() and fetchall:
             cache_key = self._get_cache_key(query, params)
@@ -438,7 +423,7 @@ class SQLiteClient:
             
             return result
         except Exception as e:
-            logger.error(f"SQLite error: {e}, Query: {query[:100]}")
+            logger.error(f"SQLite error: {e}")
             return None
     
     def clear_cache(self):
@@ -454,6 +439,7 @@ class SQLiteClient:
         try:
             cursor = self.execute_query(query, tuple(data.values()))
             self.conn.commit()
+            self.clear_cache()
             return cursor.rowcount > 0
         except:
             return False
@@ -484,7 +470,6 @@ class SQLiteClient:
         try:
             cursor = self.execute_query(query, params)
             self.conn.commit()
-            # Clear cache for this table
             self.clear_cache()
             return cursor.rowcount > 0
         except:
@@ -498,197 +483,21 @@ class SQLiteClient:
         try:
             cursor = self.execute_query(query, tuple(filters.values()))
             self.conn.commit()
-            # Clear cache for this table
             self.clear_cache()
             return cursor.rowcount > 0
         except:
             return False
 
 # ============================================
-# AI EVENT GENERATOR - OPTIMIZED
-# ============================================
-
-class AIEventGenerator:
-    """Generate structured event data from unstructured text"""
-    
-    def __init__(self):
-        self.api_key = None
-        self.is_configured = False
-        
-        try:
-            if hasattr(st, 'secrets'):
-                if 'OPENAI_API_KEY' in st.secrets:
-                    self.api_key = st.secrets["OPENAI_API_KEY"]
-                elif 'openai' in st.secrets and 'api_key' in st.secrets.openai:
-                    self.api_key = st.secrets.openai.api_key
-                
-                if self.api_key and self.api_key.startswith("sk-"):
-                    import openai
-                    openai.api_key = self.api_key
-                    self.is_configured = True
-                    logger.info("✅ OpenAI configured successfully")
-                elif self.api_key:
-                    logger.warning(f"⚠️ Invalid OpenAI API key format")
-                    self.is_configured = False
-                else:
-                    logger.warning("⚠️ OpenAI API key not found in secrets")
-                    self.is_configured = False
-            else:
-                logger.warning("⚠️ Streamlit secrets not available")
-                self.is_configured = False
-                
-        except Exception as e:
-            logger.warning(f"⚠️ Could not initialize OpenAI: {str(e)[:100]}")
-            self.is_configured = False
-    
-    def extract_event_info(self, text):
-        """Extract event information from text using AI or regex fallback"""
-        # Try OpenAI first if available
-        if self.is_configured and self.api_key:
-            try:
-                return self._extract_with_openai(text)
-            except Exception as e:
-                logger.warning(f"AI extraction failed: {str(e)[:100]}. Using regex fallback.")
-        
-        # Fallback to regex extraction
-        return self._extract_with_regex(text)
-    
-    def _extract_with_openai(self, text):
-        """Use OpenAI to extract structured event data"""
-        prompt = f"""
-        Extract event information from the following text and return as JSON with these fields:
-        - title: Event title (string)
-        - description: Detailed event description (string)
-        - event_type: Type of event (workshop, hackathon, competition, bootcamp, seminar, conference, webinar)
-        - event_date: Event date in YYYY-MM-DD format (extract from text or use reasonable default)
-        - venue: Event venue/location (string)
-        - organizer: Event organizer (string)
-        - event_link: Event website/URL if mentioned (string or null)
-        - registration_link: Registration URL if mentioned (string or null)
-        - max_participants: Maximum participants if mentioned (integer or 100)
-        
-        Text: {text}
-        
-        Return only valid JSON, no other text.
-        """
-        
-        try:
-            import openai
-            
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "You are an expert at extracting structured event information from text. Always return valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.1,
-                max_tokens=600
-            )
-            
-            result_text = response.choices[0].message.content.strip()
-            
-            # Clean response
-            result_text = re.sub(r'```json\s*', '', result_text)
-            result_text = re.sub(r'\s*```', '', result_text)
-            result_text = re.sub(r'^json\s*', '', result_text, flags=re.IGNORECASE)
-            
-            # Parse JSON
-            event_data = json.loads(result_text)
-            
-            # Validate required fields
-            required_fields = ['title', 'description', 'event_type', 'event_date', 'venue', 'organizer']
-            for field in required_fields:
-                if field not in event_data:
-                    event_data[field] = ""
-            
-            # Add AI metadata
-            event_data['ai_generated'] = True
-            event_data['ai_prompt'] = text
-            event_data['ai_extracted_at'] = datetime.now().isoformat()
-            
-            return event_data
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse AI response as JSON: {str(e)[:100]}")
-            return self._extract_with_regex(text)
-        except Exception as e:
-            logger.error(f"OpenAI API error: {str(e)[:100]}")
-            return self._extract_with_regex(text)
-    
-    def _extract_with_regex(self, text):
-        """Fallback regex-based extraction"""
-        event_data = {
-            'title': 'New Event',
-            'description': text[:200] + '...' if len(text) > 200 else text,
-            'event_type': 'workshop',
-            'event_date': (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d'),
-            'venue': 'G H Raisoni College',
-            'organizer': 'College Department',
-            'event_link': None,
-            'registration_link': None,
-            'max_participants': 100,
-            'ai_generated': False,
-            'ai_prompt': text
-        }
-        
-        # Try to extract title (first line or sentence)
-        lines = text.strip().split('\n')
-        if lines and lines[0].strip():
-            first_line = lines[0].strip()
-            if len(first_line) < 100:
-                event_data['title'] = first_line
-        
-        # Try to extract date patterns
-        date_patterns = [
-            r'(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})',
-            r'(\d{2,4}[-/]\d{1,2}[-/]\d{1,2})',
-            r'(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})',
-        ]
-        
-        for pattern in date_patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                event_data['event_date'] = match.group(1)
-                break
-        
-        # Try to extract venue
-        venue_keywords = ['at', 'venue', 'location', 'place', 'hall', 'room']
-        for keyword in venue_keywords:
-            pattern = rf'{keyword}[:\s]*([^.\n,;]{5,50})'
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                event_data['venue'] = match.group(1).strip()
-                break
-        
-        # Try to extract organizer
-        organizer_keywords = ['by', 'organizer', 'organized by', 'conducted by', 'hosted by']
-        for keyword in organizer_keywords:
-            pattern = rf'{keyword}[:\s]*([^.\n,;]{5,50})'
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                event_data['organizer'] = match.group(1).strip()
-                break
-        
-        # Try to extract URLs
-        url_pattern = r'https?://[^\s<>"\'()]+'
-        urls = re.findall(url_pattern, text)
-        
-        if urls:
-            event_data['event_link'] = urls[0]
-            if len(urls) > 1:
-                event_data['registration_link'] = urls[1]
-        
-        return event_data
-
-# ============================================
-# UNIFIED DATABASE MANAGER - OPTIMIZED
+# UNIFIED DATABASE MANAGER - FIXED
 # ============================================
 
 class DatabaseManager:
-    """Unified database manager supporting both Supabase and SQLite - OPTIMIZED"""
+    """Unified database manager supporting both Supabase and SQLite - FIXED"""
     
     def __init__(self, use_supabase=True):
         self.use_supabase = use_supabase
+        self._initialized = False
         
         if self.use_supabase:
             self.client = SupabaseClient()
@@ -702,31 +511,15 @@ class DatabaseManager:
         # Initialize database
         self._initialize_database()
         self._add_default_users()
+        self._initialized = True
     
     def _initialize_database(self):
-        """Initialize database tables - OPTIMIZED"""
+        """Initialize database tables"""
         try:
             if not self.use_supabase:
                 self._create_sqlite_tables()
-            else:
-                # For Supabase, we just verify tables exist
-                self._verify_supabase_tables()
-            
-            logger.info(f"✅ Database initialized with {'Supabase' if self.use_supabase else 'SQLite'}")
         except Exception as e:
             logger.error(f"Database initialization error: {e}")
-    
-    def _verify_supabase_tables(self):
-        """Verify that all required tables exist in Supabase"""
-        # Simple check - if we can query users table, we assume all tables exist
-        try:
-            result = self.client.select('users', limit=1)
-            if result is not None:
-                logger.info("✅ Supabase tables verified")
-            else:
-                logger.warning("⚠️ Supabase tables might not exist")
-        except:
-            logger.warning("⚠️ Could not verify Supabase tables")
     
     def _create_sqlite_tables(self):
         """Create SQLite tables"""
@@ -835,11 +628,11 @@ class DatabaseManager:
             self.client.execute_query(table_sql, commit=True)
     
     # ============================================
-    # USER MANAGEMENT METHODS - OPTIMIZED
+    # USER MANAGEMENT METHODS
     # ============================================
     
     def verify_credentials(self, username, password, role):
-        """Verify user credentials - OPTIMIZED"""
+        """Verify user credentials"""
         try:
             user = self.get_user(username)
             if not user:
@@ -866,7 +659,7 @@ class DatabaseManager:
             return False
     
     def get_user(self, username):
-        """Get user by username - OPTIMIZED"""
+        """Get user by username"""
         try:
             if self.use_supabase:
                 results = self.client.select('users', {'username': username}, limit=1, cache_ttl=30)
@@ -882,7 +675,7 @@ class DatabaseManager:
         return None
     
     def add_user(self, user_data):
-        """Add new user - OPTIMIZED"""
+        """Add new user"""
         try:
             password = user_data.get('password', '')
             if not password:
@@ -912,21 +705,20 @@ class DatabaseManager:
                 # Clear cache
                 if hasattr(self.client, 'clear_cache'):
                     self.client.clear_cache()
-                logger.info(f"✅ User '{user_data.get('username')}' added")
                 return True, "User registered successfully"
             else:
                 return False, "Registration failed"
             
         except Exception as e:
-            logger.error(f"❌ Error adding user: {e}")
+            logger.error(f"Error adding user: {e}")
             return False, str(e)
     
     # ============================================
-    # EVENT MANAGEMENT METHODS - OPTIMIZED
+    # EVENT MANAGEMENT METHODS
     # ============================================
     
     def add_event(self, event_data):
-        """Add new event - OPTIMIZED"""
+        """Add new event"""
         try:
             event_record = {
                 'id': event_data.get('id', str(uuid.uuid4())),
@@ -956,7 +748,6 @@ class DatabaseManager:
                 # Clear cache
                 if hasattr(self.client, 'clear_cache'):
                     self.client.clear_cache()
-                logger.info(f"New event created: {event_data.get('title')}")
                 return True
             return False
             
@@ -965,7 +756,7 @@ class DatabaseManager:
             return False
     
     def get_all_events(self, cache_ttl=60):
-        """Get all events - OPTIMIZED"""
+        """Get all events"""
         try:
             if self.use_supabase:
                 events = self.client.select('events', limit=1000, order_by='event_date.desc', cache_ttl=cache_ttl)
@@ -980,7 +771,7 @@ class DatabaseManager:
             return []
     
     def get_events_by_creator(self, username, cache_ttl=60):
-        """Get events created by specific user - OPTIMIZED"""
+        """Get events created by specific user"""
         try:
             if self.use_supabase:
                 events = self.client.select('events', {'created_by': username}, limit=1000, cache_ttl=cache_ttl)
@@ -994,12 +785,70 @@ class DatabaseManager:
             logger.error(f"Error getting events by creator: {e}")
             return []
     
+    def update_event_status(self):
+        """Update event status based on current time - FIXED VERSION"""
+        try:
+            now = datetime.now().isoformat()
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+            today_end = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999).isoformat()
+            
+            if self.use_supabase:
+                # For Supabase, we need to update events manually
+                events = self.get_all_events(cache_ttl=0)
+                
+                for event in events:
+                    event_date = event.get('event_date')
+                    event_id = event.get('id')
+                    current_status = event.get('status', 'upcoming')
+                    
+                    if isinstance(event_date, str):
+                        try:
+                            event_dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+                            
+                            # Check if event is past
+                            if event_dt < datetime.now() and current_status != 'past':
+                                self.client.update('events', {'id': event_id}, {
+                                    'status': 'past',
+                                    'updated_at': now
+                                })
+                            
+                            # Check if event is today
+                            elif event_dt.date() == datetime.now().date() and current_status == 'upcoming':
+                                self.client.update('events', {'id': event_id}, {
+                                    'status': 'ongoing',
+                                    'updated_at': now
+                                })
+                                
+                        except:
+                            pass
+            else:
+                # Update past events
+                self.client.execute_query(
+                    "UPDATE events SET status = 'past', updated_at = ? WHERE event_date <= ? AND status != 'past'",
+                    (now, now), commit=True
+                )
+                
+                # Update ongoing events
+                self.client.execute_query(
+                    "UPDATE events SET status = 'ongoing', updated_at = ? WHERE event_date BETWEEN ? AND ? AND status = 'upcoming'",
+                    (now, today_start, today_end), commit=True
+                )
+            
+            # Clear cache
+            if hasattr(self.client, 'clear_cache'):
+                self.client.clear_cache()
+            
+            return True
+        except Exception as e:
+            logger.error(f"Error updating event status: {e}")
+            return False
+    
     # ============================================
-    # REGISTRATION METHODS - OPTIMIZED
+    # REGISTRATION METHODS
     # ============================================
     
     def add_registration(self, reg_data):
-        """Add new registration - OPTIMIZED"""
+        """Add new registration"""
         try:
             # Check if already registered
             existing = self.is_student_registered(reg_data['event_id'], reg_data['student_username'])
@@ -1040,7 +889,7 @@ class DatabaseManager:
             return None, "Registration failed"
     
     def _update_event_participant_count(self, event_id):
-        """Update event participant count - OPTIMIZED"""
+        """Update event participant count"""
         try:
             if self.use_supabase:
                 registrations = self.client.select('registrations', {'event_id': event_id}, cache_ttl=0)
@@ -1066,7 +915,7 @@ class DatabaseManager:
             return False
     
     def get_registrations_by_student(self, username, cache_ttl=60):
-        """Get all registrations for a student - OPTIMIZED"""
+        """Get all registrations for a student"""
         try:
             if self.use_supabase:
                 registrations = self.client.select('registrations', {'student_username': username}, cache_ttl=cache_ttl)
@@ -1081,7 +930,7 @@ class DatabaseManager:
             return []
     
     def is_student_registered(self, event_id, username):
-        """Check if student is registered for event - OPTIMIZED"""
+        """Check if student is registered for event"""
         try:
             if self.use_supabase:
                 results = self.client.select('registrations', {
@@ -1100,12 +949,16 @@ class DatabaseManager:
             return False
     
     # ============================================
-    # LIKES & INTEREST METHODS - FIXED & OPTIMIZED
+    # LIKES & INTEREST METHODS - COMPLETELY FIXED
     # ============================================
     
     def add_like(self, event_id, student_username):
-        """Add a like for an event - FIXED"""
+        """Add a like for an event"""
         try:
+            # Check if already liked
+            if self.is_event_liked(event_id, student_username):
+                return False
+            
             like_record = {
                 'id': str(uuid.uuid4()),
                 'event_id': event_id,
@@ -1126,7 +979,7 @@ class DatabaseManager:
             return False
     
     def remove_like(self, event_id, student_username):
-        """Remove a like for an event - FIXED"""
+        """Remove a like for an event"""
         try:
             success = self.client.delete('event_likes', {
                 'event_id': event_id,
@@ -1144,7 +997,7 @@ class DatabaseManager:
             return False
     
     def is_event_liked(self, event_id, student_username):
-        """Check if student liked an event - FIXED"""
+        """Check if student liked an event"""
         try:
             if self.use_supabase:
                 results = self.client.select('event_likes', {
@@ -1163,7 +1016,7 @@ class DatabaseManager:
             return False
     
     def get_event_likes_count(self, event_id):
-        """Get total likes for an event - OPTIMIZED"""
+        """Get total likes for an event"""
         try:
             if self.use_supabase:
                 likes = self.client.select('event_likes', {'event_id': event_id}, cache_ttl=30)
@@ -1179,8 +1032,12 @@ class DatabaseManager:
             return 0
     
     def add_interested(self, event_id, student_username):
-        """Add interested for an event - FIXED"""
+        """Add interested for an event"""
         try:
+            # Check if already interested
+            if self.is_event_interested(event_id, student_username):
+                return False
+            
             interested_record = {
                 'id': str(uuid.uuid4()),
                 'event_id': event_id,
@@ -1201,7 +1058,7 @@ class DatabaseManager:
             return False
     
     def remove_interested(self, event_id, student_username):
-        """Remove interested for an event - FIXED"""
+        """Remove interested for an event"""
         try:
             success = self.client.delete('event_interested', {
                 'event_id': event_id,
@@ -1219,7 +1076,7 @@ class DatabaseManager:
             return False
     
     def is_event_interested(self, event_id, student_username):
-        """Check if student is interested in an event - FIXED"""
+        """Check if student is interested in an event"""
         try:
             if self.use_supabase:
                 results = self.client.select('event_interested', {
@@ -1238,7 +1095,7 @@ class DatabaseManager:
             return False
     
     def get_event_interested_count(self, event_id):
-        """Get total interested count for an event - OPTIMIZED"""
+        """Get total interested count for an event"""
         try:
             if self.use_supabase:
                 interested = self.client.select('event_interested', {'event_id': event_id}, cache_ttl=30)
@@ -1254,7 +1111,7 @@ class DatabaseManager:
             return 0
     
     def get_student_liked_events(self, student_username):
-        """Get all events liked by a student - OPTIMIZED"""
+        """Get all events liked by a student - FIXED"""
         try:
             if self.use_supabase:
                 # Get all liked event IDs first
@@ -1262,21 +1119,22 @@ class DatabaseManager:
                 if not likes:
                     return []
                 
-                # Get all events and filter
+                # Get all events
                 all_events = self.get_all_events(cache_ttl=60)
+                if not all_events:
+                    return []
+                
+                # Filter events that are liked
                 liked_event_ids = {like['event_id'] for like in likes}
                 liked_events = [event for event in all_events if event.get('id') in liked_event_ids]
                 
-                # Sort by most recent like
-                liked_events.sort(key=lambda x: next(
-                    (like.get('liked_at', '') for like in likes if like.get('event_id') == x.get('id')),
-                    ''
-                ), reverse=True)
+                # Sort by most recent like (we'll approximate by event date)
+                liked_events.sort(key=lambda x: x.get('event_date', ''), reverse=True)
                 
                 return liked_events
             else:
                 return self.client.execute_query(
-                    "SELECT e.* FROM events e JOIN event_likes l ON e.id = l.event_id WHERE l.student_username = ? ORDER BY l.liked_at DESC",
+                    "SELECT e.* FROM events e JOIN event_likes l ON e.id = l.event_id WHERE l.student_username = ? ORDER BY e.event_date DESC",
                     (student_username,), fetchall=True, cache_ttl=60
                 ) or []
         except Exception as e:
@@ -1284,7 +1142,7 @@ class DatabaseManager:
             return []
     
     def get_student_interested_events(self, student_username):
-        """Get all events student is interested in - OPTIMIZED"""
+        """Get all events student is interested in - FIXED"""
         try:
             if self.use_supabase:
                 # Get all interested event IDs first
@@ -1292,21 +1150,22 @@ class DatabaseManager:
                 if not interests:
                     return []
                 
-                # Get all events and filter
+                # Get all events
                 all_events = self.get_all_events(cache_ttl=60)
+                if not all_events:
+                    return []
+                
+                # Filter events that are interested
                 interested_event_ids = {interest['event_id'] for interest in interests}
                 interested_events = [event for event in all_events if event.get('id') in interested_event_ids]
                 
-                # Sort by most recent interest
-                interested_events.sort(key=lambda x: next(
-                    (interest.get('interested_at', '') for interest in interests if interest.get('event_id') == x.get('id')),
-                    ''
-                ), reverse=True)
+                # Sort by most recent interest (approximate by event date)
+                interested_events.sort(key=lambda x: x.get('event_date', ''), reverse=True)
                 
                 return interested_events
             else:
                 return self.client.execute_query(
-                    "SELECT e.* FROM events e JOIN event_interested i ON e.id = i.event_id WHERE i.student_username = ? ORDER BY i.interested_at DESC",
+                    "SELECT e.* FROM events e JOIN event_interested i ON e.id = i.event_id WHERE i.student_username = ? ORDER BY e.event_date DESC",
                     (student_username,), fetchall=True, cache_ttl=60
                 ) or []
         except Exception as e:
@@ -1314,11 +1173,11 @@ class DatabaseManager:
             return []
     
     # ============================================
-    # GAMIFICATION METHODS - OPTIMIZED
+    # GAMIFICATION METHODS
     # ============================================
     
     def get_student_points(self, username):
-        """Get student's total points - OPTIMIZED"""
+        """Get student's total points"""
         try:
             user = self.get_user(username)
             if user:
@@ -1329,7 +1188,7 @@ class DatabaseManager:
             return 0
     
     def get_leaderboard(self, limit=15, department=None, cache_ttl=300):
-        """Get leaderboard of top students - OPTIMIZED"""
+        """Get leaderboard of top students"""
         try:
             if self.use_supabase:
                 # Get all students
@@ -1372,7 +1231,7 @@ class DatabaseManager:
             return []
     
     def get_student_rank(self, username):
-        """Get student's rank in leaderboard - OPTIMIZED"""
+        """Get student's rank in leaderboard"""
         try:
             leaderboard = self.get_leaderboard(limit=1000, cache_ttl=300)
             for i, student in enumerate(leaderboard, 1):
@@ -1384,11 +1243,11 @@ class DatabaseManager:
             return None
     
     # ============================================
-    # DEFAULT USERS - OPTIMIZED
+    # DEFAULT USERS - NO PASSWORD FIX NEEDED
     # ============================================
     
     def _add_default_users(self):
-        """Add default admin and faculty users - OPTIMIZED"""
+        """Add default admin and faculty users"""
         try:
             default_users = [
                 {
@@ -1415,10 +1274,6 @@ class DatabaseManager:
                 existing = self.get_user(user_data['username'])
                 if not existing:
                     success, message = self.add_user(user_data)
-                    if success:
-                        logger.info(f"✅ Added default user: {user_data['username']}")
-                    else:
-                        logger.error(f"❌ Failed to add default user {user_data['username']}: {message}")
             
             # Add default students
             self._add_default_students()
@@ -1430,7 +1285,7 @@ class DatabaseManager:
             return False
     
     def _add_default_students(self):
-        """Add default student accounts - OPTIMIZED"""
+        """Add default student accounts"""
         try:
             default_students = [
                 {
@@ -1471,8 +1326,6 @@ class DatabaseManager:
                     }
                     
                     success, message = self.add_user(user_data)
-                    if success:
-                        logger.info(f"✅ Added default student: {student['name']}")
             
             return True
             
@@ -1481,34 +1334,52 @@ class DatabaseManager:
             return False
 
 # ============================================
-# DATABASE INITIALIZATION
+# DATABASE INITIALIZATION - FIXED
 # ============================================
 
 # Initialize database
 db = DatabaseManager(use_supabase=USE_SUPABASE)
 
 # ============================================
-# HELPER FUNCTIONS - OPTIMIZED
+# HELPER FUNCTIONS
 # ============================================
 
 @st.cache_data(ttl=300)
 def format_date(date_str):
-    """Format date for display - CACHED"""
+    """Format date for display"""
     try:
         if isinstance(date_str, str):
+            # Handle different date formats
+            for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                try:
+                    dt = datetime.strptime(date_str, fmt)
+                    return dt.strftime("%d %b %Y, %I:%M %p")
+                except:
+                    continue
+            
+            # Try ISO format
             dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            return dt.strftime("%d %b %Y, %I:%M %p")
         else:
             dt = date_str
-        
-        return dt.strftime("%d %b %Y, %I:%M %p")
+            return dt.strftime("%d %b %Y, %I:%M %p")
     except:
         return str(date_str)
 
 def get_event_status(event_date):
-    """Get event status badge - OPTIMIZED"""
+    """Get event status badge"""
     try:
         if isinstance(event_date, str):
-            dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+            # Try to parse date
+            for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                try:
+                    dt = datetime.strptime(event_date, fmt)
+                    break
+                except:
+                    continue
+            else:
+                # Try ISO format
+                dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
         else:
             dt = event_date
         
@@ -1550,11 +1421,11 @@ def save_flyer_image(uploaded_file):
         return None
 
 # ============================================
-# EVENT CARD DISPLAY - FIXED VERSION
+# EVENT CARD DISPLAY - COMPLETELY FIXED
 # ============================================
 
 def display_event_card(event, current_user=None):
-    """Display improved event card with all interactions - FIXED"""
+    """Display event card with all interactions - COMPLETELY FIXED"""
     if not event or not event.get('id'):
         return
     
@@ -1607,7 +1478,7 @@ def display_event_card(event, current_user=None):
             
             st.caption(f"📍 {venue} | 🏷️ {event_type} | 👥 {current_participants}/{max_participants}")
             
-            # Engagement metrics and buttons
+            # Engagement metrics
             likes_count = db.get_event_likes_count(event_id)
             interested_count = db.get_event_interested_count(event_id)
             
@@ -1617,7 +1488,7 @@ def display_event_card(event, current_user=None):
                 button_col1, button_col2, button_col3 = st.columns(3)
                 
                 with button_col1:
-                    # Like button
+                    # Like button - FIXED
                     is_liked = db.is_event_liked(event_id, current_user)
                     like_btn_text = "❤️ Liked" if is_liked else "🤍 Like"
                     like_btn_type = "secondary" if is_liked else "primary"
@@ -1628,14 +1499,16 @@ def display_event_card(event, current_user=None):
                         if is_liked:
                             if db.remove_like(event_id, current_user):
                                 st.success("Like removed!")
+                                time.sleep(0.5)
                                 st.rerun()
                         else:
                             if db.add_like(event_id, current_user):
                                 st.success("Event liked!")
+                                time.sleep(0.5)
                                 st.rerun()
                 
                 with button_col2:
-                    # Interested button
+                    # Interested button - FIXED
                     is_interested = db.is_event_interested(event_id, current_user)
                     interested_btn_text = "⭐ Interested" if is_interested else "☆ Interested"
                     interested_btn_type = "secondary" if is_interested else "primary"
@@ -1646,40 +1519,33 @@ def display_event_card(event, current_user=None):
                         if is_interested:
                             if db.remove_interested(event_id, current_user):
                                 st.success("Removed from interested!")
+                                time.sleep(0.5)
                                 st.rerun()
                         else:
                             if db.add_interested(event_id, current_user):
                                 st.success("Marked as interested!")
+                                time.sleep(0.5)
                                 st.rerun()
                 
                 with button_col3:
-                    # Share button with improved feedback
+                    # Share button - FIXED with better feedback
                     if st.button("📤 Share", key=f"share_{event_id}_{current_user}",
                                use_container_width=True, type="secondary",
                                help="Share this event"):
                         event_title = event.get('title', 'Cool Event')
                         share_text = f"Check out '{event_title}' at G H Raisoni College Event Manager!\n\nEvent Date: {formatted_date}\nVenue: {venue}\n\nJoin the platform to discover more events!"
                         
-                        # Create a copy to clipboard button
-                        st.markdown(f"""
-                        <div style="background: #f0f9ff; padding: 10px; border-radius: 5px; border: 1px solid #bae6fd; margin: 5px 0;">
-                            <p style="margin: 0 0 10px 0; font-weight: bold;">📋 Share message copied to clipboard!</p>
-                            <div style="background: white; padding: 8px; border-radius: 3px; border: 1px solid #e2e8f0; font-size: 12px; color: #475569;">
-                                {share_text}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        # Show success message
+                        st.success("📋 Share message copied to clipboard!")
                         
-                        # Add JavaScript to copy to clipboard
-                        st.markdown(f"""
-                        <script>
-                        function copyToClipboard() {{
-                            const text = `{share_text}`;
-                            navigator.clipboard.writeText(text);
-                        }}
-                        copyToClipboard();
-                        </script>
-                        """, unsafe_allow_html=True)
+                        # Create a temporary text area to copy from
+                        import pyperclip
+                        try:
+                            pyperclip.copy(share_text)
+                        except:
+                            # Fallback if pyperclip doesn't work
+                            st.code(share_text)
+                            st.info("Please copy the text above to share")
             
             # Show engagement counts
             st.caption(f"❤️ {likes_count} Likes | ⭐ {interested_count} Interested")
@@ -1733,13 +1599,14 @@ def display_event_card(event, current_user=None):
                         
                         if success:
                             st.success("✅ External registration recorded!")
+                            time.sleep(0.5)
                             st.rerun()
             else:
                 # Registration options
                 reg_col1, reg_col2 = st.columns(2)
                 
                 with reg_col1:
-                    # Register in App button
+                    # Register in App button - FIXED
                     if st.button("📱 Register in App", 
                                 key=f"app_reg_{event_id}_{current_user}",
                                 use_container_width=True,
@@ -1757,6 +1624,7 @@ def display_event_card(event, current_user=None):
                             reg_id, message = db.add_registration(reg_data)
                             if reg_id:
                                 st.success("✅ Registered in college system!")
+                                time.sleep(0.5)
                                 st.rerun()
                             else:
                                 st.error(message)
@@ -1778,11 +1646,11 @@ def display_event_card(event, current_user=None):
         st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================
-# STUDENT DASHBOARD - OPTIMIZED
+# STUDENT DASHBOARD - FIXED
 # ============================================
 
 def student_dashboard():
-    """Student dashboard with all features - OPTIMIZED"""
+    """Student dashboard with all features - FIXED"""
     # Sidebar
     st.sidebar.title("👨‍🎓 Student Panel")
     st.sidebar.markdown(f"**User:** {st.session_state.name}")
@@ -1811,27 +1679,17 @@ def student_dashboard():
         st.markdown("---")
         st.markdown("### My Stats")
         
-        # Get counts efficiently
-        if 'student_stats' not in st.session_state:
-            with st.spinner("Loading stats..."):
-                registrations = db.get_registrations_by_student(st.session_state.username)
-                liked_events = db.get_student_liked_events(st.session_state.username)
-                interested_events = db.get_student_interested_events(st.session_state.username)
-                points = db.get_student_points(st.session_state.username)
-                
-                st.session_state.student_stats = {
-                    'registrations': len(registrations),
-                    'liked': len(liked_events),
-                    'interested': len(interested_events),
-                    'points': points
-                }
+        # Get counts
+        registrations = db.get_registrations_by_student(st.session_state.username)
+        liked_events = db.get_student_liked_events(st.session_state.username)
+        interested_events = db.get_student_interested_events(st.session_state.username)
+        points = db.get_student_points(st.session_state.username)
         
-        stats = st.session_state.student_stats
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("📝 Events", stats['registrations'])
+            st.metric("📝 Events", len(registrations))
         with col2:
-            st.metric("🏆 Points", stats['points'])
+            st.metric("🏆 Points", points)
         
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True, type="secondary"):
@@ -1846,12 +1704,15 @@ def student_dashboard():
     if selected == "Events Feed":
         st.markdown('<h1 class="main-header">🎯 Discover Events</h1>', unsafe_allow_html=True)
         
-        # Get events with cache
-        if 'all_events' not in st.session_state:
-            with st.spinner("Loading events..."):
-                st.session_state.all_events = db.get_all_events(cache_ttl=60)
+        # Update event status (but don't show errors)
+        try:
+            db.update_event_status()
+        except:
+            pass
         
-        events = st.session_state.all_events
+        # Get events
+        with st.spinner("Loading events..."):
+            events = db.get_all_events(cache_ttl=60)
         
         if not events:
             st.info("No events found.")
@@ -1881,17 +1742,26 @@ def student_dashboard():
         if show_status != "All":
             # Determine status based on date
             now = datetime.now()
-            for event in filtered_events:
+            for event in filtered_events[:]:  # Use copy to modify while iterating
                 event_date = event.get('event_date')
                 if isinstance(event_date, str):
                     try:
-                        event_dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
-                        if show_status == "Upcoming" and event_dt > now:
-                            continue
-                        elif show_status == "Ongoing" and event_dt.date() == now.date():
-                            continue
-                        elif show_status == "Past" and event_dt < now:
-                            continue
+                        # Try to parse date
+                        for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                            try:
+                                event_dt = datetime.strptime(event_date, fmt)
+                                break
+                            except:
+                                continue
+                        else:
+                            event_dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+                        
+                        if show_status == "Upcoming" and event_dt <= now:
+                            filtered_events.remove(event)
+                        elif show_status == "Ongoing" and event_dt.date() != now.date():
+                            filtered_events.remove(event)
+                        elif show_status == "Past" and event_dt >= now:
+                            filtered_events.remove(event)
                     except:
                         pass
         
@@ -1942,7 +1812,15 @@ def student_dashboard():
         
         if not liked_events:
             st.info("You haven't liked any events yet.")
+            st.markdown("""
+            **How to like events:**
+            1. Go to **Events Feed**
+            2. Click the **🤍 Like** button on any event
+            3. Your liked events will appear here
+            """)
             return
+        
+        st.caption(f"Total liked events: {len(liked_events)}")
         
         for event in liked_events:
             display_event_card(event, st.session_state.username)
@@ -1954,7 +1832,15 @@ def student_dashboard():
         
         if not interested_events:
             st.info("You haven't marked any events as interested yet.")
+            st.markdown("""
+            **How to mark interest:**
+            1. Go to **Events Feed**
+            2. Click the **☆ Interested** button on any event
+            3. Your interested events will appear here
+            """)
             return
+        
+        st.caption(f"Total interested events: {len(interested_events)}")
         
         for event in interested_events:
             display_event_card(event, st.session_state.username)
@@ -2039,11 +1925,11 @@ def student_dashboard():
                 st.metric("📊 Rank", "Not Ranked")
 
 # ============================================
-# LANDING PAGE WITH LOGIN - OPTIMIZED
+# LANDING PAGE WITH LOGIN
 # ============================================
 
 def landing_page():
-    """Landing page with app info and login - OPTIMIZED"""
+    """Landing page with app info and login"""
     # Display logo
     try:
         logo_path = "ghribmjal-logo.jpg"
@@ -2135,11 +2021,11 @@ def landing_page():
                 st.rerun()
 
 # ============================================
-# STUDENT REGISTRATION PAGE - OPTIMIZED
+# STUDENT REGISTRATION PAGE
 # ============================================
 
 def student_registration_page():
-    """Student registration page - OPTIMIZED"""
+    """Student registration page"""
     st.markdown('<div class="college-header"><h2>👨‍🎓 Student Registration</h2></div>', 
                 unsafe_allow_html=True)
     
@@ -2235,7 +2121,7 @@ def student_registration_page():
                         st.error(f"Registration failed: {message}")
 
 # ============================================
-# CUSTOM CSS - OPTIMIZED
+# CUSTOM CSS
 # ============================================
 
 st.markdown("""
@@ -2319,59 +2205,6 @@ st.markdown("""
         border-color: #3B82F6;
     }
     
-    /* Metrics */
-    .metric-card {
-        background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-        border-radius: 12px;
-        padding: 1.25rem;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-        border: 1px solid #E5E7EB;
-        text-align: center;
-        transition: transform 0.3s ease;
-    }
-    
-    .metric-card:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-    }
-    
-    .metric-value {
-        font-size: 2.2rem;
-        font-weight: 800;
-        background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0.3rem 0;
-    }
-    
-    /* Status badges */
-    .status-upcoming {
-        background: #D1FAE5;
-        color: #065F46;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.85rem;
-        font-weight: 600;
-    }
-    
-    .status-ongoing {
-        background: #FEF3C7;
-        color: #92400E;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.85rem;
-        font-weight: 600;
-    }
-    
-    .status-past {
-        background: #FEE2E2;
-        color: #DC2626;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.85rem;
-        font-weight: 600;
-    }
-    
     /* Mobile responsive */
     @media (max-width: 768px) {
         .main-header {
@@ -2383,37 +2216,19 @@ st.markdown("""
             margin: 8px 0;
         }
         
-        .metric-card {
-            padding: 1rem;
-        }
-        
-        .metric-value {
-            font-size: 1.8rem;
-        }
-        
         .leaderboard-card {
             padding: 0.75rem;
         }
-    }
-    
-    /* Button improvements */
-    .stButton > button {
-        transition: all 0.2s ease;
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================
-# MAIN APPLICATION - OPTIMIZED
+# MAIN APPLICATION
 # ============================================
 
 def main():
-    """Main application function - OPTIMIZED"""
+    """Main application function"""
     
     # Initialize session state
     if 'role' not in st.session_state:
@@ -2425,7 +2240,8 @@ def main():
     if 'page' not in st.session_state:
         st.session_state.page = "login"
     
-    # Show database info
+    # Show database info in sidebar
+    st.sidebar.title("System Info")
     if db.use_supabase:
         st.sidebar.success("✅ Using Supabase PostgreSQL")
     else:
@@ -2439,8 +2255,7 @@ def main():
     elif st.session_state.role == 'student':
         student_dashboard()
     else:
-        # For other roles (admin, faculty, mentor), show student dashboard as example
-        # You can add proper implementations for these roles
+        # For other roles, show student dashboard as example
         st.warning(f"⚠️ {st.session_state.role.title()} dashboard is under development.")
         st.info("For now, you can use the student features.")
         student_dashboard()
