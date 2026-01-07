@@ -2,6 +2,7 @@
 G H Raisoni College - Advanced Event Management System
 PRODUCTION READY with Supabase PostgreSQL (Free Forever)
 Deployable on Streamlit Cloud
+WITH GAMIFICATION LEADERBOARD SYSTEM
 """
 
 import streamlit as st
@@ -79,6 +80,33 @@ COLLEGE_CONFIG = {
         "Conference", "Webinar", "Training", "Symposium", "Cultural Event",
         "Guest Lecture", "Industrial Visit"
     ]
+}
+
+# ============================================
+# GAMIFICATION CONFIGURATION
+# ============================================
+
+GAMIFICATION_CONFIG = {
+    "points": {
+        "registration": 50,
+        "shortlisted": 100,
+        "winner": 200
+    },
+    "badges": {
+        "registration": "🏅 Participant",
+        "shortlisted": "⭐ Shortlisted",
+        "winner": "🏆 Winner",
+        "top_10": "👑 Top 10 Leader",
+        "top_25": "🎖️ Top 25 Achiever",
+        "top_50": "🌟 Rising Star",
+        "mentor_choice": "💎 Mentor's Choice",
+        "most_active": "🚀 Most Active"
+    },
+    "leaderboard": {
+        "top_n": 15,  # Display top 15 students in leaderboard
+        "update_interval": 3600,  # Update leaderboard every hour
+        "department_top_n": 5  # Top 5 per department
+    }
 }
 
 # ============================================
@@ -731,7 +759,9 @@ class DatabaseManager:
                 login_attempts INTEGER DEFAULT 0,
                 last_login TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                total_points INTEGER DEFAULT 0,
+                last_points_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
             """,
             
@@ -793,6 +823,9 @@ class DatabaseManager:
                 student_mobile TEXT,
                 status TEXT DEFAULT 'pending',
                 attendance TEXT DEFAULT 'absent',
+                points_awarded INTEGER DEFAULT 0,
+                badges_awarded TEXT DEFAULT '',
+                mentor_notes TEXT,
                 registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 checked_in_at TIMESTAMP,
                 UNIQUE(event_id, student_username),
@@ -821,6 +854,37 @@ class DatabaseManager:
                 interested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(event_id, student_username),
                 FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+            )
+            """,
+            
+            # Student badges table
+            """
+            CREATE TABLE IF NOT EXISTS student_badges (
+                id TEXT PRIMARY KEY,
+                student_username TEXT NOT NULL,
+                badge_name TEXT NOT NULL,
+                badge_type TEXT,
+                awarded_for TEXT,
+                event_id TEXT,
+                event_title TEXT,
+                awarded_by TEXT,
+                awarded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (student_username) REFERENCES users(username) ON DELETE CASCADE
+            )
+            """,
+            
+            # Points history table
+            """
+            CREATE TABLE IF NOT EXISTS points_history (
+                id TEXT PRIMARY KEY,
+                student_username TEXT NOT NULL,
+                points INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                event_id TEXT,
+                event_title TEXT,
+                awarded_by TEXT,
+                awarded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (student_username) REFERENCES users(username) ON DELETE CASCADE
             )
             """
         ]
@@ -876,6 +940,9 @@ class DatabaseManager:
                     # Ensure password field exists
                     if 'password' not in user:
                         user['password'] = ''
+                    # Ensure points field exists
+                    if 'total_points' not in user:
+                        user['total_points'] = 0
                     return user
                 return None
             else:
@@ -909,7 +976,9 @@ class DatabaseManager:
                 'year': user_data.get('year', ''),
                 'email': user_data.get('email', ''),
                 'mobile': user_data.get('mobile', ''),
-                'created_at': datetime.now().isoformat()
+                'created_at': datetime.now().isoformat(),
+                'total_points': 0,
+                'last_points_update': datetime.now().isoformat()
             }
         
             if self.use_supabase:
@@ -1252,7 +1321,8 @@ class DatabaseManager:
                 'email': mentor_data.get('email'),
                 'department': mentor_data.get('department'),
                 'mobile': contact,
-                'created_at': datetime.now().isoformat()
+                'created_at': datetime.now().isoformat(),
+                'total_points': 0
             }
             
             # Add to mentors table
@@ -1428,6 +1498,9 @@ class DatabaseManager:
                 'student_mobile': mobile,
                 'status': reg_data.get('status', 'pending'),
                 'attendance': reg_data.get('attendance', 'absent'),
+                'points_awarded': 0,
+                'badges_awarded': '',
+                'mentor_notes': '',
                 'registered_at': datetime.now().isoformat()
             }
             
@@ -1512,6 +1585,376 @@ class DatabaseManager:
                 return result is not None
         except:
             return False
+    
+    def update_registration_status(self, registration_id, status, points=None, badge=None, mentor_notes=None):
+        """Update registration status and award points/badges"""
+        try:
+            # Get registration details
+            if self.use_supabase:
+                reg_results = self.client.select('registrations', {'id': registration_id})
+                if not reg_results:
+                    return False, "Registration not found"
+                registration = reg_results[0]
+            else:
+                registration = self.client.execute_query(
+                    "SELECT * FROM registrations WHERE id = ?",
+                    (registration_id,), fetchone=True
+                )
+                if not registration:
+                    return False, "Registration not found"
+            
+            student_username = registration['student_username']
+            event_id = registration['event_id']
+            event_title = registration['event_title']
+            
+            update_data = {
+                'status': status,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            # Award points if specified
+            if points is not None and points > 0:
+                update_data['points_awarded'] = points
+                
+                # Update student's total points
+                student = self.get_user(student_username)
+                if student:
+                    current_points = student.get('total_points', 0)
+                    new_points = current_points + points
+                    
+                    # Update student's total points
+                    student_update_data = {
+                        'total_points': new_points,
+                        'last_points_update': datetime.now().isoformat(),
+                        'updated_at': datetime.now().isoformat()
+                    }
+                    
+                    if self.use_supabase:
+                        self.client.update('users', {'username': student_username}, student_update_data)
+                    else:
+                        self.client.update('users', {'username': student_username}, student_update_data)
+                    
+                    # Record points history
+                    points_record = {
+                        'id': str(uuid.uuid4()),
+                        'student_username': student_username,
+                        'points': points,
+                        'reason': f"Awarded for {status.lower()} in {event_title}",
+                        'event_id': event_id,
+                        'event_title': event_title,
+                        'awarded_by': st.session_state.username if hasattr(st, 'session_state') and hasattr(st.session_state, 'username') else 'system',
+                        'awarded_at': datetime.now().isoformat()
+                    }
+                    
+                    if self.use_supabase:
+                        self.client.insert('points_history', points_record)
+                    else:
+                        self.client.insert('points_history', points_record)
+            
+            # Award badge if specified
+            if badge:
+                current_badges = registration.get('badges_awarded', '')
+                if current_badges:
+                    badges_list = current_badges.split(',')
+                    if badge not in badges_list:
+                        badges_list.append(badge)
+                        update_data['badges_awarded'] = ','.join(badges_list)
+                else:
+                    update_data['badges_awarded'] = badge
+                
+                # Add to student badges table
+                badge_record = {
+                    'id': str(uuid.uuid4()),
+                    'student_username': student_username,
+                    'badge_name': badge,
+                    'badge_type': status.lower(),
+                    'awarded_for': f"{status} in {event_title}",
+                    'event_id': event_id,
+                    'event_title': event_title,
+                    'awarded_by': st.session_state.username if hasattr(st, 'session_state') and hasattr(st.session_state, 'username') else 'system',
+                    'awarded_at': datetime.now().isoformat()
+                }
+                
+                if self.use_supabase:
+                    self.client.insert('student_badges', badge_record)
+                else:
+                    self.client.insert('student_badges', badge_record)
+            
+            # Add mentor notes
+            if mentor_notes:
+                update_data['mentor_notes'] = mentor_notes
+            
+            # Update registration
+            if self.use_supabase:
+                success = self.client.update('registrations', {'id': registration_id}, update_data)
+            else:
+                success = self.client.update('registrations', {'id': registration_id}, update_data)
+            
+            if success:
+                return True, "Registration updated successfully"
+            else:
+                return False, "Failed to update registration"
+                
+        except Exception as e:
+            logger.error(f"Error updating registration status: {e}")
+            return False, str(e)
+    
+    # ============================================
+    # GAMIFICATION & LEADERBOARD METHODS
+    # ============================================
+    
+    def award_points_and_badge(self, student_username, event_id, event_title, achievement_type, awarded_by=None):
+        """Award points and badge to student"""
+        try:
+            points = GAMIFICATION_CONFIG['points'].get(achievement_type, 0)
+            badge = GAMIFICATION_CONFIG['badges'].get(achievement_type, '')
+            
+            if points <= 0:
+                return False, "No points to award"
+            
+            # Update student's total points
+            student = self.get_user(student_username)
+            if not student:
+                return False, "Student not found"
+            
+            current_points = student.get('total_points', 0)
+            new_points = current_points + points
+            
+            update_data = {
+                'total_points': new_points,
+                'last_points_update': datetime.now().isoformat(),
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            if self.use_supabase:
+                success = self.client.update('users', {'username': student_username}, update_data)
+            else:
+                success = self.client.update('users', {'username': student_username}, update_data)
+            
+            if not success:
+                return False, "Failed to update points"
+            
+            # Record points history
+            points_record = {
+                'id': str(uuid.uuid4()),
+                'student_username': student_username,
+                'points': points,
+                'reason': f"Awarded for {achievement_type} in {event_title}",
+                'event_id': event_id,
+                'event_title': event_title,
+                'awarded_by': awarded_by or 'system',
+                'awarded_at': datetime.now().isoformat()
+            }
+            
+            if self.use_supabase:
+                self.client.insert('points_history', points_record)
+            else:
+                self.client.insert('points_history', points_record)
+            
+            # Award badge if available
+            if badge:
+                badge_record = {
+                    'id': str(uuid.uuid4()),
+                    'student_username': student_username,
+                    'badge_name': badge,
+                    'badge_type': achievement_type,
+                    'awarded_for': f"{achievement_type} in {event_title}",
+                    'event_id': event_id,
+                    'event_title': event_title,
+                    'awarded_by': awarded_by or 'system',
+                    'awarded_at': datetime.now().isoformat()
+                }
+                
+                if self.use_supabase:
+                    self.client.insert('student_badges', badge_record)
+                else:
+                    self.client.insert('student_badges', badge_record)
+            
+            # Update registration points if exists
+            try:
+                if self.use_supabase:
+                    regs = self.client.select('registrations', {
+                        'event_id': event_id,
+                        'student_username': student_username
+                    })
+                    if regs:
+                        reg_update = {
+                            'points_awarded': points,
+                            'badges_awarded': badge,
+                            'updated_at': datetime.now().isoformat()
+                        }
+                        self.client.update('registrations', {'id': regs[0]['id']}, reg_update)
+                else:
+                    reg = self.client.execute_query(
+                        "SELECT id FROM registrations WHERE event_id = ? AND student_username = ?",
+                        (event_id, student_username), fetchone=True
+                    )
+                    if reg:
+                        reg_update = {
+                            'points_awarded': points,
+                            'badges_awarded': badge
+                        }
+                        self.client.update('registrations', {'id': reg['id']}, reg_update)
+            except Exception as e:
+                logger.warning(f"Could not update registration points: {e}")
+            
+            return True, f"Awarded {points} points and badge: {badge}"
+            
+        except Exception as e:
+            logger.error(f"Error awarding points: {e}")
+            return False, str(e)
+    
+    def get_student_points(self, username):
+        """Get student's total points"""
+        try:
+            user = self.get_user(username)
+            if user:
+                return user.get('total_points', 0)
+            return 0
+        except:
+            return 0
+    
+    def get_student_badges(self, username):
+        """Get all badges earned by student"""
+        try:
+            if self.use_supabase:
+                badges = self.client.select('student_badges', {'student_username': username})
+                return badges if badges else []
+            else:
+                return self.client.execute_query(
+                    "SELECT * FROM student_badges WHERE student_username = ? ORDER BY awarded_at DESC",
+                    (username,), fetchall=True
+                )
+        except:
+            return []
+    
+    def get_points_history(self, username):
+        """Get points history for student"""
+        try:
+            if self.use_supabase:
+                history = self.client.select('points_history', {'student_username': username})
+                return history if history else []
+            else:
+                return self.client.execute_query(
+                    "SELECT * FROM points_history WHERE student_username = ? ORDER BY awarded_at DESC",
+                    (username,), fetchall=True
+                )
+        except:
+            return []
+    
+    def get_leaderboard(self, limit=15, department=None):
+        """Get leaderboard of top students"""
+        try:
+            if self.use_supabase:
+                # For Supabase, we need to get all students and sort manually
+                users = self.client.select('users', {'role': 'student'}, limit=1000)
+                if not users:
+                    return []
+                
+                # Filter by department if specified
+                if department:
+                    users = [u for u in users if u.get('department') == department]
+                
+                # Sort by points (descending), then by name
+                users.sort(key=lambda x: (x.get('total_points', 0), x.get('name', '')), reverse=True)
+                
+                # Add rank
+                for i, user in enumerate(users[:limit], 1):
+                    user['rank'] = i
+                
+                return users[:limit]
+            else:
+                query = """
+                SELECT name, username, roll_no, department, year, total_points, 
+                       (SELECT COUNT(*) FROM points_history WHERE student_username = users.username) as events_count,
+                       (SELECT COUNT(*) FROM student_badges WHERE student_username = users.username) as badges_count
+                FROM users 
+                WHERE role = 'student'
+                """
+                
+                params = []
+                if department:
+                    query += " AND department = ?"
+                    params.append(department)
+                
+                query += " ORDER BY total_points DESC, name ASC LIMIT ?"
+                params.append(limit)
+                
+                results = self.client.execute_query(query, tuple(params), fetchall=True)
+                
+                # Add rank
+                for i, result in enumerate(results, 1):
+                    result['rank'] = i
+                
+                return results
+        except Exception as e:
+            logger.error(f"Error getting leaderboard: {e}")
+            return []
+    
+    def get_department_leaderboard(self, limit=5):
+        """Get top students per department"""
+        try:
+            all_students = []
+            departments = COLLEGE_CONFIG['departments']
+            
+            for dept in departments:
+                dept_students = self.get_leaderboard(limit=limit, department=dept)
+                for student in dept_students:
+                    student['department_rank'] = dept_students.index(student) + 1
+                all_students.extend(dept_students)
+            
+            return all_students
+        except Exception as e:
+            logger.error(f"Error getting department leaderboard: {e}")
+            return []
+    
+    def get_top_badges(self, limit=10):
+        """Get students with most badges"""
+        try:
+            if self.use_supabase:
+                # This is more complex in Supabase without direct SQL
+                # We'll implement a simplified version
+                users = self.client.select('users', {'role': 'student'}, limit=1000)
+                if not users:
+                    return []
+                
+                # Get badge counts for each user
+                for user in users:
+                    badges = self.get_student_badges(user['username'])
+                    user['badges_count'] = len(badges)
+                
+                # Sort by badge count
+                users.sort(key=lambda x: x.get('badges_count', 0), reverse=True)
+                return users[:limit]
+            else:
+                return self.client.execute_query(
+                    """
+                    SELECT u.name, u.username, u.roll_no, u.department, 
+                           COUNT(sb.id) as badges_count,
+                           GROUP_CONCAT(DISTINCT sb.badge_name) as badges_list
+                    FROM users u
+                    LEFT JOIN student_badges sb ON u.username = sb.student_username
+                    WHERE u.role = 'student'
+                    GROUP BY u.username
+                    ORDER BY badges_count DESC
+                    LIMIT ?
+                    """,
+                    (limit,), fetchall=True
+                )
+        except Exception as e:
+            logger.error(f"Error getting top badges: {e}")
+            return []
+    
+    def get_student_rank(self, username):
+        """Get student's rank in leaderboard"""
+        try:
+            leaderboard = self.get_leaderboard(limit=1000)  # Get all students
+            for i, student in enumerate(leaderboard, 1):
+                if student['username'] == username:
+                    return i
+            return None
+        except:
+            return None
     
     # ============================================
     # LIKES & INTEREST METHODS (FIXED)
@@ -1837,10 +2280,13 @@ class DatabaseManager:
             users = self.client.select('users') if self.use_supabase else self.client.execute_query("SELECT role FROM users", fetchall=True)
             if users:
                 role_counts = {}
+                total_points = 0
                 for user in users:
                     role = user.get('role', 'unknown')
                     role_counts[role] = role_counts.get(role, 0) + 1
+                    total_points += user.get('total_points', 0)
                 stats['user_counts'] = role_counts
+                stats['total_points'] = total_points
             
             # Get all events
             events = self.client.select('events') if self.use_supabase else self.client.execute_query("SELECT status FROM events", fetchall=True)
@@ -1878,6 +2324,18 @@ class DatabaseManager:
                 if created_at > week_ago:
                     recent_count += 1
             stats['recent_events'] = recent_count
+            
+            # Leaderboard stats
+            top_students = self.get_leaderboard(limit=5)
+            stats['top_students'] = top_students
+            
+            # Total badges awarded
+            if self.use_supabase:
+                badges = self.client.select('student_badges')
+                stats['total_badges'] = len(badges) if badges else 0
+            else:
+                result = self.client.execute_query("SELECT COUNT(*) as count FROM student_badges", fetchone=True)
+                stats['total_badges'] = result['count'] if result else 0
             
             return stats
             
@@ -2054,6 +2512,158 @@ def check_remember_me_cookie():
                     
     except Exception as e:
         logger.debug(f"Error checking remember me cookie: {e}")
+
+# ============================================
+# LEADERBOARD DISPLAY FUNCTIONS
+# ============================================
+
+def display_leaderboard(leaderboard_data, title="🏆 College Leaderboard"):
+    """Display leaderboard with rankings"""
+    st.markdown(f'<h2 style="text-align: center; margin-bottom: 2rem;">{title}</h2>', unsafe_allow_html=True)
+    
+    if not leaderboard_data:
+        st.info("No students found in leaderboard.")
+        return
+    
+    # Create medal emojis for top 3
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    
+    for student in leaderboard_data:
+        rank = student.get('rank', 0)
+        medal = medals.get(rank, f"{rank}.")
+        
+        with st.container():
+            st.markdown('<div class="leaderboard-card">', unsafe_allow_html=True)
+            
+            col1, col2, col3, col4 = st.columns([1, 3, 2, 1])
+            
+            with col1:
+                # Display rank with medal for top 3
+                if rank <= 3:
+                    st.markdown(f'<div style="font-size: 2rem; text-align: center;">{medal}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div style="font-size: 1.5rem; text-align: center; font-weight: bold;">{rank}.</div>', unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown(f'<div style="font-weight: bold; font-size: 1.1rem;">{student.get("name")}</div>', unsafe_allow_html=True)
+                st.caption(f"{student.get('roll_no', '')} | {student.get('department', '')} | Year {student.get('year', '')}")
+                
+                # Display badges if available
+                if student.get('badges_list'):
+                    badges = student['badges_list'].split(',')[:3]  # Show only first 3 badges
+                    badge_html = ' '.join([f'<span style="background: #FFD700; color: #000; padding: 2px 6px; border-radius: 10px; font-size: 0.7rem; margin-right: 4px;">{badge}</span>' for badge in badges])
+                    st.markdown(badge_html, unsafe_allow_html=True)
+            
+            with col3:
+                # Points display
+                points = student.get('total_points', 0)
+                st.markdown(f'<div style="font-size: 1.8rem; font-weight: bold; text-align: center; color: #3B82F6;">{points}</div>', unsafe_allow_html=True)
+                st.caption("Points", help="Total points earned")
+            
+            with col4:
+                # Events count
+                events_count = student.get('events_count', 0)
+                st.metric("Events", events_count)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown("---")
+
+def display_student_gamification_profile(username):
+    """Display student's gamification profile"""
+    student = db.get_user(username)
+    if not student:
+        st.error("Student not found!")
+        return
+    
+    # Get student data
+    points = db.get_student_points(username)
+    badges = db.get_student_badges(username)
+    points_history = db.get_points_history(username)
+    rank = db.get_student_rank(username)
+    
+    # Display profile header
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        st.markdown(f'<h2>🎮 Gamification Profile</h2>', unsafe_allow_html=True)
+        st.markdown(f'**Student:** {student.get("name")}')
+        st.markdown(f'**Roll No:** {student.get("roll_no", "N/A")}')
+        st.markdown(f'**Department:** {student.get("department", "N/A")}')
+    
+    with col2:
+        st.metric("🏆 Total Points", points)
+    
+    with col3:
+        if rank:
+            st.metric("📊 Rank", f"#{rank}")
+        else:
+            st.metric("📊 Rank", "Not Ranked")
+    
+    # Badges section
+    st.markdown("### 🏅 Badges Earned")
+    if badges:
+        cols = st.columns(4)
+        for i, badge in enumerate(badges[:8]):  # Show up to 8 badges
+            with cols[i % 4]:
+                badge_name = badge.get('badge_name', '')
+                event_title = badge.get('event_title', '')
+                awarded_at = format_date(badge.get('awarded_at', ''))
+                
+                st.markdown(f'''
+                <div style="background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%); 
+                            padding: 1rem; border-radius: 10px; text-align: center; 
+                            margin: 0.5rem 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <div style="font-size: 2rem;">{badge_name.split()[0]}</div>
+                    <div style="font-weight: bold; margin: 0.5rem 0;">{badge_name}</div>
+                    <div style="font-size: 0.8rem; color: #666;">{event_title}</div>
+                    <div style="font-size: 0.7rem; color: #888;">{awarded_at}</div>
+                </div>
+                ''', unsafe_allow_html=True)
+        
+        if len(badges) > 8:
+            st.caption(f"And {len(badges) - 8} more badges...")
+    else:
+        st.info("No badges earned yet. Participate in events to earn badges!")
+    
+    # Points history
+    st.markdown("### 📈 Points History")
+    if points_history:
+        history_data = []
+        for history in points_history[:10]:  # Show last 10 entries
+            history_data.append({
+                'Date': format_date(history.get('awarded_at')),
+                'Points': f"+{history.get('points', 0)}",
+                'Reason': history.get('reason', ''),
+                'Event': history.get('event_title', '')
+            })
+        
+        if history_data:
+            df = pd.DataFrame(history_data)
+            st.dataframe(df, use_container_width=True)
+    else:
+        st.info("No points history yet.")
+    
+    # Progress section
+    st.markdown("### 🚀 Your Progress")
+    
+    # Calculate next milestone
+    milestones = [100, 250, 500, 1000, 2000, 5000]
+    next_milestone = next((m for m in milestones if m > points), None)
+    
+    if next_milestone:
+        progress = (points / next_milestone) * 100
+        st.progress(progress / 100)
+        st.caption(f"{points} / {next_milestone} points to next milestone")
+        
+        col_a, col_b = st.columns(2)
+        with col_a:
+            events_registered = len(db.get_registrations_by_student(username))
+            st.metric("Events Registered", events_registered)
+        
+        with col_b:
+            st.metric("Next Milestone", f"{next_milestone - points} points needed")
+    else:
+        st.success("🎉 You've reached all milestones! You're a top achiever!")
 
 # ============================================
 # EVENT CARD DISPLAY (FIXED VERSION WITHOUT NESTED COLUMNS)
@@ -2383,13 +2993,25 @@ def landing_page():
     except:
         pass
     
-    st.markdown(f'<div class="college-header"><h2>{COLLEGE_CONFIG["name"]}</h2><p>Advanced Event Management System</p></div>', 
+    st.markdown(f'<div class="college-header"><h2>{COLLEGE_CONFIG["name"]}</h2><p>Advanced Event Management System with Gamification</p></div>', 
                 unsafe_allow_html=True)
 
     # App Information
     with st.expander("📱 About This App", expanded=True):
         st.markdown("""
         ### Welcome to G H Raisoni Event Management System
+        
+        **New Gamification Features:**
+        - 🏆 **Leaderboard:** Compete with other students for top rankings
+        - 🎮 **Points System:** Earn points for participation and achievements
+        - 🏅 **Badges:** Collect badges for various accomplishments
+        - 📊 **Progress Tracking:** Monitor your growth and achievements
+        - 🏆 **Department Rankings:** See how your department performs
+        
+        **Points System:**
+        - **50 Points** 🏅 - Register for an event
+        - **100 Points** ⭐ - Get shortlisted in an event
+        - **200 Points** 🏆 - Win an event
         
         **Features:**
         - 🎯 **Discover Events:** Browse workshops, hackathons, seminars, and more
@@ -2411,7 +3033,7 @@ def landing_page():
         2. Enter your credentials
         3. Check "Remember Me" to stay logged in
         4. Students can register for new accounts
-        5. Start exploring events!
+        5. Start exploring events and earning points!
         """)
     
     # Check for remember me cookie
@@ -2630,7 +3252,7 @@ def student_registration_page():
                         st.error(f"Registration failed: {message}")
 
 # ============================================
-# CUSTOM CSS
+# CUSTOM CSS (Updated with leaderboard styles)
 # ============================================
 
 st.markdown("""
@@ -2695,6 +3317,100 @@ st.markdown("""
         color: #1E293B;
         margin-bottom: 6px;
         line-height: 1.3;
+    }
+    
+    /* Leaderboard Card */
+    .leaderboard-card {
+        background: white;
+        border-radius: 12px;
+        padding: 1rem;
+        margin: 0.75rem 0;
+        border: 1px solid #E5E7EB;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        transition: all 0.3s ease;
+    }
+    
+    .leaderboard-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        border-color: #3B82F6;
+    }
+    
+    /* Top 3 Leaderboard Cards */
+    .leaderboard-gold {
+        background: linear-gradient(135deg, #FFD700 0%, #FFEC8B 100%);
+        border: 2px solid #FFD700;
+    }
+    
+    .leaderboard-silver {
+        background: linear-gradient(135deg, #C0C0C0 0%, #E8E8E8 100%);
+        border: 2px solid #C0C0C0;
+    }
+    
+    .leaderboard-bronze {
+        background: linear-gradient(135deg, #CD7F32 0%, #E6B17E 100%);
+        border: 2px solid #CD7F32;
+    }
+    
+    /* Badge Styles */
+    .badge-gold {
+        background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+        color: #000;
+        font-weight: bold;
+    }
+    
+    .badge-silver {
+        background: linear-gradient(135deg, #C0C0C0 0%, #FFFFFF 100%);
+        color: #000;
+        font-weight: bold;
+    }
+    
+    .badge-bronze {
+        background: linear-gradient(135deg, #CD7F32 0%, #FFA500 100%);
+        color: #000;
+        font-weight: bold;
+    }
+    
+    .badge-participant {
+        background: linear-gradient(135deg, #3B82F6 0%, #60A5FA 100%);
+        color: white;
+    }
+    
+    .badge-shortlisted {
+        background: linear-gradient(135deg, #10B981 0%, #34D399 100%);
+        color: white;
+    }
+    
+    .badge-winner {
+        background: linear-gradient(135deg, #F59E0B 0%, #FBBF24 100%);
+        color: #000;
+    }
+    
+    /* Points Display */
+    .points-display {
+        font-size: 2.5rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-align: center;
+        margin: 1rem 0;
+    }
+    
+    /* Progress Bar */
+    .progress-container {
+        background: #E5E7EB;
+        border-radius: 10px;
+        height: 20px;
+        margin: 1rem 0;
+        overflow: hidden;
+    }
+    
+    .progress-bar {
+        height: 100%;
+        border-radius: 10px;
+        background: linear-gradient(90deg, #3B82F6, #8B5CF6);
+        transition: width 0.5s ease;
     }
     
     .registration-section {
@@ -3021,6 +3737,10 @@ st.markdown("""
         .metric-value {
             font-size: 1.8rem;
         }
+        
+        .leaderboard-card {
+            padding: 0.75rem;
+        }
     }
     
     /* Print styles */
@@ -3039,11 +3759,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================
-# DASHBOARD FUNCTIONS
+# DASHBOARD FUNCTIONS (Updated with Leaderboard)
 # ============================================
 
 def student_dashboard():
-    """Student dashboard"""
+    """Student dashboard with leaderboard"""
     st.sidebar.title("👨‍🎓 Student Panel")
     st.sidebar.markdown(f"**User:** {st.session_state.name}")
     
@@ -3055,13 +3775,22 @@ def student_dashboard():
         st.sidebar.markdown(f"**Year:** {student.get('year', 'N/A')}")
         mobile = student.get('mobile', 'Not provided')
         st.sidebar.markdown(f"**Mobile:** {mobile}")
+        
+        # Display points in sidebar
+        points = db.get_student_points(st.session_state.username)
+        st.sidebar.markdown(f"**🏆 Points:** {points}")
+        
+        # Display rank in sidebar
+        rank = db.get_student_rank(st.session_state.username)
+        if rank:
+            st.sidebar.markdown(f"**📊 Rank:** #{rank}")
     
     display_role_badge('student')
     
     # Navigation
     with st.sidebar:
         st.markdown("### Navigation")
-        nav_options = ["Events Feed", "My Registrations", "Liked Events", "Interested Events", "My Profile"]
+        nav_options = ["Events Feed", "My Registrations", "Liked Events", "Interested Events", "Leaderboard", "My Profile", "My Achievements"]
         
         if 'student_page' not in st.session_state:
             st.session_state.student_page = "Events Feed"
@@ -3082,12 +3811,20 @@ def student_dashboard():
         # Get counts
         liked_events = db.get_student_liked_events(st.session_state.username)
         interested_events = db.get_student_interested_events(st.session_state.username)
+        registrations = db.get_registrations_by_student(st.session_state.username)
+        badges = db.get_student_badges(st.session_state.username)
         
         col_stat1, col_stat2 = st.columns(2)
         with col_stat1:
             st.metric("❤️ Liked", len(liked_events))
         with col_stat2:
             st.metric("⭐ Interested", len(interested_events))
+        
+        col_stat3, col_stat4 = st.columns(2)
+        with col_stat3:
+            st.metric("📝 Registered", len(registrations))
+        with col_stat4:
+            st.metric("🏅 Badges", len(badges))
         
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True, type="secondary"):
@@ -3178,9 +3915,10 @@ def student_dashboard():
         upcoming = len([r for r in registrations if r.get('event_status') == 'upcoming'])
         ongoing = len([r for r in registrations if r.get('event_status') == 'ongoing'])
         completed = len([r for r in registrations if r.get('event_status') == 'past'])
+        total_points = sum(r.get('points_awarded', 0) for r in registrations)
         
         # Display stats
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             st.metric("Total", total)
         with col2:
@@ -3189,13 +3927,15 @@ def student_dashboard():
             st.metric("Ongoing", ongoing)
         with col4:
             st.metric("Completed", completed)
+        with col5:
+            st.metric("Points Earned", total_points)
         
         # Display registrations
         for reg in registrations:
             with st.container():
                 st.markdown('<div class="event-card">', unsafe_allow_html=True)
                 
-                col1, col2 = st.columns([3, 1])
+                col1, col2, col3 = st.columns([3, 1, 1])
                 
                 with col1:
                     event_title = reg.get('event_title', 'Unknown Event')
@@ -3212,6 +3952,16 @@ def student_dashboard():
                     # Registration details
                     reg_status = reg.get('status', 'pending').title()
                     st.caption(f"📝 Status: {reg_status}")
+                    
+                    # Points and badges
+                    points = reg.get('points_awarded', 0)
+                    badges = reg.get('badges_awarded', '')
+                    if points > 0:
+                        st.caption(f"🏆 Points: {points}")
+                    if badges:
+                        badge_list = badges.split(',')
+                        for badge in badge_list:
+                            st.markdown(f'<span style="background: #FFD700; color: #000; padding: 2px 6px; border-radius: 10px; font-size: 0.7rem; margin-right: 4px;">{badge}</span>', unsafe_allow_html=True)
                 
                 with col2:
                     # Event status
@@ -3222,6 +3972,12 @@ def student_dashboard():
                         st.warning("🟡 Ongoing")
                     else:
                         st.error("🔴 Completed")
+                
+                with col3:
+                    # Points display
+                    if points > 0:
+                        st.markdown(f'<div style="font-size: 1.5rem; font-weight: bold; text-align: center; color: #3B82F6;">{points}</div>', unsafe_allow_html=True)
+                        st.caption("Points")
                 
                 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -3313,6 +4069,43 @@ def student_dashboard():
             else:
                 st.info("No past interested events.")
     
+    elif selected == "Leaderboard":
+        st.markdown('<h1 class="main-header">🏆 College Leaderboard</h1>', unsafe_allow_html=True)
+        
+        # Leaderboard tabs
+        tab1, tab2, tab3 = st.tabs(["🏆 Overall Leaderboard", "🎖️ Department Rankings", "📈 My Progress"])
+        
+        with tab1:
+            # Overall leaderboard
+            st.subheader("Top 15 Students")
+            leaderboard = db.get_leaderboard(limit=15)
+            
+            if leaderboard:
+                display_leaderboard(leaderboard, "🏆 College Leaderboard")
+            else:
+                st.info("No students found in leaderboard.")
+        
+        with tab2:
+            # Department rankings
+            st.subheader("🎖️ Top 5 Per Department")
+            dept_leaderboard = db.get_department_leaderboard(limit=5)
+            
+            if dept_leaderboard:
+                # Group by department
+                departments = COLLEGE_CONFIG['departments']
+                
+                for dept in departments:
+                    dept_students = [s for s in dept_leaderboard if s.get('department') == dept]
+                    if dept_students:
+                        st.markdown(f"### {dept}")
+                        display_leaderboard(dept_students[:5], f"🏆 {dept}")
+            else:
+                st.info("No department rankings available yet.")
+        
+        with tab3:
+            # My progress
+            display_student_gamification_profile(st.session_state.username)
+    
     elif selected == "My Profile":
         st.header("👤 My Profile")
         
@@ -3345,16 +4138,32 @@ def student_dashboard():
         st.subheader("📊 My Statistics")
         
         registrations = db.get_registrations_by_student(st.session_state.username) or []
+        badges = db.get_student_badges(st.session_state.username) or []
+        points = db.get_student_points(st.session_state.username)
+        rank = db.get_student_rank(st.session_state.username)
         
-        col_stat1, col_stat2 = st.columns(2)
+        col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
         with col_stat1:
             st.metric("Events Registered", len(registrations))
         with col_stat2:
             attended = len([r for r in registrations if r.get('attendance') == 'present'])
             st.metric("Events Attended", attended)
+        with col_stat3:
+            st.metric("🏅 Badges Earned", len(badges))
+        with col_stat4:
+            if rank:
+                st.metric("📊 Rank", f"#{rank}")
+            else:
+                st.metric("📊 Rank", "Not Ranked")
+        
+        # Points display
+        st.markdown(f'<div class="points-display">{points} Points</div>', unsafe_allow_html=True)
+    
+    elif selected == "My Achievements":
+        display_student_gamification_profile(st.session_state.username)
 
 def mentor_dashboard():
-    """Mentor dashboard"""
+    """Mentor dashboard with gamification features"""
     st.sidebar.title("👨‍🏫 Mentor Panel")
     st.sidebar.markdown(f"**User:** {st.session_state.name}")
     
@@ -3372,7 +4181,7 @@ def mentor_dashboard():
     # Navigation
     with st.sidebar:
         st.markdown("### Navigation")
-        nav_options = ["My Events", "Student Engagement", "My Profile"]
+        nav_options = ["My Events", "Student Engagement", "Award Points", "My Profile"]
         
         if 'mentor_page' not in st.session_state:
             st.session_state.mentor_page = "My Events"
@@ -3495,6 +4304,8 @@ def mentor_dashboard():
                         'Department': reg.get('department', 'N/A'),
                         'Mobile': reg.get('mobile', 'N/A'),
                         'Status': reg.get('status', 'pending').title(),
+                        'Points': reg.get('points_awarded', 0),
+                        'Badges': reg.get('badges_awarded', ''),
                         'Registered On': format_date(reg.get('registered_at'))
                     })
                 
@@ -3503,6 +4314,180 @@ def mentor_dashboard():
                     st.dataframe(df, use_container_width=True)
             else:
                 st.info("No students have registered for this event yet.")
+    
+    elif selected == "Award Points":
+        st.markdown('<h1 class="main-header">🎮 Award Points & Badges</h1>', unsafe_allow_html=True)
+        
+        # Get mentor ID
+        mentor = db.get_mentor_by_email(st.session_state.username)
+        if not mentor:
+            st.error("Mentor profile not found!")
+            return
+        
+        mentor_id = mentor['id']
+        
+        # Get events assigned to this mentor
+        events = db.get_events_by_mentor(mentor_id)
+        
+        if not events:
+            st.info("No events assigned to you. You can only award points for your assigned events.")
+            return
+        
+        # Select event
+        event_options = {e['title']: e['id'] for e in events}
+        selected_event_title = st.selectbox("Select Event", list(event_options.keys()))
+        
+        if selected_event_title:
+            event_id = event_options[selected_event_title]
+            selected_event = next(e for e in events if e['id'] == event_id)
+            
+            # Get registrations for the selected event
+            registrations = db.get_registrations_by_event(event_id)
+            
+            if not registrations:
+                st.info("No students have registered for this event yet.")
+                return
+            
+            # Award points section
+            st.subheader("🎯 Award Points to Students")
+            
+            # Select student
+            student_options = {r['student_name']: r['student_username'] for r in registrations}
+            selected_student_name = st.selectbox("Select Student", list(student_options.keys()))
+            
+            if selected_student_name:
+                student_username = student_options[selected_student_name]
+                student = db.get_user(student_username)
+                
+                if student:
+                    # Display student info
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"**Student:** {student.get('name')}")
+                        st.markdown(f"**Roll No:** {student.get('roll_no', 'N/A')}")
+                    with col2:
+                        current_points = db.get_student_points(student_username)
+                        st.metric("Current Points", current_points)
+                    
+                    # Award options
+                    st.subheader("Select Achievement")
+                    
+                    achievement_col1, achievement_col2, achievement_col3 = st.columns(3)
+                    
+                    with achievement_col1:
+                        if st.button("🏅 Registration", use_container_width=True, type="primary"):
+                            success, message = db.award_points_and_badge(
+                                student_username,
+                                event_id,
+                                selected_event['title'],
+                                'registration',
+                                st.session_state.username
+                            )
+                            if success:
+                                st.success(f"Awarded 50 points and Participant badge!")
+                                st.rerun()
+                            else:
+                                st.error(f"Failed to award points: {message}")
+                    
+                    with achievement_col2:
+                        if st.button("⭐ Shortlisted", use_container_width=True, type="primary"):
+                            success, message = db.award_points_and_badge(
+                                student_username,
+                                event_id,
+                                selected_event['title'],
+                                'shortlisted',
+                                st.session_state.username
+                            )
+                            if success:
+                                st.success(f"Awarded 100 points and Shortlisted badge!")
+                                st.rerun()
+                            else:
+                                st.error(f"Failed to award points: {message}")
+                    
+                    with achievement_col3:
+                        if st.button("🏆 Winner", use_container_width=True, type="primary"):
+                            success, message = db.award_points_and_badge(
+                                student_username,
+                                event_id,
+                                selected_event['title'],
+                                'winner',
+                                st.session_state.username
+                            )
+                            if success:
+                                st.success(f"Awarded 200 points and Winner badge!")
+                                st.rerun()
+                            else:
+                                st.error(f"Failed to award points: {message}")
+                    
+                    # Custom award option
+                    st.markdown("---")
+                    st.subheader("Custom Award")
+                    
+                    custom_col1, custom_col2 = st.columns(2)
+                    with custom_col1:
+                        custom_points = st.number_input("Points to Award", min_value=1, max_value=500, value=50)
+                        custom_reason = st.text_input("Reason for Award", placeholder="Excellent participation, Outstanding performance...")
+                    
+                    with custom_col2:
+                        custom_badge = st.text_input("Badge Name (Optional)", placeholder="Mentor's Choice, Most Creative...")
+                        custom_badge_type = st.selectbox("Badge Type", ["custom", "recognition", "achievement"])
+                    
+                    if st.button("🎖️ Award Custom Points", use_container_width=True, type="secondary"):
+                        if custom_points > 0:
+                            # Update student's points
+                            current_points = db.get_student_points(student_username)
+                            new_points = current_points + custom_points
+                            
+                            # Update points
+                            update_data = {
+                                'total_points': new_points,
+                                'last_points_update': datetime.now().isoformat(),
+                                'updated_at': datetime.now().isoformat()
+                            }
+                            
+                            if db.use_supabase:
+                                db.client.update('users', {'username': student_username}, update_data)
+                            else:
+                                db.client.update('users', {'username': student_username}, update_data)
+                            
+                            # Record points history
+                            points_record = {
+                                'id': str(uuid.uuid4()),
+                                'student_username': student_username,
+                                'points': custom_points,
+                                'reason': custom_reason or f"Custom award from mentor",
+                                'event_id': event_id,
+                                'event_title': selected_event['title'],
+                                'awarded_by': st.session_state.username,
+                                'awarded_at': datetime.now().isoformat()
+                            }
+                            
+                            if db.use_supabase:
+                                db.client.insert('points_history', points_record)
+                            else:
+                                db.client.insert('points_history', points_record)
+                            
+                            # Award custom badge if specified
+                            if custom_badge:
+                                badge_record = {
+                                    'id': str(uuid.uuid4()),
+                                    'student_username': student_username,
+                                    'badge_name': custom_badge,
+                                    'badge_type': custom_badge_type,
+                                    'awarded_for': custom_reason or f"Custom award from mentor",
+                                    'event_id': event_id,
+                                    'event_title': selected_event['title'],
+                                    'awarded_by': st.session_state.username,
+                                    'awarded_at': datetime.now().isoformat()
+                                }
+                                
+                                if db.use_supabase:
+                                    db.client.insert('student_badges', badge_record)
+                                else:
+                                    db.client.insert('student_badges', badge_record)
+                            
+                            st.success(f"Awarded {custom_points} points to {student.get('name')}!")
+                            st.rerun()
     
     elif selected == "My Profile":
         st.header("👤 My Profile")
@@ -3556,7 +4541,7 @@ def faculty_dashboard():
     # Navigation
     with st.sidebar:
         st.markdown("### Navigation")
-        nav_options = ["Dashboard", "Create Event", "My Events", "Registrations"]
+        nav_options = ["Dashboard", "Create Event", "My Events", "Registrations", "Leaderboard"]
         
         if 'faculty_page' not in st.session_state:
             st.session_state.faculty_page = "Dashboard"
@@ -3595,13 +4580,16 @@ def faculty_dashboard():
         # Statistics
         events = db.get_events_by_creator(st.session_state.username)
         
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         
         with col1:
             st.metric("My Events", len(events))
         with col2:
             upcoming = len([e for e in events if e.get('status') == 'upcoming'])
             st.metric("Upcoming", upcoming)
+        with col3:
+            total_points = sum(db.get_event_likes_count(e['id']) + db.get_event_interested_count(e['id']) for e in events)
+            st.metric("Total Engagement", total_points)
         
         # Recent events
         st.subheader("📅 My Recent Events")
@@ -3938,6 +4926,8 @@ def faculty_dashboard():
                         'Department': reg.get('department', 'N/A'),
                         'Year': reg.get('year', 'N/A'),
                         'Status': reg.get('status', 'pending').title(),
+                        'Points': reg.get('points_awarded', 0),
+                        'Badges': reg.get('badges_awarded', ''),
                         'Registered On': format_date(reg.get('registered_at')),
                         'Attendance': reg.get('attendance', 'absent').title()
                     })
@@ -3956,9 +4946,21 @@ def faculty_dashboard():
                     )
             else:
                 st.info("No registrations for this event yet.")
+    
+    elif selected == "Leaderboard":
+        st.markdown('<h1 class="main-header">🏆 College Leaderboard</h1>', unsafe_allow_html=True)
+        
+        # Overall leaderboard
+        st.subheader("Top 15 Students")
+        leaderboard = db.get_leaderboard(limit=15)
+        
+        if leaderboard:
+            display_leaderboard(leaderboard, "🏆 College Leaderboard")
+        else:
+            st.info("No students found in leaderboard.")
 
 def admin_dashboard():
-    """Admin dashboard"""
+    """Admin dashboard with gamification analytics"""
     st.sidebar.title("👑 Admin Panel")
     st.sidebar.markdown(f"**User:** {st.session_state.name}")
     display_role_badge('admin')
@@ -3966,7 +4968,7 @@ def admin_dashboard():
     # Navigation
     with st.sidebar:
         st.markdown("### Navigation")
-        nav_options = ["Dashboard", "Manage Events", "Manage Users", "Manage Mentors"]
+        nav_options = ["Dashboard", "Manage Events", "Manage Users", "Manage Mentors", "Gamification Analytics"]
         
         if 'admin_page' not in st.session_state:
             st.session_state.admin_page = "Dashboard"
@@ -4008,6 +5010,7 @@ def admin_dashboard():
         # Get data
         events = db.get_all_events()
         mentors = db.get_all_mentors()
+        stats = db.get_system_stats()
         
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -4022,11 +5025,47 @@ def admin_dashboard():
             active_mentors = len([m for m in mentors if m.get('is_active')])
             st.metric("👨‍🏫 Active Mentors", active_mentors)
         
-        # Recent events - FIXED: Use simple display without nested columns
+        # Gamification statistics
+        st.markdown("---")
+        st.subheader("🎮 Gamification Statistics")
+        
+        total_points = stats.get('total_points', 0)
+        total_badges = stats.get('total_badges', 0)
+        top_students = stats.get('top_students', [])
+        
+        col_g1, col_g2, col_g3 = st.columns(3)
+        with col_g1:
+            st.metric("🏆 Total Points", total_points)
+        with col_g2:
+            st.metric("🏅 Total Badges", total_badges)
+        with col_g3:
+            st.metric("📊 Active Students", len(top_students) if top_students else 0)
+        
+        # Top 3 students
+        if top_students:
+            st.subheader("🏆 Top 3 Students")
+            cols = st.columns(3)
+            medals = ["🥇", "🥈", "🥉"]
+            
+            for i, student in enumerate(top_students[:3]):
+                with cols[i]:
+                    points = student.get('total_points', 0)
+                    st.markdown(f'''
+                    <div style="background: {'linear-gradient(135deg, #FFD700 0%, #FFEC8B 100%)' if i == 0 else 'linear-gradient(135deg, #C0C0C0 0%, #E8E8E8 100%)' if i == 1 else 'linear-gradient(135deg, #CD7F32 0%, #E6B17E 100%)'}; 
+                                padding: 1.5rem; border-radius: 15px; text-align: center; 
+                                margin: 0.5rem 0; box-shadow: 0 4px 12px rgba(0,0,0,0.1);">
+                        <div style="font-size: 3rem;">{medals[i]}</div>
+                        <div style="font-size: 1.5rem; font-weight: bold; margin: 1rem 0;">{student.get('name')}</div>
+                        <div style="font-size: 0.9rem; color: #666;">{student.get('department', '')}</div>
+                        <div style="font-size: 2.5rem; font-weight: bold; color: #1E3A8A; margin: 1rem 0;">{points}</div>
+                        <div style="font-size: 0.9rem;">Points</div>
+                    </div>
+                    ''', unsafe_allow_html=True)
+        
+        # Recent events
         st.subheader("📅 Recent Events")
         if events:
             for event in events[:5]:
-                # Use the fixed display_event_card function
                 display_event_card(event, None)
         else:
             st.info("No events found.")
@@ -4038,13 +5077,10 @@ def admin_dashboard():
         
         if events:
             for event in events:
-                # Create a container for each event
                 with st.container():
-                    # Use columns for layout
                     col_view, col_actions = st.columns([3, 1])
                     
                     with col_view:
-                        # Display event card in the view column
                         display_event_card(event, None)
                     
                     with col_actions:
@@ -4111,7 +5147,7 @@ def admin_dashboard():
             with col4:
                 st.metric("Mentors", mentor_count)
             
-            # User table with mobile numbers
+            # User table with points
             df_data = []
             for user in users:
                 df_data.append({
@@ -4121,6 +5157,7 @@ def admin_dashboard():
                     'Department': user.get('department', 'N/A'),
                     'Roll No': user.get('roll_no', 'N/A'),
                     'Mobile': user.get('mobile', 'N/A'),
+                    'Points': user.get('total_points', 0) if user.get('role') == 'student' else 'N/A',
                     'Created': format_date(user.get('created_at')),
                     'Status': 'Active' if user.get('is_active') else 'Inactive'
                 })
@@ -4428,6 +5465,89 @@ def admin_dashboard():
                             st.rerun()
                         else:
                             st.error("Failed to assign mentor.")
+    
+    elif selected == "Gamification Analytics":
+        st.markdown('<h1 class="main-header">📊 Gamification Analytics</h1>', unsafe_allow_html=True)
+        
+        # Overall statistics
+        stats = db.get_system_stats()
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("🏆 Total Points", stats.get('total_points', 0))
+        with col2:
+            st.metric("🏅 Total Badges", stats.get('total_badges', 0))
+        with col3:
+            student_count = stats.get('user_counts', {}).get('student', 0)
+            st.metric("👨‍🎓 Students", student_count)
+        with col4:
+            active_students = len(db.get_leaderboard(limit=1000))
+            st.metric("📊 Active Students", active_students)
+        
+        # Leaderboard
+        st.subheader("🏆 Top 15 Leaderboard")
+        leaderboard = db.get_leaderboard(limit=15)
+        
+        if leaderboard:
+            display_leaderboard(leaderboard, "🏆 College Leaderboard")
+        else:
+            st.info("No students in leaderboard yet.")
+        
+        # Department-wise statistics
+        st.subheader("🎖️ Department Performance")
+        departments = COLLEGE_CONFIG['departments']
+        
+        dept_stats = []
+        for dept in departments:
+            dept_students = db.get_leaderboard(limit=1000, department=dept)
+            if dept_students:
+                total_points = sum(s.get('total_points', 0) for s in dept_students)
+                avg_points = total_points / len(dept_students) if dept_students else 0
+                top_student = dept_students[0] if dept_students else None
+                
+                dept_stats.append({
+                    'Department': dept,
+                    'Students': len(dept_students),
+                    'Total Points': total_points,
+                    'Avg Points': round(avg_points, 1),
+                    'Top Student': top_student['name'] if top_student else 'N/A',
+                    'Top Points': top_student['total_points'] if top_student else 0
+                })
+        
+        if dept_stats:
+            dept_df = pd.DataFrame(dept_stats)
+            dept_df = dept_df.sort_values('Total Points', ascending=False)
+            st.dataframe(dept_df, use_container_width=True)
+        
+        # Points distribution
+        st.subheader("📈 Points Distribution")
+        all_students = db.get_leaderboard(limit=1000)
+        
+        if all_students:
+            points_data = [s.get('total_points', 0) for s in all_students]
+            
+            # Create histogram
+            import plotly.graph_objects as go
+            
+            fig = go.Figure(data=[go.Histogram(x=points_data, nbinsx=20)])
+            fig.update_layout(
+                title="Points Distribution Among Students",
+                xaxis_title="Points",
+                yaxis_title="Number of Students",
+                showlegend=False
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Summary statistics
+            col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+            with col_s1:
+                st.metric("Max Points", max(points_data) if points_data else 0)
+            with col_s2:
+                st.metric("Average Points", round(sum(points_data)/len(points_data), 1) if points_data else 0)
+            with col_s3:
+                st.metric("Median Points", sorted(points_data)[len(points_data)//2] if points_data else 0)
+            with col_s4:
+                st.metric("Total Students", len(points_data))
 
     
 # ============================================
