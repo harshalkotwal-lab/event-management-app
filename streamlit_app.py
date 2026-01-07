@@ -2432,8 +2432,12 @@ class DatabaseManager:
             logger.error(f"Error getting stats: {e}")
             return {}
 
+# ============================================
+# DATABASE INITIALIZATION
+# ============================================
+
 # Initialize database
-db = (use_supabase=USE_SUPABASE)
+db = DatabaseManager(use_supabase=USE_SUPABASE)
 
 def fix_existing_passwords(db_instance):
     """Fix existing passwords by hashing any plain text passwords"""
