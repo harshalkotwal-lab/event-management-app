@@ -711,7 +711,7 @@ class PasswordResetManager:
 # UNIFIED DATABASE MANAGER - UPDATED WITH SUPABASE SCHEMA CREATION
 # ============================================
 
-class :
+class DatabaseManager:
     """Unified database manager supporting both Supabase and SQLite"""
     
     def __init__(self, use_supabase=True):
