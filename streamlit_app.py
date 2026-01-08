@@ -1171,6 +1171,34 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting interested events: {e}")
             return []
+
+    # Add this helper function to the DatabaseManager class or as a standalone function
+    def _get_event_status_from_date(event_date):
+        """Get event status from date string"""
+        try:
+            if isinstance(event_date, str):
+                # Try to parse date
+                for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                    try:
+                        dt = datetime.strptime(event_date, fmt)
+                        break
+                    except:
+                        continue
+                else:
+                    # Try ISO format
+                    dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+            else:
+                dt = event_date
+        
+            now = datetime.now()
+            if dt > now:
+                return 'upcoming'
+            elif dt.date() == now.date():
+                return 'ongoing'
+            else:
+                return 'past'
+        except:
+            return 'unknown'
     
     # ============================================
     # GAMIFICATION METHODS
@@ -1742,28 +1770,7 @@ def student_dashboard():
         if show_status != "All":
             # Determine status based on date
             now = datetime.now()
-            for event in filtered_events[:]:  # Use copy to modify while iterating
-                event_date = event.get('event_date')
-                if isinstance(event_date, str):
-                    try:
-                        # Try to parse date
-                        for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
-                            try:
-                                event_dt = datetime.strptime(event_date, fmt)
-                                break
-                            except:
-                                continue
-                        else:
-                            event_dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
-                        
-                        if show_status == "Upcoming" and event_dt <= now:
-                            filtered_events.remove(event)
-                        elif show_status == "Ongoing" and event_dt.date() != now.date():
-                            filtered_events.remove(event)
-                        elif show_status == "Past" and event_dt >= now:
-                            filtered_events.remove(event)
-                    except:
-                        pass
+            filtered_events = [e for e in filtered_events if self._get_event_status_from_date(e.get('event_date')) == show_status.lower()]
         
         # Display events
         st.caption(f"Found {len(filtered_events)} events")
@@ -1778,30 +1785,91 @@ def student_dashboard():
         
         if not registrations:
             st.info("You haven't registered for any events yet.")
+            st.markdown("""
+            **How to register for events:**
+            1. Go to **Events Feed**
+            2. Find an event you're interested in
+            3. Click the **📱 Register in App** button
+            4. Your registered events will appear here
+            """)
             return
+        
+        # Statistics
+        total = len(registrations)
+        upcoming = len([r for r in registrations if self._get_event_status_from_date(r.get('event_date')) == 'upcoming'])
+        ongoing = len([r for r in registrations if self._get_event_status_from_date(r.get('event_date')) == 'ongoing'])
+        completed = len([r for r in registrations if self._get_event_status_from_date(r.get('event_date')) == 'past'])
+        total_points = sum(r.get('points_awarded', 0) for r in registrations)
+        
+        # Display stats
+        col1, col2, col3, col4, col5 = st.columns(5)
+        with col1:
+            st.metric("Total", total)
+        with col2:
+            st.metric("Upcoming", upcoming)
+        with col3:
+            st.metric("Ongoing", ongoing)
+        with col4:
+            st.metric("Completed", completed)
+        with col5:
+            st.metric("Points", total_points)
+        
+        # Display registrations with proper registration cards
+        st.subheader("📅 Your Registered Events")
         
         for reg in registrations:
             with st.container():
-                st.markdown('<div class="event-card">', unsafe_allow_html=True)
+                st.markdown('<div class="registration-card">', unsafe_allow_html=True)
                 
-                col1, col2 = st.columns([3, 1])
+                col1, col2, col3 = st.columns([3, 1, 1])
                 
                 with col1:
+                    # Event title
                     event_title = reg.get('event_title', 'Unknown Event')
                     st.markdown(f'<div class="card-title">{event_title}</div>', unsafe_allow_html=True)
                     
+                    # Event date and venue
                     event_date = reg.get('event_date')
                     if event_date:
                         st.caption(f"📅 {format_date(event_date)}")
                     
+                    venue = reg.get('venue', 'N/A')
+                    st.caption(f"📍 {venue}")
+                    
+                    # Registration details
                     reg_status = reg.get('status', 'pending').title()
-                    st.caption(f"📝 Status: {reg_status}")
+                    reg_date = format_date(reg.get('registered_at'))
+                    st.caption(f"📝 Status: {reg_status} | Registered on: {reg_date}")
+                    
+                    # Points and badges
+                    points = reg.get('points_awarded', 0)
+                    badges = reg.get('badges_awarded', '')
+                    if points > 0:
+                        st.caption(f"🏆 Points Awarded: {points}")
+                    if badges:
+                        badge_list = badges.split(',')
+                        for badge in badge_list:
+                            if badge.strip():
+                                st.markdown(f'<span style="background: #FFD700; color: #000; padding: 2px 6px; border-radius: 10px; font-size: 0.7rem; margin-right: 4px;">{badge.strip()}</span>', unsafe_allow_html=True)
                 
                 with col2:
+                    # Event status badge
+                    event_status = self._get_event_status_from_date(reg.get('event_date'))
+                    if event_status == 'upcoming':
+                        st.success("🟢 Upcoming")
+                    elif event_status == 'ongoing':
+                        st.warning("🟡 Ongoing")
+                    else:
+                        st.error("🔴 Completed")
+                
+                with col3:
+                    # Points display
                     points = reg.get('points_awarded', 0)
                     if points > 0:
                         st.markdown(f'<div style="font-size: 1.5rem; font-weight: bold; text-align: center; color: #3B82F6;">{points}</div>', unsafe_allow_html=True)
                         st.caption("Points")
+                    else:
+                        st.info("No points yet")
                 
                 st.markdown('</div>', unsafe_allow_html=True)
     
@@ -2219,6 +2287,22 @@ st.markdown("""
         .leaderboard-card {
             padding: 0.75rem;
         }
+    }
+    .registration-card {
+        border: 1px solid #E5E7EB;
+        border-radius: 12px;
+        padding: 16px;
+        margin: 10px 0;
+        background: white;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        transition: all 0.3s ease;
+        border-left: 4px solid #10B981;
+    }
+    
+    .registration-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.1);
+        border-color: #059669;
     }
 </style>
 """, unsafe_allow_html=True)
