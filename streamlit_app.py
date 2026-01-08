@@ -1172,34 +1172,6 @@ class DatabaseManager:
             logger.error(f"Error getting interested events: {e}")
             return []
 
-    # Add this helper function to the DatabaseManager class or as a standalone function
-    def _get_event_status_from_date(event_date):
-        """Get event status from date string"""
-        try:
-            if isinstance(event_date, str):
-                # Try to parse date
-                for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
-                    try:
-                        dt = datetime.strptime(event_date, fmt)
-                        break
-                    except:
-                        continue
-                else:
-                    # Try ISO format
-                    dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
-            else:
-                dt = event_date
-        
-            now = datetime.now()
-            if dt > now:
-                return 'upcoming'
-            elif dt.date() == now.date():
-                return 'ongoing'
-            else:
-                return 'past'
-        except:
-            return 'unknown'
-    
     # ============================================
     # GAMIFICATION METHODS
     # ============================================
@@ -1673,9 +1645,32 @@ def display_event_card(event, current_user=None):
         
         st.markdown('</div>', unsafe_allow_html=True)
 
-# ============================================
-# STUDENT DASHBOARD - FIXED
-# ============================================
+def _get_event_status_from_date(event_date):
+    """Get event status from date string - STANDALONE FUNCTION"""
+    try:
+        if isinstance(event_date, str):
+            # Try to parse date
+            for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                try:
+                    dt = datetime.strptime(event_date, fmt)
+                    break
+                except:
+                    continue
+            else:
+                # Try ISO format
+                dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+        else:
+            dt = event_date
+        
+        now = datetime.now()
+        if dt > now:
+            return 'upcoming'
+        elif dt.date() == now.date():
+            return 'ongoing'
+        else:
+            return 'past'
+    except:
+        return 'unknown'
 
 def student_dashboard():
     """Student dashboard with all features - FIXED"""
@@ -1769,8 +1764,7 @@ def student_dashboard():
         
         if show_status != "All":
             # Determine status based on date
-            now = datetime.now()
-            filtered_events = [e for e in filtered_events if self._get_event_status_from_date(e.get('event_date')) == show_status.lower()]
+            filtered_events = [e for e in filtered_events if _get_event_status_from_date(e.get('event_date')) == show_status.lower()]
         
         # Display events
         st.caption(f"Found {len(filtered_events)} events")
@@ -1796,9 +1790,9 @@ def student_dashboard():
         
         # Statistics
         total = len(registrations)
-        upcoming = len([r for r in registrations if self._get_event_status_from_date(r.get('event_date')) == 'upcoming'])
-        ongoing = len([r for r in registrations if self._get_event_status_from_date(r.get('event_date')) == 'ongoing'])
-        completed = len([r for r in registrations if self._get_event_status_from_date(r.get('event_date')) == 'past'])
+        upcoming = len([r for r in registrations if _get_event_status_from_date(r.get('event_date')) == 'upcoming'])
+        ongoing = len([r for r in registrations if _get_event_status_from_date(r.get('event_date')) == 'ongoing'])
+        completed = len([r for r in registrations if _get_event_status_from_date(r.get('event_date')) == 'past'])
         total_points = sum(r.get('points_awarded', 0) for r in registrations)
         
         # Display stats
@@ -1854,7 +1848,7 @@ def student_dashboard():
                 
                 with col2:
                     # Event status badge
-                    event_status = self._get_event_status_from_date(reg.get('event_date'))
+                    event_status = _get_event_status_from_date(reg.get('event_date'))
                     if event_status == 'upcoming':
                         st.success("🟢 Upcoming")
                     elif event_status == 'ongoing':
@@ -2194,6 +2188,22 @@ def student_registration_page():
 
 st.markdown("""
 <style>
+    .registration-card {
+        border: 1px solid #E5E7EB;
+        border-radius: 12px;
+        padding: 16px;
+        margin: 10px 0;
+        background: white;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        transition: all 0.3s ease;
+        border-left: 4px solid #10B981;
+    }
+    
+    .registration-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(16, 185, 129, 0.1);
+        border-color: #059669;
+    }
     .main-header {
         font-size: 2.2rem;
         color: #1E3A8A;
