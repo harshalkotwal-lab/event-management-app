@@ -1673,7 +1673,15 @@ def _get_event_status_from_date(event_date):
         return 'unknown'
 
 def student_dashboard():
-    """Student dashboard with all features - FIXED"""
+    """Student dashboard with all features - FIXED session state checks"""
+    # Check if user is logged in
+    if 'username' not in st.session_state or not st.session_state.username:
+        st.error("Please login first!")
+        time.sleep(2)
+        st.session_state.page = "login"
+        st.rerun()
+        return
+    
     # Sidebar
     st.sidebar.title("👨‍🎓 Student Panel")
     st.sidebar.markdown(f"**User:** {st.session_state.name}")
@@ -1703,16 +1711,19 @@ def student_dashboard():
         st.markdown("### My Stats")
         
         # Get counts
-        registrations = db.get_registrations_by_student(st.session_state.username)
-        liked_events = db.get_student_liked_events(st.session_state.username)
-        interested_events = db.get_student_interested_events(st.session_state.username)
-        points = db.get_student_points(st.session_state.username)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("📝 Events", len(registrations))
-        with col2:
-            st.metric("🏆 Points", points)
+        try:
+            registrations = db.get_registrations_by_student(st.session_state.username)
+            liked_events = db.get_student_liked_events(st.session_state.username)
+            interested_events = db.get_student_interested_events(st.session_state.username)
+            points = db.get_student_points(st.session_state.username)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("📝 Events", len(registrations))
+            with col2:
+                st.metric("🏆 Points", points)
+        except Exception as e:
+            logger.error(f"Error loading stats: {e}")
         
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True, type="secondary"):
@@ -1722,7 +1733,7 @@ def student_dashboard():
             st.rerun()
     
     # Main content
-    selected = st.session_state.student_page
+    selected = st.session_state.get('student_page', 'Events Feed')
     
     if selected == "Events Feed":
         st.markdown('<h1 class="main-header">🎯 Discover Events</h1>', unsafe_allow_html=True)
@@ -1991,7 +2002,7 @@ def student_dashboard():
 # ============================================
 
 def landing_page():
-    """Landing page with app info and login"""
+    """Landing page with app info and login - FIXED session state"""
     # Display logo
     try:
         logo_path = "ghribmjal-logo.jpg"
@@ -2042,10 +2053,10 @@ def landing_page():
             password = st.text_input("Password", type="password", key="login_password")
         
         # Remember me
-        remember_me = st.checkbox("Remember Me", help="Stay logged in on this device")
+        remember_me = st.checkbox("Remember Me", help="Stay logged in on this device", key="login_remember")
         
         # Login button
-        if st.button("Login", use_container_width=True, type="primary"):
+        if st.button("Login", use_container_width=True, type="primary", key="login_button"):
             if not username or not password:
                 st.error("Please enter username and password")
             else:
@@ -2062,10 +2073,14 @@ def landing_page():
                 if db.verify_credentials(username, password, db_role):
                     user = db.get_user(username)
                     if user:
+                        # Initialize session state properly
                         st.session_state.role = db_role
                         st.session_state.username = username
                         st.session_state.name = user.get('name', username)
                         st.session_state.session_start = datetime.now()
+                        st.session_state.remember_me = remember_me
+                        st.session_state.page = None  # Clear page to use role-based routing
+                        
                         st.success("Login successful!")
                         st.rerun()
                     else:
@@ -2078,7 +2093,7 @@ def landing_page():
             st.markdown("---")
             st.subheader("👨‍🎓 New Student Registration")
             
-            if st.button("Create New Student Account", use_container_width=True, type="secondary"):
+            if st.button("Create New Student Account", use_container_width=True, type="secondary", key="register_button"):
                 st.session_state.page = "student_register"
                 st.rerun()
 
