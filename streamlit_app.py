@@ -2317,22 +2317,21 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================
-# MAIN APPLICATION
+# MAIN APPLICATION - FIXED
 # ============================================
 
 def main():
-    """Main application function"""
+    """Main application function - FIXED session state initialization"""
     
-    # Initialize session state
-    if 'role' not in st.session_state:
+    # Initialize all required session state variables FIRST
+    if 'initialized' not in st.session_state:
+        st.session_state.initialized = True
         st.session_state.role = None
-    if 'username' not in st.session_state:
         st.session_state.username = None
-    if 'name' not in st.session_state:
         st.session_state.name = None
-    if 'page' not in st.session_state:
         st.session_state.page = "login"
+        st.session_state.session_start = datetime.now()
+        st.session_state.remember_me = False
     
     # Show database info in sidebar
     st.sidebar.title("System Info")
@@ -2360,3 +2359,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
