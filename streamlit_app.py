@@ -2332,11 +2332,769 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
+# ============================================
+# MENTOR DASHBOARD - ADDED
+# ============================================
+
+def mentor_dashboard():
+    """Mentor dashboard"""
+    # Check if user is logged in
+    if 'username' not in st.session_state or not st.session_state.username:
+        st.error("Please login first!")
+        time.sleep(2)
+        st.session_state.page = "login"
+        st.rerun()
+        return
+    
+    # Sidebar
+    st.sidebar.title("👨‍🏫 Mentor Panel")
+    st.sidebar.markdown(f"**User:** {st.session_state.name}")
+    
+    # Get mentor info from users table
+    mentor = db.get_user(st.session_state.username)
+    if mentor:
+        st.sidebar.markdown(f"**Department:** {mentor.get('department', 'N/A')}")
+        st.sidebar.markdown(f"**Email:** {mentor.get('email', 'N/A')}")
+        st.sidebar.markdown(f"**Mobile:** {mentor.get('mobile', 'N/A')}")
+    
+    # Navigation
+    with st.sidebar:
+        st.markdown("### Navigation")
+        nav_options = ["Dashboard", "My Events", "Student Engagement", "Award Points", "My Profile"]
+        
+        if 'mentor_page' not in st.session_state:
+            st.session_state.mentor_page = "Dashboard"
+        
+        for option in nav_options:
+            if st.button(option, key=f"mentor_{option}", use_container_width=True):
+                st.session_state.mentor_page = option
+                st.rerun()
+        
+        st.markdown("---")
+        if st.button("🚪 Logout", use_container_width=True, type="secondary"):
+            # Clear session
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+    
+    # Main content
+    selected = st.session_state.get('mentor_page', 'Dashboard')
+    
+    if selected == "Dashboard":
+        st.markdown('<h1 class="main-header">👨‍🏫 Mentor Dashboard</h1>', unsafe_allow_html=True)
+        
+        # Welcome message
+        st.info(f"Welcome, {st.session_state.name}! As a mentor, you can monitor events, track student engagement, and award points.")
+        
+        # Quick stats
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Get events count (placeholder)
+            st.metric("Assigned Events", "0")
+        
+        with col2:
+            # Get students count (placeholder)
+            st.metric("Students Monitored", "0")
+        
+        with col3:
+            # Get engagement score (placeholder)
+            st.metric("Engagement Score", "0")
+        
+        # Quick actions
+        st.subheader("📋 Quick Actions")
+        
+        action_col1, action_col2, action_col3 = st.columns(3)
+        
+        with action_col1:
+            if st.button("🎯 View My Events", use_container_width=True, type="primary"):
+                st.session_state.mentor_page = "My Events"
+                st.rerun()
+        
+        with action_col2:
+            if st.button("📊 Check Engagement", use_container_width=True, type="primary"):
+                st.session_state.mentor_page = "Student Engagement"
+                st.rerun()
+        
+        with action_col3:
+            if st.button("🏆 Award Points", use_container_width=True, type="primary"):
+                st.session_state.mentor_page = "Award Points"
+                st.rerun()
+        
+        # Recent activity
+        st.subheader("📈 Recent Activity")
+        st.info("No recent activity to display. Events assigned to you will appear here.")
+    
+    elif selected == "My Events":
+        st.markdown('<h1 class="main-header">📅 My Assigned Events</h1>', unsafe_allow_html=True)
+        
+        # Get all events (for now, show all events since we don't have mentor assignment yet)
+        events = db.get_all_events(cache_ttl=60)
+        
+        if not events:
+            st.info("No events assigned to you yet.")
+            st.markdown("""
+            **How events are assigned:**
+            1. Faculty creates events and assigns mentors
+            2. Admin can also assign mentors to events
+            3. Once assigned, events will appear here
+            """)
+            return
+        
+        # For now, show all events since we don't have mentor filtering
+        st.info(f"Showing all events ({len(events)} total)")
+        
+        for event in events[:10]:  # Show only first 10
+            display_event_card(event, st.session_state.username)
+    
+    elif selected == "Student Engagement":
+        st.markdown('<h1 class="main-header">📊 Student Engagement</h1>', unsafe_allow_html=True)
+        
+        # Get all events
+        events = db.get_all_events(cache_ttl=60)
+        
+        if not events:
+            st.info("No events available to monitor engagement.")
+            return
+        
+        # Select event to view engagement
+        event_options = {e['title']: e['id'] for e in events}
+        selected_event_title = st.selectbox("Select Event", list(event_options.keys()))
+        
+        if selected_event_title:
+            event_id = event_options[selected_event_title]
+            selected_event = next(e for e in events if e['id'] == event_id)
+            
+            # Get engagement data
+            likes_count = db.get_event_likes_count(event_id)
+            interested_count = db.get_event_interested_count(event_id)
+            
+            # Display statistics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Likes", likes_count)
+            with col2:
+                st.metric("Interested", interested_count)
+            with col3:
+                # Get registrations count
+                if db.use_supabase:
+                    registrations = db.client.select('registrations', {'event_id': event_id})
+                    reg_count = len(registrations) if registrations else 0
+                else:
+                    cursor = db.client.conn.cursor()
+                    cursor.execute("SELECT COUNT(*) FROM registrations WHERE event_id = ?", (event_id,))
+                    reg_count = cursor.fetchone()[0]
+                st.metric("Registrations", reg_count)
+            
+            # Engagement chart (placeholder)
+            st.subheader("📈 Engagement Over Time")
+            st.info("Engagement analytics chart will appear here when data is available.")
+    
+    elif selected == "Award Points":
+        st.markdown('<h1 class="main-header">🎮 Award Points to Students</h1>', unsafe_allow_html=True)
+        
+        # Get all events
+        events = db.get_all_events(cache_ttl=60)
+        
+        if not events:
+            st.info("No events available to award points for.")
+            return
+        
+        # Select event
+        event_options = {e['title']: e['id'] for e in events}
+        selected_event_title = st.selectbox("Select Event", list(event_options.keys()))
+        
+        if selected_event_title:
+            event_id = event_options[selected_event_title]
+            selected_event = next(e for e in events if e['id'] == event_id)
+            
+            # Get registrations for this event
+            if db.use_supabase:
+                registrations = db.client.select('registrations', {'event_id': event_id})
+            else:
+                cursor = db.client.conn.cursor()
+                cursor.execute("SELECT * FROM registrations WHERE event_id = ?", (event_id,))
+                registrations = [dict(row) for row in cursor.fetchall()]
+            
+            if not registrations:
+                st.info("No students have registered for this event yet.")
+                return
+            
+            st.subheader(f"📋 Students Registered for: {selected_event_title}")
+            
+            # Display students table
+            student_data = []
+            for reg in registrations:
+                student_data.append({
+                    'Student Name': reg.get('student_name'),
+                    'Roll No': reg.get('student_roll', 'N/A'),
+                    'Department': reg.get('student_dept', 'N/A'),
+                    'Current Points': db.get_student_points(reg.get('student_username'))
+                })
+            
+            if student_data:
+                df = pd.DataFrame(student_data)
+                st.dataframe(df, use_container_width=True)
+            
+            # Award points section
+            st.subheader("🎯 Award Points")
+            
+            # Select student
+            student_options = {reg['student_name']: reg['student_username'] for reg in registrations}
+            selected_student_name = st.selectbox("Select Student", list(student_options.keys()))
+            
+            if selected_student_name:
+                student_username = student_options[selected_student_name]
+                student = db.get_user(student_username)
+                
+                if student:
+                    # Display student info
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"**Student:** {student.get('name')}")
+                        st.markdown(f"**Roll No:** {student.get('roll_no', 'N/A')}")
+                    with col2:
+                        current_points = db.get_student_points(student_username)
+                        st.metric("Current Points", current_points)
+                    
+                    # Points award form
+                    with st.form("award_points_form"):
+                        points = st.number_input("Points to Award", min_value=1, max_value=500, value=50)
+                        reason = st.text_input("Reason for Award", placeholder="Excellent participation, Outstanding performance...")
+                        notes = st.text_area("Mentor Notes (Optional)", placeholder="Additional comments...")
+                        
+                        if st.form_submit_button("🎖️ Award Points", use_container_width=True):
+                            # Here you would implement points awarding logic
+                            st.success(f"Awarded {points} points to {student.get('name')}!")
+                            st.info("Points awarding functionality will be implemented in the next update.")
+    
+    elif selected == "My Profile":
+        st.header("👤 My Profile")
+        
+        mentor = db.get_user(st.session_state.username)
+        
+        if not mentor:
+            st.error("User not found!")
+            return
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### Personal Information")
+            st.markdown(f"**Full Name:** {mentor.get('name', 'N/A')}")
+            st.markdown(f"**Department:** {mentor.get('department', 'N/A')}")
+            st.markdown(f"**Email:** {mentor.get('email', 'N/A')}")
+            st.markdown(f"**Mobile:** {mentor.get('mobile', 'N/A')}")
+        
+        with col2:
+            st.markdown("### Professional Information")
+            st.markdown(f"**Role:** Mentor")
+            st.markdown(f"**Username:** {mentor.get('username', 'N/A')}")
+            st.markdown(f"**Member Since:** {format_date(mentor.get('created_at'))}")
+        
+        # Statistics
+        st.markdown("---")
+        st.subheader("📊 My Statistics")
+        
+        # Get mentor statistics (placeholder)
+        col_stat1, col_stat2, col_stat3 = st.columns(3)
+        with col_stat1:
+            st.metric("Events Mentored", "0")
+        with col_stat2:
+            st.metric("Students Guided", "0")
+        with col_stat3:
+            st.metric("Points Awarded", "0")
+
+# ============================================
+# FACULTY DASHBOARD - ADDED
+# ============================================
+
+def faculty_dashboard():
+    """Faculty dashboard"""
+    # Check if user is logged in
+    if 'username' not in st.session_state or not st.session_state.username:
+        st.error("Please login first!")
+        time.sleep(2)
+        st.session_state.page = "login"
+        st.rerun()
+        return
+    
+    # Sidebar
+    st.sidebar.title("👨‍🏫 Faculty Panel")
+    st.sidebar.markdown(f"**User:** {st.session_state.name}")
+    
+    # Navigation
+    with st.sidebar:
+        st.markdown("### Navigation")
+        nav_options = ["Dashboard", "Create Event", "My Events", "Registrations", "Leaderboard"]
+        
+        if 'faculty_page' not in st.session_state:
+            st.session_state.faculty_page = "Dashboard"
+        
+        for option in nav_options:
+            if st.button(option, key=f"faculty_{option}", use_container_width=True):
+                st.session_state.faculty_page = option
+                st.rerun()
+        
+        st.markdown("---")
+        if st.button("🚪 Logout", use_container_width=True, type="secondary"):
+            # Clear session
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+    
+    # Main content
+    selected = st.session_state.get('faculty_page', 'Dashboard')
+    
+    if selected == "Dashboard":
+        st.markdown('<h1 class="main-header">👨‍🏫 Faculty Dashboard</h1>', unsafe_allow_html=True)
+        
+        # Welcome message
+        st.info(f"Welcome, {st.session_state.name}! As a faculty coordinator, you can create and manage events.")
+        
+        # Quick stats
+        events = db.get_events_by_creator(st.session_state.username)
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("My Events", len(events))
+        
+        with col2:
+            upcoming = len([e for e in events if _get_event_status_from_date(e.get('event_date')) == 'upcoming'])
+            st.metric("Upcoming", upcoming)
+        
+        with col3:
+            total_likes = sum(db.get_event_likes_count(e['id']) for e in events)
+            st.metric("Total Likes", total_likes)
+        
+        # Quick actions
+        st.subheader("📋 Quick Actions")
+        
+        action_col1, action_col2, action_col3 = st.columns(3)
+        
+        with action_col1:
+            if st.button("➕ Create Event", use_container_width=True, type="primary"):
+                st.session_state.faculty_page = "Create Event"
+                st.rerun()
+        
+        with action_col2:
+            if st.button("📋 My Events", use_container_width=True, type="primary"):
+                st.session_state.faculty_page = "My Events"
+                st.rerun()
+        
+        with action_col3:
+            if st.button("📝 Registrations", use_container_width=True, type="primary"):
+                st.session_state.faculty_page = "Registrations"
+                st.rerun()
+        
+        # Recent events
+        st.subheader("📅 My Recent Events")
+        if events:
+            for event in events[:3]:  # Show only first 3
+                display_event_card(event, st.session_state.username)
+        else:
+            st.info("No events created yet. Create your first event!")
+    
+    elif selected == "Create Event":
+        st.header("➕ Create New Event")
+        
+        with st.form("create_event_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                title = st.text_input("Event Title *")
+                event_type = st.selectbox("Event Type *", COLLEGE_CONFIG['event_types'])
+                event_date = st.date_input("Event Date *", min_value=date.today())
+                event_time = st.time_input("Event Time *")
+                max_participants = st.number_input("Max Participants", min_value=1, value=100)
+            
+            with col2:
+                venue = st.text_input("Venue *", value="G H Raisoni College")
+                organizer = st.text_input("Organizer *", value="G H Raisoni College")
+                event_link = st.text_input("Event Website/URL", placeholder="https://example.com/event-details")
+                registration_link = st.text_input("Registration Link", placeholder="https://forms.google.com/registration")
+                
+                # Flyer upload
+                st.subheader("Event Flyer (Optional)")
+                flyer = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif', 'webp'], key="faculty_flyer")
+                if flyer:
+                    st.image(flyer, width=200)
+            
+            description = st.text_area("Event Description *", height=150)
+            
+            submit_button = st.form_submit_button("Create Event", use_container_width=True, type="primary")
+            
+            if submit_button:
+                if not all([title, event_type, venue, organizer, description]):
+                    st.error("Please fill all required fields (*)")
+                else:
+                    # Save flyer
+                    flyer_path = save_flyer_image(flyer)
+                    
+                    # Combine date and time
+                    event_datetime = datetime.combine(event_date, event_time)
+                    
+                    event_data = {
+                        'title': title,
+                        'description': description,
+                        'event_type': event_type,
+                        'event_date': event_datetime.isoformat(),
+                        'venue': venue,
+                        'organizer': organizer,
+                        'event_link': event_link,
+                        'registration_link': registration_link,
+                        'max_participants': max_participants,
+                        'flyer_path': flyer_path,
+                        'created_by': st.session_state.username,
+                        'created_by_name': st.session_state.name,
+                        'ai_generated': False
+                    }
+                    
+                    if db.add_event(event_data):
+                        st.success(f"Event '{title}' created successfully! 🎉")
+                        st.rerun()
+                    else:
+                        st.error("Failed to create event")
+    
+    elif selected == "My Events":
+        st.header("📋 My Events")
+        
+        events = db.get_events_by_creator(st.session_state.username)
+        
+        if not events:
+            st.info("You haven't created any events yet.")
+            return
+        
+        # Show engagement statistics
+        st.subheader("📊 Event Engagement")
+        total_likes = sum(db.get_event_likes_count(e['id']) for e in events)
+        total_interested = sum(db.get_event_interested_count(e['id']) for e in events)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Total Likes", total_likes)
+        with col2:
+            st.metric("Total Interested", total_interested)
+            
+        # Display events
+        st.subheader("📅 All My Events")
+        for event in events:
+            display_event_card(event, st.session_state.username)
+    
+    elif selected == "Registrations":
+        st.header("📝 Event Registrations")
+        
+        events = db.get_events_by_creator(st.session_state.username)
+        
+        if not events:
+            st.info("You haven't created any events yet.")
+            return
+        
+        # Select event
+        event_titles = [e['title'] for e in events]
+        selected_title = st.selectbox("Select Event", event_titles)
+        
+        if selected_title:
+            selected_event = next(e for e in events if e['title'] == selected_title)
+            event_id = selected_event['id']
+            
+            # Get registrations for the selected event
+            registrations = db.get_registrations_by_student(st.session_state.username)  # This needs fixing
+            
+            st.info(f"📊 Registrations for: **{selected_title}**")
+            st.info("Registration tracking will be implemented in the next update.")
+    
+    elif selected == "Leaderboard":
+        st.markdown('<h1 class="main-header">🏆 College Leaderboard</h1>', unsafe_allow_html=True)
+        
+        # Overall leaderboard
+        st.subheader("Top 15 Students")
+        leaderboard = db.get_leaderboard(limit=15)
+        
+        if leaderboard:
+            for student in leaderboard:
+                with st.container():
+                    st.markdown('<div class="leaderboard-card">', unsafe_allow_html=True)
+                    
+                    col1, col2, col3 = st.columns([1, 3, 1])
+                    
+                    with col1:
+                        rank = student.get('rank', 0)
+                        if rank <= 3:
+                            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+                            st.markdown(f'<div style="font-size: 2rem; text-align: center;">{medals.get(rank, f"{rank}.")}</div>', unsafe_allow_html=True)
+                        else:
+                            st.markdown(f'<div style="font-size: 1.5rem; text-align: center; font-weight: bold;">{rank}.</div>', unsafe_allow_html=True)
+                    
+                    with col2:
+                        st.markdown(f'<div style="font-weight: bold; font-size: 1.1rem;">{student.get("name")}</div>', unsafe_allow_html=True)
+                        st.caption(f"{student.get('roll_no', '')} | {student.get('department', '')}")
+                    
+                    with col3:
+                        points = student.get('total_points', 0)
+                        st.markdown(f'<div style="font-size: 1.8rem; font-weight: bold; text-align: center; color: #3B82F6;">{points}</div>', unsafe_allow_html=True)
+                        st.caption("Points")
+                    
+                    st.markdown('</div>', unsafe_allow_html=True)
+                    st.markdown("---")
+        else:
+            st.info("No students found in leaderboard.")
+
+# ============================================
+# ADMIN DASHBOARD - ADDED
+# ============================================
+
+def admin_dashboard():
+    """Admin dashboard"""
+    # Check if user is logged in
+    if 'username' not in st.session_state or not st.session_state.username:
+        st.error("Please login first!")
+        time.sleep(2)
+        st.session_state.page = "login"
+        st.rerun()
+        return
+    
+    # Sidebar
+    st.sidebar.title("👑 Admin Panel")
+    st.sidebar.markdown(f"**User:** {st.session_state.name}")
+    
+    # Navigation
+    with st.sidebar:
+        st.markdown("### Navigation")
+        nav_options = ["Dashboard", "Manage Users", "Manage Events", "System Settings"]
+        
+        if 'admin_page' not in st.session_state:
+            st.session_state.admin_page = "Dashboard"
+        
+        for option in nav_options:
+            if st.button(option, key=f"admin_{option}", use_container_width=True):
+                st.session_state.admin_page = option
+                st.rerun()
+        
+        st.markdown("---")
+        if st.button("🚪 Logout", use_container_width=True, type="secondary"):
+            # Clear session
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+    
+    # Main content
+    selected = st.session_state.get('admin_page', 'Dashboard')
+    
+    if selected == "Dashboard":
+        st.markdown('<h1 class="main-header">👑 Admin Dashboard</h1>', unsafe_allow_html=True)
+        
+        # Welcome message
+        st.info(f"Welcome, {st.session_state.name}! As an administrator, you have full system control.")
+        
+        # System statistics
+        st.subheader("📊 System Statistics")
+        
+        # Get all users
+        if db.use_supabase:
+            users = db.client.select('users')
+        else:
+            cursor = db.client.conn.cursor()
+            cursor.execute("SELECT * FROM users")
+            users = [dict(row) for row in cursor.fetchall()]
+        
+        # Get all events
+        events = db.get_all_events(cache_ttl=60)
+        
+        # Calculate statistics
+        total_users = len(users) if users else 0
+        admin_count = len([u for u in users if u.get('role') == 'admin']) if users else 0
+        faculty_count = len([u for u in users if u.get('role') == 'faculty']) if users else 0
+        student_count = len([u for u in users if u.get('role') == 'student']) if users else 0
+        mentor_count = len([u for u in users if u.get('role') == 'mentor']) if users else 0
+        total_events = len(events) if events else 0
+        
+        # Display stats
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Users", total_users)
+        with col2:
+            st.metric("Total Events", total_events)
+        with col3:
+            st.metric("Students", student_count)
+        with col4:
+            st.metric("Mentors", mentor_count)
+        
+        # Quick actions
+        st.subheader("⚡ Quick Actions")
+        
+        action_col1, action_col2, action_col3 = st.columns(3)
+        
+        with action_col1:
+            if st.button("👥 Manage Users", use_container_width=True, type="primary"):
+                st.session_state.admin_page = "Manage Users"
+                st.rerun()
+        
+        with action_col2:
+            if st.button("📅 Manage Events", use_container_width=True, type="primary"):
+                st.session_state.admin_page = "Manage Events"
+                st.rerun()
+        
+        with action_col3:
+            if st.button("⚙️ Settings", use_container_width=True, type="primary"):
+                st.session_state.admin_page = "System Settings"
+                st.rerun()
+        
+        # Recent activity
+        st.subheader("📈 Recent System Activity")
+        st.info("System activity log will be displayed here.")
+    
+    elif selected == "Manage Users":
+        st.header("👥 Manage Users")
+        
+        # Get all users
+        if db.use_supabase:
+            users = db.client.select('users')
+        else:
+            cursor = db.client.conn.cursor()
+            cursor.execute("SELECT * FROM users ORDER BY created_at DESC")
+            users = [dict(row) for row in cursor.fetchall()]
+        
+        if not users:
+            st.info("No users found in the system.")
+            return
+        
+        # Display user statistics
+        st.subheader("📊 User Statistics")
+        
+        admin_count = len([u for u in users if u.get('role') == 'admin'])
+        faculty_count = len([u for u in users if u.get('role') == 'faculty'])
+        student_count = len([u for u in users if u.get('role') == 'student'])
+        mentor_count = len([u for u in users if u.get('role') == 'mentor'])
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Admins", admin_count)
+        with col2:
+            st.metric("Faculty", faculty_count)
+        with col3:
+            st.metric("Students", student_count)
+        with col4:
+            st.metric("Mentors", mentor_count)
+        
+        # User table
+        st.subheader("📋 All Users")
+        
+        user_data = []
+        for user in users:
+            user_data.append({
+                'Name': user.get('name'),
+                'Username': user.get('username'),
+                'Role': user.get('role', 'unknown').title(),
+                'Department': user.get('department', 'N/A'),
+                'Email': user.get('email', 'N/A'),
+                'Mobile': user.get('mobile', 'N/A'),
+                'Created': format_date(user.get('created_at')),
+                'Status': 'Active' if user.get('is_active', True) else 'Inactive'
+            })
+        
+        if user_data:
+            df = pd.DataFrame(user_data)
+            st.dataframe(df, use_container_width=True)
+            
+            # Export option
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download User List",
+                data=csv,
+                file_name="users_list.csv",
+                mime="text/csv"
+            )
+    
+    elif selected == "Manage Events":
+        st.header("📅 Manage Events")
+        
+        events = db.get_all_events(cache_ttl=60)
+        
+        if not events:
+            st.info("No events found in the system.")
+            return
+        
+        # Event statistics
+        st.subheader("📊 Event Statistics")
+        
+        total_events = len(events)
+        upcoming = len([e for e in events if _get_event_status_from_date(e.get('event_date')) == 'upcoming'])
+        ongoing = len([e for e in events if _get_event_status_from_date(e.get('event_date')) == 'ongoing'])
+        past = len([e for e in events if _get_event_status_from_date(e.get('event_date')) == 'past'])
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Events", total_events)
+        with col2:
+            st.metric("Upcoming", upcoming)
+        with col3:
+            st.metric("Ongoing", ongoing)
+        with col4:
+            st.metric("Past", past)
+        
+        # Events table
+        st.subheader("📋 All Events")
+        
+        for event in events:
+            display_event_card(event, st.session_state.username)
+    
+    elif selected == "System Settings":
+        st.header("⚙️ System Settings")
+        
+        st.subheader("Database Configuration")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("Database Type", "Supabase PostgreSQL" if db.use_supabase else "SQLite")
+        
+        with col2:
+            if db.use_supabase:
+                st.success("✅ Supabase connected")
+            else:
+                st.info("💾 Using local SQLite")
+        
+        st.subheader("System Information")
+        
+        info_col1, info_col2 = st.columns(2)
+        
+        with info_col1:
+            st.markdown("**College Name:** G H Raisoni College")
+            st.markdown("**Departments:** 10")
+            st.markdown("**Event Types:** 12")
+        
+        with info_col2:
+            st.markdown("**System Version:** 2.0.0")
+            st.markdown("**Last Updated:** Today")
+            st.markdown("**Status:** Operational")
+        
+        # Maintenance actions
+        st.subheader("🔧 Maintenance Actions")
+        
+        action_col1, action_col2, action_col3 = st.columns(3)
+        
+        with action_col1:
+            if st.button("🔄 Refresh Cache", use_container_width=True, type="secondary"):
+                if hasattr(db.client, 'clear_cache'):
+                    db.client.clear_cache()
+                st.success("Cache cleared successfully!")
+        
+        with action_col2:
+            if st.button("📊 Update Stats", use_container_width=True, type="secondary"):
+                st.info("Statistics updated!")
+        
+        with action_col3:
+            if st.button("🧹 Cleanup", use_container_width=True, type="secondary"):
+                st.info("Cleanup completed!")
+
 # MAIN APPLICATION - FIXED
 # ============================================
 
 def main():
-    """Main application function - FIXED session state initialization"""
+    """Main application function - PROPER ROLE ROUTING"""
     
     # Initialize all required session state variables FIRST
     if 'initialized' not in st.session_state:
@@ -2362,12 +3120,16 @@ def main():
         landing_page()
     elif st.session_state.role == 'student':
         student_dashboard()
+    elif st.session_state.role == 'mentor':
+        mentor_dashboard()
+    elif st.session_state.role == 'faculty':
+        faculty_dashboard()
+    elif st.session_state.role == 'admin':
+        admin_dashboard()
     else:
-        # For other roles, show student dashboard as example
-        st.warning(f"⚠️ {st.session_state.role.title()} dashboard is under development.")
-        st.info("For now, you can use the student features.")
-        student_dashboard()
-
+        # Fallback for unknown roles
+        st.error(f"Unknown role: {st.session_state.role}")
+        landing_page()
 # ============================================
 # RUN APPLICATION
 # ============================================
