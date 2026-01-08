@@ -20,7 +20,7 @@ from datetime import datetime
 # Import modules
 from config import *
 from utils import get_custom_css, display_role_badge, format_date, get_event_status, save_flyer_image
-from database import DatabaseManager
+from utils import DatabaseManager
 
 # Setup logging
 logging.basicConfig(
