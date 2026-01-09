@@ -1051,6 +1051,53 @@ class DatabaseManager:
     def _start_background_tasks(self):
         """Start background maintenance tasks"""
         threading.Thread(target=self._background_maintenance, daemon=True).start()
+
+    def get_all_users(self, cache_ttl=60, use_cache=True):
+        """Get all users from the database"""
+        cache_key = "all_users"
+        if use_cache and CACHE_ENABLED:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+    
+        try:
+            if self.use_supabase:
+                users = self.client.select('users', limit=1000, 
+                                     cache_ttl=cache_ttl, use_cache=use_cache)
+            else:
+                users = self.client.execute_query(
+                    "SELECT * FROM users ORDER BY role, name",
+                    fetchall=True, use_cache=use_cache
+                )
+        
+            users = users or []
+        
+            if use_cache and CACHE_ENABLED:
+                cache.set(cache_key, users, ttl=cache_ttl)
+        
+            return users
+        
+        except Exception as e:
+            logger.error(f"Error getting all users: {e}")
+            return []
+
+    def get_users_by_role(self, role, cache_ttl=60):
+        """Get users by role"""
+        try:
+            if self.use_supabase:
+                users = self.client.select('users', {'role': role}, 
+                                     limit=1000, cache_ttl=cache_ttl)
+            else:
+                users = self.client.execute_query(
+                    "SELECT * FROM users WHERE role = ? ORDER BY name",
+                    (role,), fetchall=True, cache_ttl=cache_ttl
+                )
+        
+            return users or []
+        
+        except Exception as e:
+            logger.error(f"Error getting users by role {role}: {e}")
+            return []
     
     def _background_maintenance(self):
         """Background maintenance tasks"""
@@ -2622,7 +2669,7 @@ class DatabaseManager:
         
         try:
             if self.use_supabase:
-                students = self.client.select('users', {'role': 'student'}, limit=1000)
+                students = self.get_users_by_role('student')
                 
                 stats = {}
                 for student in students:
@@ -4322,8 +4369,8 @@ def events_feed_page():
     
     try:
         db.update_event_status()
-    except:
-        pass
+    except Exception as e:
+        logger.debug(f"Event status update skipped: {e}")
     
     with st.spinner("Loading events..."):
         events = db.get_all_events(cache_ttl=60)
@@ -6927,14 +6974,7 @@ def admin_backup_page():
 
 def get_all_users():
     """Get all users from database"""
-    try:
-        if db.use_supabase:
-            return db.client.select('users', limit=1000, use_cache=False)
-        else:
-            return db.client.execute_query("SELECT * FROM users", fetchall=True, use_cache=False)
-    except Exception as e:
-        logger.error(f"Error getting users: {e}")
-        return []
+    return db.get_all_users()
 
 def confirm_action(message):
     """Confirm an action with the user"""
