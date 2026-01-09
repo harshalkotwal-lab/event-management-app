@@ -3867,7 +3867,8 @@ def landing_page():
         
         with col_forgot:
             if st.button("Forgot Password?"):
-                st.info("Password reset feature coming soon!")
+                st.session_state.page = "forgot_password"
+                st.rerun()
         
         if st.button("Login", use_container_width=True, type="primary", key="login_button"):
             if not username or not password:
@@ -5656,7 +5657,7 @@ def mentor_dashboard():
             button_text = f"▶ {option}" if is_active else option
             
             if st.button(button_text, key=f"mentor_{option}", use_container_width=True):
-                                st.session_state.mentor_page = option
+                st.session_state.mentor_page = option
                 st.rerun()
         
         st.markdown("---")
@@ -7022,18 +7023,106 @@ def main():
             st.rerun()
     
     # Route to appropriate dashboard
-    elif st.session_state.role == 'admin':
-        admin_dashboard()
+    elif st.session_state.role == 'student':
+        student_dashboard()
     elif st.session_state.role == 'faculty':
         faculty_dashboard()
     elif st.session_state.role == 'mentor':
         mentor_dashboard()
-    elif st.session_state.role == 'student':
-        student_dashboard()
+    elif st.session_state.role == 'admin':
+        admin_dashboard()
+    else:
+        # If role is set but doesn't match any dashboard, show error
+        st.error(f"Invalid role configuration: {st.session_state.role}")
+        if st.button("Logout"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+
+# ============================================
+# STYLES
+# ============================================
+
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #1e3a8a;
+        margin-bottom: 1.5rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    .college-header h1 {
+        font-size: 2.8rem;
+        color: #1e3a8a;
+        margin-bottom: 0.5rem;
+    }
+    .college-header h3 {
+        font-size: 1.2rem;
+        color: #6b7280;
+        margin-top: 0;
+    }
+    .event-card {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        border: 1px solid #e5e7eb;
+        transition: all 0.3s ease;
+    }
+    .event-card:hover {
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        transform: translateY(-2px);
+    }
+    .card-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #1f2937;
+        margin-bottom: 8px;
+        line-height: 1.3;
+    }
+    .registration-card, .user-card, .leaderboard-card {
+        background: white;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 12px;
+        border: 1px solid #e5e7eb;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    .registration-section {
+        background: #f8fafc;
+        border-radius: 8px;
+        padding: 16px;
+        margin-top: 16px;
+        border: 1px solid #e2e8f0;
+    }
+    .stButton button {
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.2s;
+    }
+    .stButton button:hover {
+        transform: translateY(-1px);
+    }
+    .stProgress > div > div {
+        background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+    }
+    .css-1d391kg {
+        padding: 2rem 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ============================================
 # RUN APPLICATION
 # ============================================
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)[:200]}")
+        logger.error(f"Application error: {e}", exc_info=True)
+        if st.button("Restart Application"):
+            st.rerun()
