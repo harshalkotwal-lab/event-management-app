@@ -1658,60 +1658,78 @@ class DatabaseManager:
     def update_event_status(self):
         """Update event status based on current time"""
         try:
-            now = datetime.now().isoformat()
-            
+            now = datetime.now()
+        
             if self.use_supabase:
                 events = self.get_all_events(cache_ttl=0, use_cache=False)
-                
+            
                 for event in events:
                     event_date = event.get('event_date')
                     event_id = event.get('id')
                     current_status = event.get('status', 'upcoming')
                     end_date = event.get('end_date')
-                    
+                
                     if isinstance(event_date, str):
                         try:
-                            event_dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
-                            now_dt = datetime.now()
-                            
+                            # Parse date string to datetime (handle timezone-aware strings)
+                            if 'Z' in event_date or '+' in event_date:
+                                # Timezone-aware datetime
+                                event_dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+                                # Make both datetime objects timezone-aware or both naive
+                                # Convert to naive datetime by removing timezone info
+                                event_dt = event_dt.replace(tzinfo=None)
+                            else:
+                                # Naive datetime
+                                event_dt = datetime.fromisoformat(event_date)
+                        
                             if end_date:
-                                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-                                if end_dt < now_dt and current_status != 'completed':
+                                # Parse end date similarly
+                                if 'Z' in end_date or '+' in end_date:
+                                    end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                                    end_dt = end_dt.replace(tzinfo=None)
+                                else:
+                                    end_dt = datetime.fromisoformat(end_date)
+                            
+                                if end_dt < now and current_status != 'completed':
                                     self.client.update('events', {'id': event_id}, {
-                                        'status': 'completed',
-                                        'updated_at': now
-                                    })
-                            
-                            elif event_dt <= now_dt and current_status == 'upcoming':
-                                self.client.update('events', {'id': event_id}, {
-                                    'status': 'ongoing',
-                                    'updated_at': now
-                                })
-                            
-                            elif event_dt < now_dt and current_status not in ['completed', 'cancelled']:
-                                self.client.update('events', {'id': event_id}, {
                                     'status': 'completed',
-                                    'updated_at': now
-                                })
-                                
+                                    'updated_at': now.isoformat()
+                                    }, use_cache=False)
+                        
+                            elif event_dt <= now and current_status == 'upcoming':
+                                self.client.update('events', {'id': event_id}, {
+                                'status': 'ongoing',
+                                'updated_at': now.isoformat()
+                                }, use_cache=False)
+                        
+                            elif event_dt < now and current_status not in ['completed', 'cancelled']:
+                                self.client.update('events', {'id': event_id}, {
+                                'status': 'completed',
+                                'updated_at': now.isoformat()
+                                }, use_cache=False)
+                            
                         except Exception as e:
-                            logger.warning(f"Error parsing event date: {e}")
+                            logger.warning(f"Error parsing event date {event_date}: {e}")
+                            continue
+                        
             else:
+                # For SQLite
+                now_iso = now.isoformat()
                 self.client.execute_query(
                     "UPDATE events SET status = 'ongoing', updated_at = ? WHERE event_date <= ? AND status = 'upcoming'",
-                    (now, now), commit=True
+                    (now_iso, now_iso), commit=True
                 )
-                
+            
                 self.client.execute_query(
                     "UPDATE events SET status = 'completed', updated_at = ? WHERE event_date < ? AND status IN ('upcoming', 'ongoing')",
-                    (now, now), commit=True
+                    (now_iso, now_iso), commit=True
                 )
-            
+        
             cache.delete("events_all")
             cache.delete("events_upcoming")
-            
+        
             return True
-            
+        
         except Exception as e:
             logger.error(f"Error updating event status: {e}")
             return False
@@ -3116,6 +3134,7 @@ def format_date(date_str):
     """Format date for display"""
     try:
         if isinstance(date_str, str):
+            # Try different date formats
             for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
                 try:
                     dt = datetime.strptime(date_str, fmt)
@@ -3123,14 +3142,12 @@ def format_date(date_str):
                 except:
                     continue
             
-            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-            return dt.strftime("%d %b %Y, %I:%M %p")
-        else:
-            dt = date_str
-            return dt.strftime("%d %b %Y, %I:%M %p")
-    except:
-        return str(date_str)
-
+            # Handle ISO format with timezone
+            if 'Z' in date_str or '+' in date_str:
+                dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            else:
+                dt = datetime.fromisoformat
+                
 def get_event_status(event_date, end_date=None, status=None):
     """Get event status badge"""
     try:
@@ -3141,25 +3158,34 @@ def get_event_status(event_date, end_date=None, status=None):
                 return '<span style="background: #E5E7EB; color: #374151; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🔴 Completed</span>'
         
         if isinstance(event_date, str):
-            for fmt in ['%Y-%m-dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
-                try:
-                    dt = datetime.strptime(event_date, fmt)
-                    break
-                except:
-                    continue
-            else:
+            # Parse date string
+            if 'Z' in event_date or '+' in event_date:
+                # Timezone-aware datetime
                 dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+                dt = dt.replace(tzinfo=None)  # Convert to naive datetime
+            else:
+                # Naive datetime
+                dt = datetime.fromisoformat(event_date)
         else:
             dt = event_date
+            # Ensure dt is naive datetime
+            if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+                dt = dt.replace(tzinfo=None)
         
         now = datetime.now()
         
         if end_date:
             try:
                 if isinstance(end_date, str):
-                    end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                    if 'Z' in end_date or '+' in end_date:
+                        end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                        end_dt = end_dt.replace(tzinfo=None)
+                    else:
+                        end_dt = datetime.fromisoformat(end_date)
                 else:
                     end_dt = end_date
+                    if hasattr(end_dt, 'tzinfo') and end_dt.tzinfo is not None:
+                        end_dt = end_dt.replace(tzinfo=None)
                 
                 if end_dt < now:
                     return '<span style="background: #E5E7EB; color: #374151; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🔴 Completed</span>'
