@@ -2,7 +2,7 @@
 G H Raisoni College - Advanced Event Management System
 PRODUCTION READY with Supabase PostgreSQL (Free Forever)
 Deployable on Streamlit Cloud
-WITH GAMIFICATION LEADERBOARD SYSTEM
+WITH ENHANCED GAMIFICATION & ANALYTICS
 """
 
 import streamlit as st
@@ -26,22 +26,31 @@ import logging
 import time
 import secrets
 import smtplib
+import plotly.express as px
+import plotly.graph_objects as go
+import numpy as np
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Dict, List, Tuple, Optional, Any
 from pathlib import Path
 import csv
 import sqlite3
+import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import random
+from collections import defaultdict
+import math
 
 # ============================================
-# LOGGING SETUP - FIXED
+# LOGGING SETUP - ENHANCED
 # ============================================
 
-# Configure logger once
+# Configure logger
 logger = logging.getLogger(__name__)
 if not logger.handlers:
     logging.basicConfig(
-        level=logging.WARNING,  # Reduced from INFO to WARNING
+        level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.FileHandler('event_management.log'),
@@ -54,15 +63,18 @@ if not logger.handlers:
 # CONFIGURATION
 # ============================================
 
-# Set to True for Supabase PostgreSQL, False for SQLite
+# Database configuration
 USE_SUPABASE = True  # Change this to switch databases
+CACHE_ENABLED = True  # Enable caching for better performance
+CACHE_TTL = 300  # 5 minutes
 
 # Security settings
 SESSION_TIMEOUT_MINUTES = 60
 MAX_LOGIN_ATTEMPTS = 5
 PASSWORD_MIN_LENGTH = 8
+RATE_LIMIT_REQUESTS = 100  # Max requests per minute per user
 
-# College configuration
+# College configuration - Enhanced
 COLLEGE_CONFIG = {
     "name": "G H Raisoni College of Engineering and Management, Jalgaon",
     "departments": [
@@ -81,39 +93,154 @@ COLLEGE_CONFIG = {
     "event_types": [
         "Workshop", "Hackathon", "Competition", "Bootcamp", "Seminar",
         "Conference", "Webinar", "Training", "Symposium", "Cultural Event",
-        "Guest Lecture", "Industrial Visit"
+        "Guest Lecture", "Industrial Visit", "Sports Event", "Technical Fest",
+        "Placement Drive", "Alumni Talk", "Research Symposium"
+    ],
+    "event_categories": [
+        "Technical", "Cultural", "Sports", "Academic", "Career", 
+        "Research", "Innovation", "Social", "Entertainment"
     ]
 }
 
 # ============================================
-# GAMIFICATION CONFIGURATION
+# GAMIFICATION CONFIGURATION - ENHANCED
 # ============================================
 
 GAMIFICATION_CONFIG = {
     "points": {
         "registration": 50,
+        "attendance": 25,
         "shortlisted": 100,
-        "winner": 200
+        "winner": 200,
+        "runner_up": 150,
+        "participation": 30,
+        "event_creation": 20,
+        "daily_login": 10,
+        "feedback_submission": 15,
+        "invite_friend": 50,
+        "complete_profile": 100
     },
     "badges": {
         "registration": "🏅 Participant",
         "shortlisted": "⭐ Shortlisted",
         "winner": "🏆 Winner",
+        "runner_up": "🥈 Runner Up",
         "top_10": "👑 Top 10 Leader",
         "top_25": "🎖️ Top 25 Achiever",
         "top_50": "🌟 Rising Star",
         "mentor_choice": "💎 Mentor's Choice",
-        "most_active": "🚀 Most Active"
+        "most_active": "🚀 Most Active",
+        "event_creator": "🎪 Event Organizer",
+        "perfect_attendance": "📊 100% Attendance",
+        "department_champion": "🏛️ Department Champion",
+        "early_bird": "🐦 Early Bird",
+        "social_butterfly": "🦋 Social Butterfly",
+        "feedback_expert": "💬 Feedback Expert"
+    },
+    "levels": {
+        1: {"name": "Beginner", "points_required": 0},
+        2: {"name": "Learner", "points_required": 500},
+        3: {"name": "Contributor", "points_required": 1500},
+        4: {"name": "Expert", "points_required": 3000},
+        5: {"name": "Master", "points_required": 5000},
+        6: {"name": "Grand Master", "points_required": 10000},
+        7: {"name": "Legend", "points_required": 20000}
     },
     "leaderboard": {
-        "top_n": 15,  # Display top 15 students in leaderboard
-        "update_interval": 3600,  # Update leaderboard every hour
-        "department_top_n": 5  # Top 5 per department
+        "top_n": 20,
+        "update_interval": 1800,  # 30 minutes
+        "department_top_n": 10,
+        "monthly_reset": False,
+        "seasonal_awards": True
+    },
+    "streak_bonus": {
+        "daily_login": [5, 10, 15, 20, 25, 30, 50],  # Bonus points for consecutive days
+        "event_streak": [10, 25, 50, 100]  # Bonus for attending consecutive events
     }
 }
 
 # ============================================
-# VALIDATION CLASS
+# PERFORMANCE CACHE - ENHANCED
+# ============================================
+
+class PerformanceCache:
+    """Enhanced caching system with TTL and LRU eviction"""
+    
+    def __init__(self, max_size=1000):
+        self.cache = {}
+        self.ttl = {}
+        self.access_time = {}
+        self.max_size = max_size
+        self.hits = 0
+        self.misses = 0
+        
+    def get(self, key, default=None):
+        """Get item from cache with TTL check"""
+        if key in self.cache:
+            if time.time() > self.ttl.get(key, 0):
+                self.delete(key)
+                self.misses += 1
+                return default
+            
+            self.access_time[key] = time.time()
+            self.hits += 1
+            return self.cache[key]
+        
+        self.misses += 1
+        return default
+    
+    def set(self, key, value, ttl=300):
+        """Set item in cache with TTL"""
+        if len(self.cache) >= self.max_size:
+            self._evict()
+        
+        self.cache[key] = value
+        self.ttl[key] = time.time() + ttl
+        self.access_time[key] = time.time()
+    
+    def delete(self, key):
+        """Delete item from cache"""
+        if key in self.cache:
+            del self.cache[key]
+        if key in self.ttl:
+            del self.ttl[key]
+        if key in self.access_time:
+            del self.access_time[key]
+    
+    def clear(self):
+        """Clear all cache"""
+        self.cache.clear()
+        self.ttl.clear()
+        self.access_time.clear()
+        self.hits = 0
+        self.misses = 0
+    
+    def _evict(self):
+        """LRU eviction policy"""
+        if not self.access_time:
+            return
+        
+        # Find least recently used key
+        lru_key = min(self.access_time.items(), key=lambda x: x[1])[0]
+        self.delete(lru_key)
+    
+    def get_stats(self):
+        """Get cache statistics"""
+        total = self.hits + self.misses
+        hit_rate = (self.hits / total * 100) if total > 0 else 0
+        return {
+            "size": len(self.cache),
+            "max_size": self.max_size,
+            "hits": self.hits,
+            "misses": self.misses,
+            "hit_rate": f"{hit_rate:.1f}%"
+        }
+
+# Global cache instance
+cache = PerformanceCache(max_size=2000)
+
+# ============================================
+# VALIDATION CLASS - ENHANCED
 # ============================================
 
 class Validators:
@@ -122,10 +249,17 @@ class Validators:
     @staticmethod
     def validate_email(email: str) -> Tuple[bool, str]:
         """Validate email format"""
+        if not email:
+            return False, "Email is required"
+        
         pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         
         if not re.match(pattern, email):
             return False, "Invalid email format"
+        
+        # Check college domain
+        if not email.endswith('@ghraisoni.edu'):
+            return True, "Valid email (external)"
         
         return True, "Valid email"
     
@@ -159,6 +293,11 @@ class Validators:
             if not check:
                 return False, message
         
+        # Check for common patterns
+        common_patterns = ['123456', 'password', 'admin', 'qwerty', 'letmein']
+        if password.lower() in common_patterns:
+            return False, "Password is too common"
+        
         return True, "Strong password"
     
     @staticmethod
@@ -168,237 +307,364 @@ class Validators:
         if len(digits) == 10:
             return f"+91 {digits[:5]} {digits[5:]}"
         return mobile
+    
+    @staticmethod
+    def validate_roll_number(roll_no: str) -> Tuple[bool, str]:
+        """Validate roll number format"""
+        if not roll_no:
+            return False, "Roll number required"
+        
+        pattern = r'^[A-Z]{2,4}\d{4,7}$'
+        if re.match(pattern, roll_no, re.IGNORECASE):
+            return True, "Valid roll number"
+        
+        return False, "Invalid roll number format (e.g., CSE2023001)"
+    
+    @staticmethod
+    def sanitize_input(text: str, max_length: int = 500) -> str:
+        """Sanitize user input"""
+        if not text:
+            return ""
+        
+        # Remove potentially dangerous characters
+        text = re.sub(r'[<>"\'&;]', '', text)
+        
+        # Limit length
+        if len(text) > max_length:
+            text = text[:max_length]
+        
+        return text.strip()
 
 # ============================================
-# SUPABASE CLIENT (PostgreSQL) - FIXED
+# SUPABASE CLIENT (PostgreSQL) - ENHANCED
 # ============================================
 
 class SupabaseClient:
-    """Supabase PostgreSQL client using HTTP REST API - FIXED VERSION"""
+    """Enhanced Supabase PostgreSQL client with connection pooling and retry logic"""
     
     def __init__(self):
         self.url = None
         self.key = None
         self.headers = None
         self.is_configured = False
-        self._cache = {}
+        self.pool_size = 5
+        self._connection_pool = []
         self._initialized = False
+        self.retry_attempts = 3
+        self.retry_delay = 1
         
         self._initialize_supabase()
     
     def _initialize_supabase(self):
-        """Initialize Supabase connection - FIXED"""
+        """Initialize Supabase connection with retry logic"""
         if self._initialized:
             return
             
-        try:
-            if hasattr(st, 'secrets'):
-                if 'SUPABASE' in st.secrets:
-                    self.url = st.secrets.SUPABASE.get('url')
-                    self.key = st.secrets.SUPABASE.get('key')
-                    
-                    if self.url and self.key:
-                        # Ensure URL has https:// scheme
-                        if not self.url.startswith(('http://', 'https://')):
-                            self.url = f'https://{self.url}'
+        for attempt in range(self.retry_attempts):
+            try:
+                if hasattr(st, 'secrets'):
+                    if 'SUPABASE' in st.secrets:
+                        self.url = st.secrets.SUPABASE.get('url')
+                        self.key = st.secrets.SUPABASE.get('key')
                         
-                        # Remove trailing slash if present
-                        self.url = self.url.rstrip('/')
-                        
-                        self.headers = {
-                            'apikey': self.key,
-                            'Authorization': f'Bearer {self.key}',
-                            'Content-Type': 'application/json',
-                            'Prefer': 'return=representation'
-                        }
-                        self.is_configured = True
-                        self._initialized = True
-                        logger.info("✅ Supabase configured successfully")
+                        if self.url and self.key:
+                            # Ensure URL has https:// scheme
+                            if not self.url.startswith(('http://', 'https://')):
+                                self.url = f'https://{self.url}'
+                            
+                            # Remove trailing slash if present
+                            self.url = self.url.rstrip('/')
+                            
+                            self.headers = {
+                                'apikey': self.key,
+                                'Authorization': f'Bearer {self.key}',
+                                'Content-Type': 'application/json',
+                                'Prefer': 'return=representation',
+                                'Accept-Encoding': 'gzip, deflate'
+                            }
+                            self.is_configured = True
+                            self._initialized = True
+                            logger.info(f"✅ Supabase configured successfully (attempt {attempt + 1})")
+                            break
+                        else:
+                            logger.warning(f"⚠️ Supabase credentials incomplete (attempt {attempt + 1})")
                     else:
-                        logger.warning("⚠️ Supabase credentials incomplete")
+                        logger.warning(f"⚠️ Supabase credentials not found in secrets (attempt {attempt + 1})")
                 else:
-                    logger.warning("⚠️ Supabase credentials not found in secrets")
-            else:
-                logger.warning("⚠️ Streamlit secrets not available")
-                
-        except Exception as e:
-            logger.error(f"Supabase initialization error: {e}")
+                    logger.warning(f"⚠️ Streamlit secrets not available (attempt {attempt + 1})")
+                    
+                if attempt < self.retry_attempts - 1:
+                    time.sleep(self.retry_delay)
+                    
+            except Exception as e:
+                logger.error(f"Supabase initialization error (attempt {attempt + 1}): {e}")
+                if attempt < self.retry_attempts - 1:
+                    time.sleep(self.retry_delay)
     
-    def _get_cache_key(self, table, method='GET', filters=None):
-        """Generate cache key"""
-        key_parts = [table, method]
-        if filters:
-            key_parts.append(json.dumps(filters, sort_keys=True))
-        return hashlib.md5('_'.join(key_parts).encode()).hexdigest()
+    def _execute_with_retry(self, func, *args, **kwargs):
+        """Execute function with retry logic"""
+        for attempt in range(self.retry_attempts):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                logger.warning(f"Retry attempt {attempt + 1} failed: {e}")
+                if attempt < self.retry_attempts - 1:
+                    time.sleep(self.retry_delay * (attempt + 1))
+                else:
+                    raise
     
-    def execute_query(self, table, method='GET', data=None, filters=None, limit=1000, order_by=None, cache_ttl=60):
-        """Execute REST API query to Supabase - FIXED VERSION"""
-        if not self.is_configured:
-            logger.error("Supabase not configured")
-            return None
-        
-        # Check cache for GET requests
-        if method == 'GET':
-            cache_key = self._get_cache_key(table, method, filters)
-            if cache_key in self._cache:
-                cache_data, timestamp = self._cache[cache_key]
-                if time.time() - timestamp < cache_ttl:
-                    return cache_data
+    def execute_query(self, table, method='GET', data=None, filters=None, limit=1000, 
+                     order_by=None, cache_ttl=60, use_cache=True):
+        """Execute REST API query to Supabase with enhanced performance"""
+        # Check cache first
+        if method == 'GET' and use_cache and CACHE_ENABLED:
+            cache_key = self._get_cache_key(table, method, filters, limit, order_by)
+            cached_data = cache.get(cache_key)
+            if cached_data is not None:
+                return cached_data
         
         try:
             import requests
             
             url = f"{self.url}/rest/v1/{table}"
             
-            # Build query parameters - FIXED: Use proper query syntax
-            params = {}
+            # Build query parameters
+            params = {'limit': str(limit)}
             
-            # Add filters - FIXED: Use proper filter syntax
             if filters:
                 for k, v in filters.items():
                     if v is not None:
-                        # Handle special operators
                         if isinstance(v, dict):
                             for op, val in v.items():
                                 params[f"{k}"] = f"{op}.{val}"
                         else:
                             params[f"{k}"] = f"eq.{v}"
             
-            # Add ordering
             if order_by:
                 params['order'] = order_by
             
-            # Add limit
-            params['limit'] = str(limit)
+            # Set timeout
+            timeout = 10 if method == 'GET' else 30
             
-            # Make request
-            timeout = 15
-            if method == 'GET':
-                response = requests.get(url, headers=self.headers, params=params, timeout=timeout)
-            elif method == 'POST':
-                response = requests.post(url, headers=self.headers, json=data, timeout=timeout)
-            elif method == 'PATCH':
-                # For PATCH with filters
-                if filters:
-                    # Build filter query string for PATCH
-                    filter_params = []
-                    for k, v in filters.items():
-                        if v is not None:
-                            filter_params.append(f"{k}=eq.{v}")
-                    if filter_params:
-                        url = f"{url}?{'&'.join(filter_params)}"
-                response = requests.patch(url, headers=self.headers, json=data, timeout=timeout)
-            elif method == 'DELETE':
-                # Build filter query string for DELETE
-                if filters:
-                    filter_params = []
-                    for k, v in filters.items():
-                        if v is not None:
-                            filter_params.append(f"{k}=eq.{v}")
-                    if filter_params:
-                        url = f"{url}?{'&'.join(filter_params)}"
-                response = requests.delete(url, headers=self.headers, timeout=timeout)
-            else:
-                logger.error(f"Unsupported method: {method}")
+            # Execute request with retry
+            response = self._execute_with_retry(
+                self._make_request, url, method, params, data, timeout
+            )
+            
+            if response is None:
                 return None
             
-            # Check for errors
-            if response.status_code >= 400:
-                logger.error(f"Supabase API error {response.status_code}: {response.text[:200]}")
-                return None
-            
+            # Process response
             result = None
             if method == 'GET':
                 result = response.json() if response.text else []
                 # Cache the result
-                cache_key = self._get_cache_key(table, method, filters)
-                self._cache[cache_key] = (result, time.time())
+                if use_cache and CACHE_ENABLED:
+                    cache_key = self._get_cache_key(table, method, filters, limit, order_by)
+                    cache.set(cache_key, result, ttl=cache_ttl)
             elif method in ['POST', 'PATCH']:
                 result = response.json() if response.text else True
+                # Invalidate relevant caches
+                self._invalidate_cache(table)
             elif method == 'DELETE':
                 result = response.status_code in [200, 204]
+                self._invalidate_cache(table)
             
             return result
                 
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Supabase API request error: {e}")
-            return None
         except Exception as e:
-            logger.error(f"Unexpected error in Supabase query: {e}")
+            logger.error(f"Supabase API error: {e}")
             return None
     
-    def clear_cache(self):
-        """Clear cache"""
-        self._cache.clear()
+    def _make_request(self, url, method, params, data, timeout):
+        """Make HTTP request"""
+        import requests
+        
+        if method == 'GET':
+            response = requests.get(url, headers=self.headers, params=params, 
+                                  timeout=timeout, allow_redirects=True)
+        elif method == 'POST':
+            response = requests.post(url, headers=self.headers, json=data, 
+                                   params=params, timeout=timeout)
+        elif method == 'PATCH':
+            response = requests.patch(url, headers=self.headers, json=data, 
+                                    params=params, timeout=timeout)
+        elif method == 'DELETE':
+            response = requests.delete(url, headers=self.headers, 
+                                     params=params, timeout=timeout)
+        else:
+            raise ValueError(f"Unsupported method: {method}")
+        
+        if response.status_code >= 400:
+            logger.error(f"API error {response.status_code}: {response.text[:200]}")
+            if response.status_code == 429:  # Rate limited
+                retry_after = response.headers.get('Retry-After', 60)
+                time.sleep(int(retry_after))
+            return None
+        
+        return response
     
-    def insert(self, table, data):
+    def _get_cache_key(self, table, method, filters, limit, order_by):
+        """Generate cache key"""
+        import json
+        key_data = {
+            'table': table,
+            'method': method,
+            'filters': filters,
+            'limit': limit,
+            'order_by': order_by
+        }
+        return f"supabase_{hashlib.md5(json.dumps(key_data, sort_keys=True).encode()).hexdigest()}"
+    
+    def _invalidate_cache(self, table):
+        """Invalidate cache for a table"""
+        keys_to_delete = []
+        for key in cache.cache.keys():
+            if key.startswith(f"supabase_{table}"):
+                keys_to_delete.append(key)
+        
+        for key in keys_to_delete:
+            cache.delete(key)
+    
+    def insert(self, table, data, use_cache=True):
         """Insert data into table"""
-        result = self.execute_query(table, 'POST', data)
-        if result is None:
-            return False
-        return bool(result)
+        return self.execute_query(table, 'POST', data, use_cache=use_cache)
     
-    def select(self, table, filters=None, limit=1000, order_by=None, cache_ttl=60):
+    def select(self, table, filters=None, limit=1000, order_by=None, 
+               cache_ttl=60, use_cache=True):
         """Select data from table"""
-        return self.execute_query(table, 'GET', filters=filters, limit=limit, order_by=order_by, cache_ttl=cache_ttl)
+        return self.execute_query(table, 'GET', filters=filters, limit=limit, 
+                                 order_by=order_by, cache_ttl=cache_ttl, use_cache=use_cache)
     
-    def update(self, table, filters, data):
-        """Update data in table - FIXED"""
-        result = self.execute_query(table, 'PATCH', data, filters)
-        if result is None:
-            return False
-        return bool(result)
+    def update(self, table, filters, data, use_cache=True):
+        """Update data in table"""
+        return self.execute_query(table, 'PATCH', data, filters, use_cache=use_cache)
     
-    def delete(self, table, filters):
+    def delete(self, table, filters, use_cache=True):
         """Delete data from table"""
-        return self.execute_query(table, 'DELETE', filters=filters)
+        return self.execute_query(table, 'DELETE', filters=filters, use_cache=use_cache)
+    
+    def batch_insert(self, table, data_list, batch_size=100):
+        """Batch insert for better performance"""
+        if not data_list:
+            return True
+        
+        for i in range(0, len(data_list), batch_size):
+            batch = data_list[i:i + batch_size]
+            for data in batch:
+                if not self.insert(table, data, use_cache=False):
+                    logger.error(f"Batch insert failed at index {i}")
+                    return False
+            time.sleep(0.1)  # Small delay to avoid rate limiting
+        
+        self._invalidate_cache(table)
+        return True
 
 # ============================================
 # SQLITE CLIENT (Fallback) - OPTIMIZED
 # ============================================
 
 class SQLiteClient:
-    """SQLite client for local development"""
+    """Optimized SQLite client with connection pooling"""
     
     def __init__(self, db_path="data/event_management.db"):
         self.db_path = db_path
-        self.conn = None
-        self._cache = {}
-        self._initialize()
+        self.connection_pool = []
+        self.max_pool_size = 5
+        self._lock = threading.Lock()
+        self._initialize_db()
     
-    def _initialize(self):
-        """Initialize SQLite database"""
+    def _initialize_db(self):
+        """Initialize SQLite database with performance optimizations"""
         try:
             os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-            self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-            self.conn.row_factory = sqlite3.Row
-            self.conn.execute("PRAGMA foreign_keys = ON")
-            self.conn.execute("PRAGMA journal_mode = WAL")
-            self.conn.execute("PRAGMA synchronous = NORMAL")
-            self.conn.execute("PRAGMA cache_size = -10000")
+            conn = self._create_connection()
+            conn.row_factory = sqlite3.Row
+            
+            # Performance optimizations
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
+            conn.execute("PRAGMA cache_size = -10000")
+            conn.execute("PRAGMA mmap_size = 268435456")  # 256MB
+            conn.execute("PRAGMA temp_store = MEMORY")
+            conn.execute("PRAGMA locking_mode = NORMAL")
+            conn.execute("PRAGMA foreign_keys = ON")
+            
+            # Create indexes for performance
+            self._create_indexes(conn)
+            
+            self.connection_pool.append(conn)
+            logger.info("✅ SQLite database initialized with optimizations")
+            
         except Exception as e:
             logger.error(f"SQLite initialization error: {e}")
             raise
     
-    def _get_cache_key(self, query, params=None):
-        """Generate cache key"""
-        key_parts = [query]
-        if params:
-            key_parts.append(str(params))
-        return hashlib.md5('_'.join(key_parts).encode()).hexdigest()
+    def _create_connection(self):
+        """Create a new database connection"""
+        return sqlite3.connect(self.db_path, check_same_thread=False, timeout=30)
     
-    def execute_query(self, query, params=None, fetchone=False, fetchall=False, commit=False, cache_ttl=60):
-        """Execute SQL query"""
-        # Check cache for SELECT queries
-        if 'SELECT' in query.upper() and fetchall:
-            cache_key = self._get_cache_key(query, params)
-            if cache_key in self._cache:
-                cache_data, timestamp = self._cache[cache_key]
-                if time.time() - timestamp < cache_ttl:
-                    return cache_data
+    def _create_indexes(self, conn):
+        """Create indexes for performance"""
+        indexes = [
+            "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)",
+            "CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)",
+            "CREATE INDEX IF NOT EXISTS idx_users_department ON users(department)",
+            "CREATE INDEX IF NOT EXISTS idx_users_points ON users(total_points DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_events_date ON events(event_date)",
+            "CREATE INDEX IF NOT EXISTS idx_events_status ON events(status)",
+            "CREATE INDEX IF NOT EXISTS idx_events_creator ON events(created_by)",
+            "CREATE INDEX IF NOT EXISTS idx_registrations_event ON registrations(event_id)",
+            "CREATE INDEX IF NOT EXISTS idx_registrations_student ON registrations(student_username)",
+            "CREATE INDEX IF NOT EXISTS idx_likes_event_user ON event_likes(event_id, student_username)",
+            "CREATE INDEX IF NOT EXISTS idx_interested_event_user ON event_interested(event_id, student_username)",
+            "CREATE INDEX IF NOT EXISTS idx_feedback_event ON event_feedback(event_id)",
+            "CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read)",
+            "CREATE INDEX IF NOT EXISTS idx_achievements_user ON user_achievements(user_id)"
+        ]
         
+        cursor = conn.cursor()
+        for index_sql in indexes:
+            try:
+                cursor.execute(index_sql)
+            except Exception as e:
+                logger.warning(f"Failed to create index: {e}")
+        conn.commit()
+    
+    def get_connection(self):
+        """Get a connection from pool or create new one"""
+        with self._lock:
+            if self.connection_pool:
+                return self.connection_pool.pop()
+            elif len(self.connection_pool) < self.max_pool_size:
+                conn = self._create_connection()
+                conn.row_factory = sqlite3.Row
+                return conn
+            else:
+                raise Exception("Connection pool exhausted")
+    
+    def return_connection(self, conn):
+        """Return connection to pool"""
+        with self._lock:
+            if len(self.connection_pool) < self.max_pool_size:
+                self.connection_pool.append(conn)
+            else:
+                conn.close()
+    
+    def execute_query(self, query, params=None, fetchone=False, fetchall=False, 
+                     commit=False, use_cache=True):
+        """Execute SQL query with connection pooling"""
+        # Check cache for SELECT queries
+        if 'SELECT' in query.upper() and fetchall and use_cache and CACHE_ENABLED:
+            cache_key = f"sqlite_{hashlib.md5((query + str(params)).encode()).hexdigest()}"
+            cached_data = cache.get(cache_key)
+            if cached_data is not None:
+                return cached_data
+        
+        conn = None
         try:
-            cursor = self.conn.cursor()
+            conn = self.get_connection()
+            cursor = conn.cursor()
             
             if params:
                 cursor.execute(query, params)
@@ -406,45 +672,59 @@ class SQLiteClient:
                 cursor.execute(query)
             
             if commit:
-                self.conn.commit()
+                conn.commit()
             
             result = None
             if fetchone:
-                result = cursor.fetchone()
-                result = dict(result) if result else None
+                row = cursor.fetchone()
+                result = dict(row) if row else None
             elif fetchall:
-                results = cursor.fetchall()
-                result = [dict(row) for row in results]
+                rows = cursor.fetchall()
+                result = [dict(row) for row in rows]
                 # Cache the result
-                cache_key = self._get_cache_key(query, params)
-                self._cache[cache_key] = (result, time.time())
+                if use_cache and CACHE_ENABLED:
+                    cache_key = f"sqlite_{hashlib.md5((query + str(params)).encode()).hexdigest()}"
+                    cache.set(cache_key, result, ttl=300)
             else:
                 result = cursor
             
             return result
+            
         except Exception as e:
             logger.error(f"SQLite error: {e}")
+            if conn and not commit:
+                conn.rollback()
             return None
+            
+        finally:
+            if conn:
+                self.return_connection(conn)
     
     def clear_cache(self):
-        """Clear cache"""
-        self._cache.clear()
+        """Clear SQLite related cache"""
+        keys_to_delete = []
+        for key in cache.cache.keys():
+            if key.startswith("sqlite_"):
+                keys_to_delete.append(key)
+        
+        for key in keys_to_delete:
+            cache.delete(key)
     
-    def insert(self, table, data):
+    def insert(self, table, data, use_cache=True):
         """Insert data into table"""
         columns = ', '.join(data.keys())
         placeholders = ', '.join(['?' for _ in data])
         query = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
         
         try:
-            cursor = self.execute_query(query, tuple(data.values()))
-            self.conn.commit()
+            self.execute_query(query, tuple(data.values()), commit=True)
             self.clear_cache()
-            return cursor.rowcount > 0
-        except:
+            return True
+        except Exception as e:
+            logger.error(f"Insert error: {e}")
             return False
     
-    def select(self, table, filters=None, limit=1000, cache_ttl=60):
+    def select(self, table, filters=None, limit=1000, cache_ttl=60, use_cache=True):
         """Select data from table"""
         query = f"SELECT * FROM {table}"
         
@@ -455,49 +735,55 @@ class SQLiteClient:
         query = f"{query} LIMIT {limit}"
         
         if filters:
-            return self.execute_query(query, tuple(filters.values()), fetchall=True, cache_ttl=cache_ttl)
+            return self.execute_query(query, tuple(filters.values()), 
+                                    fetchall=True, use_cache=use_cache)
         else:
-            return self.execute_query(query, fetchall=True, cache_ttl=cache_ttl)
+            return self.execute_query(query, fetchall=True, use_cache=use_cache)
     
-    def update(self, table, filters, data):
-        """Update data in table"""
-        set_clause = ', '.join([f"{k} = ?" for k in data.keys()])
-        conditions = ' AND '.join([f"{k} = ?" for k in filters.keys()])
+    def batch_insert(self, table, data_list, batch_size=100):
+        """Batch insert for better performance"""
+        if not data_list:
+            return True
         
-        query = f"UPDATE {table} SET {set_clause} WHERE {conditions}"
-        params = tuple(data.values()) + tuple(filters.values())
-        
+        conn = None
         try:
-            cursor = self.execute_query(query, params)
-            self.conn.commit()
+            conn = self.get_connection()
+            cursor = conn.cursor()
+            
+            for i in range(0, len(data_list), batch_size):
+                batch = data_list[i:i + batch_size]
+                for data in batch:
+                    columns = ', '.join(data.keys())
+                    placeholders = ', '.join(['?' for _ in data])
+                    query = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
+                    cursor.execute(query, tuple(data.values()))
+            
+            conn.commit()
             self.clear_cache()
-            return cursor.rowcount > 0
-        except:
+            return True
+            
+        except Exception as e:
+            logger.error(f"Batch insert error: {e}")
+            if conn:
+                conn.rollback()
             return False
-    
-    def delete(self, table, filters):
-        """Delete data from table"""
-        conditions = ' AND '.join([f"{k} = ?" for k in filters.keys()])
-        query = f"DELETE FROM {table} WHERE {conditions}"
-        
-        try:
-            cursor = self.execute_query(query, tuple(filters.values()))
-            self.conn.commit()
-            self.clear_cache()
-            return cursor.rowcount > 0
-        except:
-            return False
+        finally:
+            if conn:
+                self.return_connection(conn)
 
 # ============================================
-# UNIFIED DATABASE MANAGER - FIXED
+# UNIFIED DATABASE MANAGER - ENHANCED
 # ============================================
 
 class DatabaseManager:
-    """Unified database manager supporting both Supabase and SQLite - FIXED"""
+    """Enhanced database manager with async operations and analytics"""
     
     def __init__(self, use_supabase=True):
         self.use_supabase = use_supabase
         self._initialized = False
+        self._analytics_cache = {}
+        self._analytics_ttl = {}
+        self._executor = ThreadPoolExecutor(max_workers=4)
         
         if self.use_supabase:
             self.client = SupabaseClient()
@@ -512,9 +798,46 @@ class DatabaseManager:
         self._initialize_database()
         self._add_default_users()
         self._initialized = True
+        
+        # Start background tasks
+        self._start_background_tasks()
+    
+    def _start_background_tasks(self):
+        """Start background maintenance tasks"""
+        threading.Thread(target=self._background_maintenance, daemon=True).start()
+    
+    def _background_maintenance(self):
+        """Background maintenance tasks"""
+        while True:
+            try:
+                # Update event status every 5 minutes
+                self.update_event_status()
+                
+                # Clean old cache every hour
+                self._clean_old_cache()
+                
+                # Update analytics cache every 30 minutes
+                self._update_analytics_cache()
+                
+                # Sleep for 5 minutes
+                time.sleep(300)
+                
+            except Exception as e:
+                logger.error(f"Background maintenance error: {e}")
+                time.sleep(60)
+    
+    def _clean_old_cache(self):
+        """Clean old cache entries"""
+        cache.clear()
+        self._analytics_cache.clear()
+    
+    def _update_analytics_cache(self):
+        """Update analytics cache"""
+        # This will be populated by analytics queries
+        pass
     
     def _initialize_database(self):
-        """Initialize database tables"""
+        """Initialize database tables with new features"""
         try:
             if not self.use_supabase:
                 self._create_sqlite_tables()
@@ -522,8 +845,8 @@ class DatabaseManager:
             logger.error(f"Database initialization error: {e}")
     
     def _create_sqlite_tables(self):
-        """Create SQLite tables"""
-        # Users table
+        """Create SQLite tables with new features"""
+        # Users table - Enhanced
         users_table = """
         CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
@@ -536,46 +859,74 @@ class DatabaseManager:
             year TEXT,
             email TEXT,
             mobile TEXT,
+            avatar_url TEXT,
+            bio TEXT,
+            skills TEXT,
             reset_token TEXT,
             reset_token_expiry TEXT,
             last_activity TEXT,
             is_active INTEGER DEFAULT 1,
             login_attempts INTEGER DEFAULT 0,
             last_login TEXT,
+            daily_login_streak INTEGER DEFAULT 0,
+            last_daily_login TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
             total_points INTEGER DEFAULT 0,
-            last_points_update TEXT DEFAULT CURRENT_TIMESTAMP
+            current_level INTEGER DEFAULT 1,
+            level_progress INTEGER DEFAULT 0,
+            badges_earned TEXT DEFAULT '[]',
+            achievements_unlocked TEXT DEFAULT '[]',
+            notification_settings TEXT DEFAULT '{"email": true, "push": true, "event_updates": true}',
+            privacy_settings TEXT DEFAULT '{"profile_public": true, "show_points": true}',
+            INDEX idx_users_points (total_points DESC),
+            INDEX idx_users_department (department),
+            INDEX idx_users_role (role)
         )
         """
         
-        # Events table
+        # Events table - Enhanced
         events_table = """
         CREATE TABLE IF NOT EXISTS events (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
             description TEXT,
             event_type TEXT,
+            event_category TEXT,
             event_date TEXT,
+            end_date TEXT,
             venue TEXT,
             organizer TEXT,
+            co_organizers TEXT DEFAULT '[]',
             event_link TEXT,
             registration_link TEXT,
             max_participants INTEGER DEFAULT 100,
             current_participants INTEGER DEFAULT 0,
             flyer_path TEXT,
+            tags TEXT DEFAULT '[]',
+            prerequisites TEXT,
+            resources TEXT DEFAULT '[]',
             created_by TEXT,
             created_by_name TEXT,
             ai_generated INTEGER DEFAULT 0,
             status TEXT DEFAULT 'upcoming',
             mentor_id TEXT,
+            difficulty_level TEXT DEFAULT 'Beginner',
+            estimated_duration INTEGER,  -- in minutes
+            has_certificate INTEGER DEFAULT 0,
+            certificate_template TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            last_updated TEXT DEFAULT CURRENT_TIMESTAMP
+            last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
+            views_count INTEGER DEFAULT 0,
+            popularity_score FLOAT DEFAULT 0.0,
+            INDEX idx_events_date (event_date),
+            INDEX idx_events_status (status),
+            INDEX idx_events_creator (created_by)
         )
         """
         
-        # Registrations table
+        # Registrations table - Enhanced
         registrations_table = """
         CREATE TABLE IF NOT EXISTS registrations (
             id TEXT PRIMARY KEY,
@@ -590,11 +941,18 @@ class DatabaseManager:
             attendance TEXT DEFAULT 'absent',
             points_awarded INTEGER DEFAULT 0,
             badges_awarded TEXT DEFAULT '',
+            feedback_provided INTEGER DEFAULT 0,
             mentor_notes TEXT,
+            certificate_issued INTEGER DEFAULT 0,
+            certificate_url TEXT,
             registered_at TEXT DEFAULT CURRENT_TIMESTAMP,
             checked_in_at TEXT,
+            checked_out_at TEXT,
+            time_spent INTEGER DEFAULT 0,  -- in minutes
             UNIQUE(event_id, student_username),
-            FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+            FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+            INDEX idx_registrations_event (event_id),
+            INDEX idx_registrations_student (student_username)
         )
         """
         
@@ -606,7 +964,8 @@ class DatabaseManager:
             student_username TEXT NOT NULL,
             liked_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(event_id, student_username),
-            FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+            FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+            INDEX idx_likes_event_user (event_id, student_username)
         )
         """
         
@@ -618,64 +977,205 @@ class DatabaseManager:
             student_username TEXT NOT NULL,
             interested_at TEXT DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(event_id, student_username),
-            FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+            FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+            INDEX idx_interested_event_user (event_id, student_username)
         )
         """
         
-        tables = [users_table, events_table, registrations_table, likes_table, interested_table]
+        # Event feedback table - NEW
+        feedback_table = """
+        CREATE TABLE IF NOT EXISTS event_feedback (
+            id TEXT PRIMARY KEY,
+            event_id TEXT NOT NULL,
+            student_username TEXT NOT NULL,
+            rating INTEGER CHECK(rating >= 1 AND rating <= 5),
+            comments TEXT,
+            anonymous INTEGER DEFAULT 0,
+            submitted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+            INDEX idx_feedback_event (event_id)
+        )
+        """
+        
+        # Notifications table - NEW
+        notifications_table = """
+        CREATE TABLE IF NOT EXISTS notifications (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            notification_type TEXT,
+            related_id TEXT,
+            read INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            expires_at TEXT,
+            action_url TEXT,
+            INDEX idx_notifications_user (user_id, read)
+        )
+        """
+        
+        # User achievements table - NEW
+        achievements_table = """
+        CREATE TABLE IF NOT EXISTS user_achievements (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            achievement_id TEXT NOT NULL,
+            achievement_name TEXT NOT NULL,
+            achievement_type TEXT,
+            points_awarded INTEGER DEFAULT 0,
+            unlocked_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            metadata TEXT DEFAULT '{}',
+            UNIQUE(user_id, achievement_id),
+            INDEX idx_achievements_user (user_id)
+        )
+        """
+        
+        # Event categories table - NEW
+        categories_table = """
+        CREATE TABLE IF NOT EXISTS event_categories (
+            id TEXT PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT,
+            icon TEXT,
+            color TEXT DEFAULT '#3B82F6',
+            is_active INTEGER DEFAULT 1
+        )
+        """
+        
+        # Department stats table - NEW
+        department_stats_table = """
+        CREATE TABLE IF NOT EXISTS department_stats (
+            id TEXT PRIMARY KEY,
+            department TEXT UNIQUE NOT NULL,
+            total_students INTEGER DEFAULT 0,
+            total_points INTEGER DEFAULT 0,
+            events_organized INTEGER DEFAULT 0,
+            average_rating FLOAT DEFAULT 0.0,
+            last_updated TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+        
+        tables = [
+            users_table, events_table, registrations_table, likes_table,
+            interested_table, feedback_table, notifications_table,
+            achievements_table, categories_table, department_stats_table
+        ]
         
         for table_sql in tables:
             self.client.execute_query(table_sql, commit=True)
     
     # ============================================
-    # USER MANAGEMENT METHODS
+    # USER MANAGEMENT - ENHANCED
     # ============================================
     
     def verify_credentials(self, username, password, role):
-        """Verify user credentials"""
+        """Verify user credentials with rate limiting"""
+        # Rate limiting check
+        rate_key = f"login_attempts_{username}"
+        attempts = cache.get(rate_key, 0)
+        if attempts >= MAX_LOGIN_ATTEMPTS:
+            logger.warning(f"Rate limited: {username}")
+            return False
+        
         try:
             user = self.get_user(username)
             if not user:
+                cache.set(rate_key, attempts + 1, ttl=300)
                 return False
             
             if user.get('role') != role:
+                cache.set(rate_key, attempts + 1, ttl=300)
                 return False
             
             stored_pass = user.get('password', '')
             input_hash = hashlib.sha256(password.encode()).hexdigest().lower()
             
             if stored_pass == input_hash or stored_pass == password:
-                # Update last login
-                self.client.update('users', {'username': username}, {
+                # Update last login and streak
+                update_data = {
                     'last_login': datetime.now().isoformat(),
-                    'updated_at': datetime.now().isoformat()
-                })
+                    'updated_at': datetime.now().isoformat(),
+                    'login_attempts': 0
+                }
+                
+                # Check daily login streak
+                last_login = user.get('last_daily_login')
+                if last_login:
+                    try:
+                        last_login_date = datetime.fromisoformat(last_login.replace('Z', '+00:00')).date()
+                        today = datetime.now().date()
+                        
+                        if today > last_login_date:
+                            if (today - last_login_date).days == 1:
+                                # Consecutive day
+                                new_streak = user.get('daily_login_streak', 0) + 1
+                                update_data['daily_login_streak'] = new_streak
+                                
+                                # Award streak bonus
+                                streak_bonus = GAMIFICATION_CONFIG['streak_bonus']['daily_login']
+                                bonus_index = min(new_streak - 1, len(streak_bonus) - 1)
+                                if bonus_index >= 0:
+                                    self.award_points(username, streak_bonus[bonus_index], 
+                                                    "daily_login_streak", f"Day {new_streak} streak")
+                            else:
+                                # Broken streak
+                                update_data['daily_login_streak'] = 1
+                        
+                        update_data['last_daily_login'] = datetime.now().isoformat()
+                    except:
+                        update_data['daily_login_streak'] = 1
+                        update_data['last_daily_login'] = datetime.now().isoformat()
+                
+                self.client.update('users', {'username': username}, update_data)
+                
+                # Clear rate limit
+                cache.delete(rate_key)
+                
+                # Award daily login points
+                self.award_points(username, GAMIFICATION_CONFIG['points']['daily_login'], 
+                                "daily_login", "Daily login")
+                
                 return True
             
+            cache.set(rate_key, attempts + 1, ttl=300)
             return False
             
         except Exception as e:
             logger.error(f"Login error: {e}")
+            cache.set(rate_key, attempts + 1, ttl=300)
             return False
     
-    def get_user(self, username):
-        """Get user by username"""
+    def get_user(self, username, use_cache=True):
+        """Get user by username with caching"""
+        cache_key = f"user_{username}"
+        if use_cache and CACHE_ENABLED:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+        
         try:
             if self.use_supabase:
-                results = self.client.select('users', {'username': username}, limit=1, cache_ttl=30)
+                results = self.client.select('users', {'username': username}, 
+                                           limit=1, cache_ttl=30, use_cache=use_cache)
                 if results:
-                    return results[0]
+                    user = results[0]
+                    if use_cache:
+                        cache.set(cache_key, user, ttl=300)
+                    return user
             else:
-                return self.client.execute_query(
+                user = self.client.execute_query(
                     "SELECT * FROM users WHERE username = ?",
-                    (username,), fetchone=True, cache_ttl=30
+                    (username,), fetchone=True, use_cache=use_cache
                 )
+                if user and use_cache:
+                    cache.set(cache_key, user, ttl=300)
+                return user
         except Exception as e:
             logger.error(f"Error getting user {username}: {e}")
         return None
     
     def add_user(self, user_data):
-        """Add new user"""
+        """Add new user with enhanced validation"""
         try:
             password = user_data.get('password', '')
             if not password:
@@ -694,17 +1194,29 @@ class DatabaseManager:
                 'year': user_data.get('year', ''),
                 'email': user_data.get('email', ''),
                 'mobile': user_data.get('mobile', ''),
+                'avatar_url': user_data.get('avatar_url', ''),
+                'bio': user_data.get('bio', ''),
+                'skills': json.dumps(user_data.get('skills', [])),
                 'total_points': 0,
+                'current_level': 1,
+                'level_progress': 0,
+                'badges_earned': '[]',
+                'achievements_unlocked': '[]',
                 'created_at': datetime.now().isoformat(),
                 'updated_at': datetime.now().isoformat()
             }
             
-            success = self.client.insert('users', user_record)
+            success = self.client.insert('users', user_record, use_cache=False)
             
             if success:
                 # Clear cache
-                if hasattr(self.client, 'clear_cache'):
-                    self.client.clear_cache()
+                self._clear_user_cache(user_record['username'])
+                
+                # Award points for completing profile
+                self.award_points(user_record['username'], 
+                                GAMIFICATION_CONFIG['points']['complete_profile'],
+                                "complete_profile", "Profile completion")
+                
                 return True, "User registered successfully"
             else:
                 return False, "Registration failed"
@@ -713,147 +1225,250 @@ class DatabaseManager:
             logger.error(f"Error adding user: {e}")
             return False, str(e)
     
+    def update_user_profile(self, username, profile_data):
+        """Update user profile"""
+        try:
+            if 'skills' in profile_data and isinstance(profile_data['skills'], list):
+                profile_data['skills'] = json.dumps(profile_data['skills'])
+            
+            profile_data['updated_at'] = datetime.now().isoformat()
+            
+            success = self.client.update('users', {'username': username}, profile_data)
+            
+            if success:
+                self._clear_user_cache(username)
+                return True, "Profile updated successfully"
+            else:
+                return False, "Profile update failed"
+            
+        except Exception as e:
+            logger.error(f"Error updating profile: {e}")
+            return False, str(e)
+    
+    def _clear_user_cache(self, username):
+        """Clear cache for user"""
+        cache.delete(f"user_{username}")
+        cache.delete(f"user_stats_{username}")
+    
     # ============================================
-    # EVENT MANAGEMENT METHODS
+    # EVENT MANAGEMENT - ENHANCED
     # ============================================
     
     def add_event(self, event_data):
-        """Add new event"""
+        """Add new event with enhanced features"""
         try:
             event_record = {
                 'id': event_data.get('id', str(uuid.uuid4())),
                 'title': event_data.get('title'),
                 'description': event_data.get('description'),
                 'event_type': event_data.get('event_type'),
+                'event_category': event_data.get('event_category', 'Technical'),
                 'event_date': event_data.get('event_date'),
+                'end_date': event_data.get('end_date'),
                 'venue': event_data.get('venue'),
                 'organizer': event_data.get('organizer'),
+                'co_organizers': json.dumps(event_data.get('co_organizers', [])),
                 'event_link': event_data.get('event_link', ''),
                 'registration_link': event_data.get('registration_link', ''),
                 'max_participants': event_data.get('max_participants', 100),
                 'current_participants': 0,
                 'flyer_path': event_data.get('flyer_path'),
+                'tags': json.dumps(event_data.get('tags', [])),
+                'prerequisites': event_data.get('prerequisites', ''),
+                'resources': json.dumps(event_data.get('resources', [])),
                 'created_by': event_data.get('created_by'),
                 'created_by_name': event_data.get('created_by_name'),
                 'ai_generated': event_data.get('ai_generated', False),
                 'status': 'upcoming',
                 'mentor_id': event_data.get('mentor_id'),
+                'difficulty_level': event_data.get('difficulty_level', 'Beginner'),
+                'estimated_duration': event_data.get('estimated_duration'),
+                'has_certificate': event_data.get('has_certificate', False),
+                'certificate_template': event_data.get('certificate_template', ''),
                 'created_at': datetime.now().isoformat(),
-                'updated_at': datetime.now().isoformat()
+                'updated_at': datetime.now().isoformat(),
+                'views_count': 0,
+                'popularity_score': 0.0
             }
             
-            success = self.client.insert('events', event_record)
+            success = self.client.insert('events', event_record, use_cache=False)
             
             if success:
                 # Clear cache
-                if hasattr(self.client, 'clear_cache'):
-                    self.client.clear_cache()
-                return True
-            return False
+                cache.delete("events_all")
+                cache.delete("events_upcoming")
+                
+                # Award points to creator
+                if event_record['created_by']:
+                    self.award_points(event_record['created_by'], 
+                                    GAMIFICATION_CONFIG['points']['event_creation'],
+                                    "event_creation", f"Created event: {event_record['title'][:30]}")
+                
+                # Send notifications to interested users
+                self._notify_interested_users(event_record)
+                
+                return True, event_record['id']
+            return False, None
             
         except Exception as e:
             logger.error(f"Error adding event: {e}")
-            return False
+            return False, None
     
-    def get_all_events(self, cache_ttl=60):
-        """Get all events"""
+    def _notify_interested_users(self, event):
+        """Notify users interested in similar events"""
+        # This is a simplified version - implement based on your needs
+        pass
+    
+    def get_all_events(self, cache_ttl=60, use_cache=True):
+        """Get all events with caching"""
+        cache_key = "events_all"
+        if use_cache and CACHE_ENABLED:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+        
         try:
             if self.use_supabase:
-                events = self.client.select('events', limit=1000, order_by='event_date.desc', cache_ttl=cache_ttl)
+                events = self.client.select('events', limit=1000, 
+                                          order_by='event_date.desc', 
+                                          cache_ttl=cache_ttl, use_cache=use_cache)
             else:
                 events = self.client.execute_query(
                     "SELECT * FROM events ORDER BY event_date DESC",
-                    fetchall=True, cache_ttl=cache_ttl
+                    fetchall=True, use_cache=use_cache
                 )
-            return events or []
+            
+            events = events or []
+            
+            if use_cache:
+                cache.set(cache_key, events, ttl=cache_ttl)
+            
+            return events
+            
         except Exception as e:
             logger.error(f"Error getting events: {e}")
             return []
     
-    def get_events_by_creator(self, username, cache_ttl=60):
-        """Get events created by specific user"""
+    def get_upcoming_events(self, limit=10, cache_ttl=300):
+        """Get upcoming events"""
+        cache_key = f"events_upcoming_{limit}"
+        if CACHE_ENABLED:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+        
         try:
+            now = datetime.now().isoformat()
+            
             if self.use_supabase:
-                events = self.client.select('events', {'created_by': username}, limit=1000, cache_ttl=cache_ttl)
+                filters = {'status': 'upcoming'}
+                events = self.client.select('events', filters=filters, limit=limit,
+                                          order_by='event_date.asc', cache_ttl=cache_ttl)
             else:
                 events = self.client.execute_query(
-                    "SELECT * FROM events WHERE created_by = ? ORDER BY event_date DESC",
-                    (username,), fetchall=True, cache_ttl=cache_ttl
+                    "SELECT * FROM events WHERE status = 'upcoming' AND event_date > ? ORDER BY event_date ASC LIMIT ?",
+                    (now, limit), fetchall=True
                 )
-            return events or []
+            
+            events = events or []
+            
+            if CACHE_ENABLED:
+                cache.set(cache_key, events, ttl=cache_ttl)
+            
+            return events
+            
         except Exception as e:
-            logger.error(f"Error getting events by creator: {e}")
+            logger.error(f"Error getting upcoming events: {e}")
             return []
     
     def update_event_status(self):
-        """Update event status based on current time - FIXED VERSION"""
+        """Update event status based on current time"""
         try:
             now = datetime.now().isoformat()
-            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-            today_end = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999).isoformat()
             
             if self.use_supabase:
-                # For Supabase, we need to update events manually
-                events = self.get_all_events(cache_ttl=0)
+                # Get all events
+                events = self.get_all_events(cache_ttl=0, use_cache=False)
                 
                 for event in events:
                     event_date = event.get('event_date')
                     event_id = event.get('id')
                     current_status = event.get('status', 'upcoming')
+                    end_date = event.get('end_date')
                     
                     if isinstance(event_date, str):
                         try:
                             event_dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+                            now_dt = datetime.now()
                             
-                            # Check if event is past
-                            if event_dt < datetime.now() and current_status != 'past':
-                                self.client.update('events', {'id': event_id}, {
-                                    'status': 'past',
-                                    'updated_at': now
-                                })
+                            # Check if event has ended
+                            if end_date:
+                                end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                                if end_dt < now_dt and current_status != 'completed':
+                                    self.client.update('events', {'id': event_id}, {
+                                        'status': 'completed',
+                                        'updated_at': now
+                                    })
                             
-                            # Check if event is today
-                            elif event_dt.date() == datetime.now().date() and current_status == 'upcoming':
+                            # Check if event is ongoing
+                            elif event_dt <= now_dt and current_status == 'upcoming':
                                 self.client.update('events', {'id': event_id}, {
                                     'status': 'ongoing',
                                     'updated_at': now
                                 })
+                            
+                            # Check if event is past (for events without end date)
+                            elif event_dt < now_dt and current_status not in ['completed', 'cancelled']:
+                                self.client.update('events', {'id': event_id}, {
+                                    'status': 'completed',
+                                    'updated_at': now
+                                })
                                 
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.warning(f"Error parsing event date: {e}")
             else:
-                # Update past events
+                # Update ongoing events
                 self.client.execute_query(
-                    "UPDATE events SET status = 'past', updated_at = ? WHERE event_date <= ? AND status != 'past'",
+                    "UPDATE events SET status = 'ongoing', updated_at = ? WHERE event_date <= ? AND status = 'upcoming'",
                     (now, now), commit=True
                 )
                 
-                # Update ongoing events
+                # Update completed events
                 self.client.execute_query(
-                    "UPDATE events SET status = 'ongoing', updated_at = ? WHERE event_date BETWEEN ? AND ? AND status = 'upcoming'",
-                    (now, today_start, today_end), commit=True
+                    "UPDATE events SET status = 'completed', updated_at = ? WHERE event_date < ? AND status IN ('upcoming', 'ongoing')",
+                    (now, now), commit=True
                 )
             
             # Clear cache
-            if hasattr(self.client, 'clear_cache'):
-                self.client.clear_cache()
+            cache.delete("events_all")
+            cache.delete("events_upcoming")
             
             return True
+            
         except Exception as e:
             logger.error(f"Error updating event status: {e}")
             return False
     
     # ============================================
-    # REGISTRATION METHODS
+    # REGISTRATION MANAGEMENT - ENHANCED
     # ============================================
     
     def add_registration(self, reg_data):
-        """Add new registration"""
+        """Add new registration with enhanced features"""
         try:
             # Check if already registered
             existing = self.is_student_registered(reg_data['event_id'], reg_data['student_username'])
             if existing:
                 return None, "Already registered"
+            
+            # Check event capacity
+            event = self.get_event_by_id(reg_data['event_id'])
+            if event:
+                max_participants = event.get('max_participants', 100)
+                current_participants = event.get('current_participants', 0)
+                
+                if current_participants >= max_participants:
+                    return None, "Event is full"
             
             # Get student info
             student = self.get_user(reg_data['student_username'])
@@ -868,18 +1483,34 @@ class DatabaseManager:
                 'student_roll': reg_data.get('student_roll'),
                 'student_dept': reg_data.get('student_dept'),
                 'student_mobile': mobile,
-                'status': 'pending',
+                'status': 'confirmed',
                 'registered_at': datetime.now().isoformat()
             }
             
-            success = self.client.insert('registrations', registration_record)
+            success = self.client.insert('registrations', registration_record, use_cache=False)
             
             if success:
                 # Clear cache
-                if hasattr(self.client, 'clear_cache'):
-                    self.client.clear_cache()
+                self._clear_registration_cache(reg_data['student_username'])
+                
                 # Update participant count
                 self._update_event_participant_count(reg_data['event_id'])
+                
+                # Award registration points
+                self.award_points(reg_data['student_username'], 
+                                GAMIFICATION_CONFIG['points']['registration'],
+                                "event_registration", 
+                                f"Registered for: {reg_data['event_title'][:30]}")
+                
+                # Send confirmation notification
+                self.create_notification(
+                    user_id=reg_data['student_username'],
+                    title="✅ Event Registration Confirmed",
+                    message=f"You have successfully registered for '{reg_data['event_title']}'",
+                    notification_type="registration",
+                    related_id=reg_data['event_id']
+                )
+                
                 return registration_record['id'], "Registration successful"
             
             return None, "Registration failed"
@@ -892,23 +1523,29 @@ class DatabaseManager:
         """Update event participant count"""
         try:
             if self.use_supabase:
-                registrations = self.client.select('registrations', {'event_id': event_id}, cache_ttl=0)
+                registrations = self.client.select('registrations', {'event_id': event_id}, 
+                                                 cache_ttl=0, use_cache=False)
                 count = len(registrations) if registrations else 0
                 self.client.update('events', {'id': event_id}, {
                     'current_participants': count,
                     'updated_at': datetime.now().isoformat()
-                })
+                }, use_cache=False)
             else:
-                cursor = self.client.conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM registrations WHERE event_id = ?", (event_id,))
-                count = cursor.fetchone()[0]
-                cursor.execute("UPDATE events SET current_participants = ?, updated_at = ? WHERE id = ?", 
-                             (count, datetime.now().isoformat(), event_id))
-                self.client.conn.commit()
+                cursor = self.client.execute_query(
+                    "SELECT COUNT(*) as count FROM registrations WHERE event_id = ?",
+                    (event_id,), fetchone=True, use_cache=False
+                )
+                count = cursor['count'] if cursor else 0
+                self.client.execute_query(
+                    "UPDATE events SET current_participants = ?, updated_at = ? WHERE id = ?",
+                    (count, datetime.now().isoformat(), event_id),
+                    commit=True
+                )
             
             # Clear cache
-            if hasattr(self.client, 'clear_cache'):
-                self.client.clear_cache()
+            cache.delete(f"event_{event_id}")
+            cache.delete("events_all")
+            
             return True
         except Exception as e:
             logger.error(f"Error updating participant count: {e}")
@@ -916,40 +1553,681 @@ class DatabaseManager:
     
     def get_registrations_by_student(self, username, cache_ttl=60):
         """Get all registrations for a student"""
+        cache_key = f"registrations_{username}"
+        if CACHE_ENABLED:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+        
         try:
             if self.use_supabase:
-                registrations = self.client.select('registrations', {'student_username': username}, cache_ttl=cache_ttl)
+                registrations = self.client.select('registrations', {'student_username': username}, 
+                                                 cache_ttl=cache_ttl)
             else:
                 registrations = self.client.execute_query(
                     "SELECT r.*, e.event_date, e.venue, e.status as event_status FROM registrations r LEFT JOIN events e ON r.event_id = e.id WHERE r.student_username = ? ORDER BY r.registered_at DESC",
-                    (username,), fetchall=True, cache_ttl=cache_ttl
+                    (username,), fetchall=True
                 )
-            return registrations or []
+            
+            registrations = registrations or []
+            
+            if CACHE_ENABLED:
+                cache.set(cache_key, registrations, ttl=cache_ttl)
+            
+            return registrations
+            
         except Exception as e:
             logger.error(f"Error getting registrations: {e}")
             return []
     
+    def _clear_registration_cache(self, username):
+        """Clear registration cache for user"""
+        cache.delete(f"registrations_{username}")
+    
+    # ============================================
+    # GAMIFICATION & POINTS SYSTEM - ENHANCED
+    # ============================================
+    
+    def award_points(self, username, points, reason, description=""):
+        """Award points to a user"""
+        try:
+            user = self.get_user(username, use_cache=False)
+            if not user:
+                return False
+            
+            current_points = user.get('total_points', 0)
+            new_points = current_points + points
+            
+            # Update user points
+            update_data = {
+                'total_points': new_points,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            # Check for level up
+            current_level = user.get('current_level', 1)
+            for level, config in GAMIFICATION_CONFIG['levels'].items():
+                if new_points >= config['points_required'] and level > current_level:
+                    update_data['current_level'] = level
+                    update_data['level_progress'] = 0
+                    
+                    # Create level up achievement
+                    self.unlock_achievement(
+                        username,
+                        f"level_{level}",
+                        f"Reached Level {level}: {config['name']}",
+                        "level_up",
+                        points * 2  # Bonus points for leveling up
+                    )
+                    
+                    # Send notification
+                    self.create_notification(
+                        user_id=username,
+                        title=f"🎉 Level Up!",
+                        message=f"Congratulations! You've reached Level {level}: {config['name']}",
+                        notification_type="achievement",
+                        related_id=f"level_{level}"
+                    )
+            
+            success = self.client.update('users', {'username': username}, update_data, use_cache=False)
+            
+            if success:
+                # Clear user cache
+                self._clear_user_cache(username)
+                
+                # Log points transaction
+                self._log_points_transaction(username, points, reason, description)
+                
+                # Check for badge unlocks
+                self._check_badge_unlocks(username)
+                
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error awarding points: {e}")
+            return False
+    
+    def _log_points_transaction(self, username, points, reason, description):
+        """Log points transaction for audit trail"""
+        # Implement if needed - could be a separate table
+        pass
+    
+    def _check_badge_unlocks(self, username):
+        """Check and unlock badges based on user achievements"""
+        user = self.get_user(username, use_cache=False)
+        if not user:
+            return
+        
+        points = user.get('total_points', 0)
+        current_badges = json.loads(user.get('badges_earned', '[]'))
+        new_badges = []
+        
+        # Check for point-based badges
+        if points >= 10000 and "legend_badge" not in current_badges:
+            new_badges.append("legend_badge")
+        elif points >= 5000 and "master_badge" not in current_badges:
+            new_badges.append("master_badge")
+        elif points >= 1000 and "expert_badge" not in current_badges:
+            new_badges.append("expert_badge")
+        
+        # Add new badges
+        if new_badges:
+            all_badges = current_badges + new_badges
+            self.client.update('users', {'username': username}, {
+                'badges_earned': json.dumps(all_badges),
+                'updated_at': datetime.now().isoformat()
+            }, use_cache=False)
+            
+            # Send notifications for new badges
+            for badge in new_badges:
+                self.create_notification(
+                    user_id=username,
+                    title="🎖️ New Badge Unlocked!",
+                    message=f"You've unlocked the {badge.replace('_', ' ').title()} badge!",
+                    notification_type="badge",
+                    related_id=badge
+                )
+    
+    def unlock_achievement(self, username, achievement_id, name, achievement_type, points=0):
+        """Unlock an achievement for a user"""
+        try:
+            achievement_record = {
+                'id': str(uuid.uuid4()),
+                'user_id': username,
+                'achievement_id': achievement_id,
+                'achievement_name': name,
+                'achievement_type': achievement_type,
+                'points_awarded': points,
+                'unlocked_at': datetime.now().isoformat()
+            }
+            
+            success = self.client.insert('user_achievements', achievement_record, use_cache=False)
+            
+            if success and points > 0:
+                self.award_points(username, points, "achievement", name)
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error unlocking achievement: {e}")
+            return False
+    
+    def get_student_points(self, username):
+        """Get student's total points"""
+        user = self.get_user(username)
+        if user:
+            return user.get('total_points', 0)
+        return 0
+    
+    def get_student_level(self, username):
+        """Get student's current level"""
+        user = self.get_user(username)
+        if user:
+            return user.get('current_level', 1)
+        return 1
+    
+    def get_level_progress(self, username):
+        """Get student's level progress percentage"""
+        user = self.get_user(username)
+        if not user:
+            return 0
+        
+        current_level = user.get('current_level', 1)
+        current_points = user.get('total_points', 0)
+        
+        # Get points required for current and next level
+        current_level_config = GAMIFICATION_CONFIG['levels'].get(current_level, {})
+        next_level_config = GAMIFICATION_CONFIG['levels'].get(current_level + 1, {})
+        
+        if not next_level_config:
+            return 100  # Max level reached
+        
+        points_current_level = current_level_config.get('points_required', 0)
+        points_next_level = next_level_config.get('points_required', 0)
+        
+        if points_next_level <= points_current_level:
+            return 100
+        
+        points_in_level = current_points - points_current_level
+        points_needed = points_next_level - points_current_level
+        
+        progress = (points_in_level / points_needed) * 100
+        return min(100, max(0, progress))
+    
+    # ============================================
+    # LEADERBOARD & ANALYTICS - ENHANCED
+    # ============================================
+    
+    def get_leaderboard(self, limit=20, department=None, timeframe="all", cache_ttl=300):
+        """Get leaderboard of top students with timeframe support"""
+        cache_key = f"leaderboard_{department}_{timeframe}_{limit}"
+        if CACHE_ENABLED:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+        
+        try:
+            if timeframe == "weekly":
+                # Get points from last 7 days
+                date_cutoff = (datetime.now() - timedelta(days=7)).isoformat()
+                points_column = "weekly_points"  # You need to track this separately
+            elif timeframe == "monthly":
+                # Get points from last 30 days
+                date_cutoff = (datetime.now() - timedelta(days=30)).isoformat()
+                points_column = "monthly_points"  # You need to track this separately
+            else:
+                points_column = "total_points"
+            
+            if self.use_supabase:
+                filters = {'role': 'student'}
+                if department:
+                    filters['department'] = department
+                
+                users = self.client.select('users', filters, limit=limit * 2, 
+                                         order_by=f'{points_column}.desc', 
+                                         cache_ttl=cache_ttl)
+                
+                if not users:
+                    return []
+                
+                # Calculate rank
+                users = sorted(users, key=lambda x: x.get(points_column, 0), reverse=True)
+                users = users[:limit]
+                
+                for i, user in enumerate(users, 1):
+                    user['rank'] = i
+                    user['points'] = user.get(points_column, 0)
+                
+            else:
+                query = f"""
+                SELECT *, {points_column} as points FROM users 
+                WHERE role = 'student'
+                """
+                params = []
+                
+                if department:
+                    query += " AND department = ?"
+                    params.append(department)
+                
+                query += f" ORDER BY {points_column} DESC, name ASC LIMIT ?"
+                params.append(limit)
+                
+                results = self.client.execute_query(query, tuple(params), fetchall=True) or []
+                
+                # Add rank
+                for i, result in enumerate(results, 1):
+                    result['rank'] = i
+            
+            if CACHE_ENABLED:
+                cache.set(cache_key, results, ttl=cache_ttl)
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error getting leaderboard: {e}")
+            return []
+    
+    def get_student_rank(self, username):
+        """Get student's rank in leaderboard"""
+        leaderboard = self.get_leaderboard(limit=1000, timeframe="all")
+        for i, student in enumerate(leaderboard, 1):
+            if student['username'] == username:
+                return i
+        return None
+    
+    def get_department_stats(self):
+        """Get statistics for all departments"""
+        cache_key = "department_stats"
+        if CACHE_ENABLED:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+        
+        try:
+            if self.use_supabase:
+                # Get all students grouped by department
+                students = self.client.select('users', {'role': 'student'}, limit=1000)
+                
+                stats = {}
+                for student in students:
+                    dept = student.get('department', 'Unknown')
+                    if dept not in stats:
+                        stats[dept] = {
+                            'total_students': 0,
+                            'total_points': 0,
+                            'average_points': 0
+                        }
+                    
+                    stats[dept]['total_students'] += 1
+                    stats[dept]['total_points'] += student.get('total_points', 0)
+                
+                # Calculate averages
+                for dept in stats:
+                    if stats[dept]['total_students'] > 0:
+                        stats[dept]['average_points'] = stats[dept]['total_points'] / stats[dept]['total_students']
+                
+                result = [{'department': k, **v} for k, v in stats.items()]
+                
+            else:
+                result = self.client.execute_query("""
+                    SELECT 
+                        department,
+                        COUNT(*) as total_students,
+                        SUM(total_points) as total_points,
+                        AVG(total_points) as average_points
+                    FROM users 
+                    WHERE role = 'student' AND department IS NOT NULL AND department != ''
+                    GROUP BY department
+                    ORDER BY total_points DESC
+                """, fetchall=True) or []
+            
+            if CACHE_ENABLED:
+                cache.set(cache_key, result, ttl=3600)  # 1 hour cache
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error getting department stats: {e}")
+            return []
+    
+    def get_event_analytics(self, event_id=None):
+        """Get analytics for events"""
+        try:
+            if event_id:
+                # Single event analytics
+                event = self.get_event_by_id(event_id)
+                if not event:
+                    return None
+                
+                registrations = self.client.select('registrations', {'event_id': event_id})
+                likes = self.get_event_likes_count(event_id)
+                interested = self.get_event_interested_count(event_id)
+                
+                return {
+                    'event': event,
+                    'registrations_count': len(registrations) if registrations else 0,
+                    'likes_count': likes,
+                    'interested_count': interested,
+                    'attendance_rate': self._calculate_attendance_rate(event_id),
+                    'feedback_stats': self._get_feedback_stats(event_id)
+                }
+            else:
+                # All events analytics
+                events = self.get_all_events(use_cache=False)
+                total_events = len(events)
+                
+                # Count by status
+                status_counts = defaultdict(int)
+                type_counts = defaultdict(int)
+                total_registrations = 0
+                
+                for event in events:
+                    status = event.get('status', 'unknown')
+                    event_type = event.get('event_type', 'Unknown')
+                    
+                    status_counts[status] += 1
+                    type_counts[event_type] += 1
+                    
+                    # Get registration count for this event
+                    regs = self.client.select('registrations', {'event_id': event.get('id')})
+                    total_registrations += len(regs) if regs else 0
+                
+                return {
+                    'total_events': total_events,
+                    'status_counts': dict(status_counts),
+                    'type_counts': dict(type_counts),
+                    'total_registrations': total_registrations,
+                    'average_registrations': total_registrations / total_events if total_events > 0 else 0
+                }
+                
+        except Exception as e:
+            logger.error(f"Error getting event analytics: {e}")
+            return None
+    
+    def _calculate_attendance_rate(self, event_id):
+        """Calculate attendance rate for an event"""
+        try:
+            if self.use_supabase:
+                registrations = self.client.select('registrations', {'event_id': event_id})
+                if not registrations:
+                    return 0
+                
+                attended = sum(1 for r in registrations if r.get('attendance') == 'present')
+                return (attended / len(registrations)) * 100 if registrations else 0
+            else:
+                result = self.client.execute_query(
+                    "SELECT COUNT(*) as total, SUM(CASE WHEN attendance = 'present' THEN 1 ELSE 0 END) as attended FROM registrations WHERE event_id = ?",
+                    (event_id,), fetchone=True
+                )
+                if result and result['total'] > 0:
+                    return (result['attended'] / result['total']) * 100
+                return 0
+        except:
+            return 0
+    
+    def _get_feedback_stats(self, event_id):
+        """Get feedback statistics for an event"""
+        try:
+            if self.use_supabase:
+                feedbacks = self.client.select('event_feedback', {'event_id': event_id})
+                if not feedbacks:
+                    return {'count': 0, 'average_rating': 0, 'total': 0}
+                
+                total_rating = sum(f.get('rating', 0) for f in feedbacks)
+                average = total_rating / len(feedbacks) if feedbacks else 0
+                
+                return {
+                    'count': len(feedbacks),
+                    'average_rating': round(average, 1),
+                    'total': total_rating
+                }
+            else:
+                result = self.client.execute_query(
+                    "SELECT COUNT(*) as count, AVG(rating) as average FROM event_feedback WHERE event_id = ?",
+                    (event_id,), fetchone=True
+                )
+                if result:
+                    return {
+                        'count': result['count'],
+                        'average_rating': round(result['average'] or 0, 1),
+                        'total': result['count'] * (result['average'] or 0)
+                    }
+                return {'count': 0, 'average_rating': 0, 'total': 0}
+        except:
+            return {'count': 0, 'average_rating': 0, 'total': 0}
+    
+    # ============================================
+    # NOTIFICATION SYSTEM - NEW
+    # ============================================
+    
+    def create_notification(self, user_id, title, message, notification_type=None, 
+                          related_id=None, expires_in=604800):  # 7 days default
+        """Create a notification for a user"""
+        try:
+            notification_record = {
+                'id': str(uuid.uuid4()),
+                'user_id': user_id,
+                'title': title,
+                'message': message,
+                'notification_type': notification_type,
+                'related_id': related_id,
+                'read': 0,
+                'created_at': datetime.now().isoformat(),
+                'expires_at': (datetime.now() + timedelta(seconds=expires_in)).isoformat(),
+                'action_url': related_id  # Could be customized based on type
+            }
+            
+            success = self.client.insert('notifications', notification_record, use_cache=False)
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error creating notification: {e}")
+            return False
+    
+    def get_user_notifications(self, user_id, unread_only=False, limit=20):
+        """Get notifications for a user"""
+        try:
+            if self.use_supabase:
+                filters = {'user_id': user_id}
+                if unread_only:
+                    filters['read'] = 0
+                
+                notifications = self.client.select('notifications', filters=filters, 
+                                                 limit=limit, order_by='created_at.desc')
+            else:
+                query = "SELECT * FROM notifications WHERE user_id = ?"
+                params = [user_id]
+                
+                if unread_only:
+                    query += " AND read = 0"
+                
+                query += " ORDER BY created_at DESC LIMIT ?"
+                params.append(limit)
+                
+                notifications = self.client.execute_query(query, tuple(params), fetchall=True)
+            
+            return notifications or []
+            
+        except Exception as e:
+            logger.error(f"Error getting notifications: {e}")
+            return []
+    
+    def mark_notification_read(self, notification_id, user_id=None):
+        """Mark a notification as read"""
+        try:
+            filters = {'id': notification_id}
+            if user_id:
+                filters['user_id'] = user_id
+            
+            success = self.client.update('notifications', filters, {'read': 1}, use_cache=False)
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error marking notification read: {e}")
+            return False
+    
+    def mark_all_notifications_read(self, user_id):
+        """Mark all notifications as read for a user"""
+        try:
+            if self.use_supabase:
+                success = self.client.update('notifications', {'user_id': user_id, 'read': 0}, 
+                                           {'read': 1}, use_cache=False)
+            else:
+                success = self.client.execute_query(
+                    "UPDATE notifications SET read = 1 WHERE user_id = ? AND read = 0",
+                    (user_id,), commit=True
+                )
+                success = success is not None
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Error marking all notifications read: {e}")
+            return False
+    
+    # ============================================
+    # FEEDBACK SYSTEM - NEW
+    # ============================================
+    
+    def submit_feedback(self, event_id, username, rating, comments=None, anonymous=False):
+        """Submit feedback for an event"""
+        try:
+            # Check if already submitted feedback
+            existing = self.get_user_feedback(event_id, username)
+            if existing:
+                return False, "Feedback already submitted"
+            
+            feedback_record = {
+                'id': str(uuid.uuid4()),
+                'event_id': event_id,
+                'student_username': username,
+                'rating': rating,
+                'comments': comments,
+                'anonymous': 1 if anonymous else 0,
+                'submitted_at': datetime.now().isoformat()
+            }
+            
+            success = self.client.insert('event_feedback', feedback_record, use_cache=False)
+            
+            if success:
+                # Update registration to mark feedback provided
+                self.client.update('registrations', 
+                                 {'event_id': event_id, 'student_username': username},
+                                 {'feedback_provided': 1}, use_cache=False)
+                
+                # Award points for feedback
+                self.award_points(username, GAMIFICATION_CONFIG['points']['feedback_submission'],
+                                "feedback_submission", f"Feedback for event")
+                
+                return True, "Feedback submitted successfully"
+            
+            return False, "Failed to submit feedback"
+            
+        except Exception as e:
+            logger.error(f"Error submitting feedback: {e}")
+            return False, "Error submitting feedback"
+    
+    def get_user_feedback(self, event_id, username):
+        """Get feedback submitted by a user for an event"""
+        try:
+            if self.use_supabase:
+                results = self.client.select('event_feedback', 
+                                           {'event_id': event_id, 'student_username': username},
+                                           limit=1)
+                return results[0] if results else None
+            else:
+                return self.client.execute_query(
+                    "SELECT * FROM event_feedback WHERE event_id = ? AND student_username = ?",
+                    (event_id, username), fetchone=True
+                )
+        except Exception as e:
+            logger.error(f"Error getting user feedback: {e}")
+            return None
+    
+    def get_event_feedback(self, event_id, limit=50):
+        """Get all feedback for an event"""
+        try:
+            if self.use_supabase:
+                feedbacks = self.client.select('event_feedback', {'event_id': event_id},
+                                             limit=limit, order_by='submitted_at.desc')
+            else:
+                feedbacks = self.client.execute_query(
+                    "SELECT * FROM event_feedback WHERE event_id = ? ORDER BY submitted_at DESC LIMIT ?",
+                    (event_id, limit), fetchall=True
+                )
+            
+            return feedbacks or []
+            
+        except Exception as e:
+            logger.error(f"Error getting event feedback: {e}")
+            return []
+    
+    # ============================================
+    # HELPER METHODS
+    # ============================================
+    
+    def get_event_by_id(self, event_id):
+        """Get event by ID"""
+        cache_key = f"event_{event_id}"
+        if CACHE_ENABLED:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+        
+        try:
+            if self.use_supabase:
+                results = self.client.select('events', {'id': event_id}, limit=1)
+                event = results[0] if results else None
+            else:
+                event = self.client.execute_query(
+                    "SELECT * FROM events WHERE id = ?",
+                    (event_id,), fetchone=True
+                )
+            
+            if event and CACHE_ENABLED:
+                cache.set(cache_key, event, ttl=300)
+            
+            return event
+            
+        except Exception as e:
+            logger.error(f"Error getting event: {e}")
+            return None
+    
     def is_student_registered(self, event_id, username):
         """Check if student is registered for event"""
+        cache_key = f"registered_{event_id}_{username}"
+        if CACHE_ENABLED:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+        
         try:
             if self.use_supabase:
                 results = self.client.select('registrations', {
                     'event_id': event_id,
                     'student_username': username
-                }, limit=1, cache_ttl=30)
-                return bool(results)
+                }, limit=1, use_cache=False)
+                result = bool(results)
             else:
                 result = self.client.execute_query(
                     "SELECT id FROM registrations WHERE event_id = ? AND student_username = ?",
-                    (event_id, username), fetchone=True, cache_ttl=30
+                    (event_id, username), fetchone=True, use_cache=False
                 )
-                return result is not None
+                result = result is not None
+            
+            if CACHE_ENABLED:
+                cache.set(cache_key, result, ttl=60)
+            
+            return result
+            
         except Exception as e:
             logger.error(f"Error checking registration: {e}")
             return False
     
     # ============================================
-    # LIKES & INTEREST METHODS - COMPLETELY FIXED
+    # LIKES & INTEREST METHODS - OPTIMIZED
     # ============================================
     
     def add_like(self, event_id, student_username):
@@ -966,14 +2244,20 @@ class DatabaseManager:
                 'liked_at': datetime.now().isoformat()
             }
             
-            success = self.client.insert('event_likes', like_record)
+            success = self.client.insert('event_likes', like_record, use_cache=False)
             
             if success:
                 # Clear cache
-                if hasattr(self.client, 'clear_cache'):
-                    self.client.clear_cache()
+                cache.delete(f"liked_{event_id}_{student_username}")
+                cache.delete(f"likes_count_{event_id}")
+                cache.delete(f"liked_events_{student_username}")
+                
+                # Update event popularity
+                self._update_event_popularity(event_id)
+                
                 return True
             return False
+            
         except Exception as e:
             logger.error(f"Error adding like: {e}")
             return False
@@ -984,266 +2268,120 @@ class DatabaseManager:
             success = self.client.delete('event_likes', {
                 'event_id': event_id,
                 'student_username': student_username
-            })
+            }, use_cache=False)
             
             if success:
                 # Clear cache
-                if hasattr(self.client, 'clear_cache'):
-                    self.client.clear_cache()
+                cache.delete(f"liked_{event_id}_{student_username}")
+                cache.delete(f"likes_count_{event_id}")
+                cache.delete(f"liked_events_{student_username}")
+                
+                # Update event popularity
+                self._update_event_popularity(event_id)
+                
                 return True
             return False
+            
         except Exception as e:
             logger.error(f"Error removing like: {e}")
             return False
     
     def is_event_liked(self, event_id, student_username):
         """Check if student liked an event"""
+        cache_key = f"liked_{event_id}_{student_username}"
+        if CACHE_ENABLED:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+        
         try:
             if self.use_supabase:
                 results = self.client.select('event_likes', {
                     'event_id': event_id,
                     'student_username': student_username
-                }, limit=1, cache_ttl=30)
-                return bool(results)
+                }, limit=1, use_cache=False)
+                result = bool(results)
             else:
                 result = self.client.execute_query(
                     "SELECT id FROM event_likes WHERE event_id = ? AND student_username = ?",
-                    (event_id, student_username), fetchone=True, cache_ttl=30
+                    (event_id, student_username), fetchone=True, use_cache=False
                 )
-                return result is not None
+                result = result is not None
+            
+            if CACHE_ENABLED:
+                cache.set(cache_key, result, ttl=300)
+            
+            return result
+            
         except Exception as e:
             logger.error(f"Error checking like: {e}")
             return False
     
     def get_event_likes_count(self, event_id):
         """Get total likes for an event"""
+        cache_key = f"likes_count_{event_id}"
+        if CACHE_ENABLED:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+        
         try:
             if self.use_supabase:
-                likes = self.client.select('event_likes', {'event_id': event_id}, cache_ttl=30)
-                return len(likes) if likes else 0
+                likes = self.client.select('event_likes', {'event_id': event_id}, use_cache=False)
+                count = len(likes) if likes else 0
             else:
                 result = self.client.execute_query(
                     "SELECT COUNT(*) as count FROM event_likes WHERE event_id = ?",
-                    (event_id,), fetchone=True, cache_ttl=30
+                    (event_id,), fetchone=True, use_cache=False
                 )
-                return result['count'] if result else 0
+                count = result['count'] if result else 0
+            
+            if CACHE_ENABLED:
+                cache.set(cache_key, count, ttl=60)
+            
+            return count
+            
         except Exception as e:
             logger.error(f"Error getting likes count: {e}")
             return 0
     
-    def add_interested(self, event_id, student_username):
-        """Add interested for an event"""
+    def _update_event_popularity(self, event_id):
+        """Update event popularity score"""
         try:
-            # Check if already interested
-            if self.is_event_interested(event_id, student_username):
-                return False
+            likes = self.get_event_likes_count(event_id)
+            interested = self.get_event_interested_count(event_id)
+            registrations = self._get_event_registration_count(event_id)
             
-            interested_record = {
-                'id': str(uuid.uuid4()),
-                'event_id': event_id,
-                'student_username': student_username,
-                'interested_at': datetime.now().isoformat()
-            }
+            # Simple popularity formula (can be enhanced)
+            popularity = (likes * 0.3) + (interested * 0.4) + (registrations * 0.3)
             
-            success = self.client.insert('event_interested', interested_record)
+            self.client.update('events', {'id': event_id}, {
+                'popularity_score': popularity,
+                'updated_at': datetime.now().isoformat()
+            }, use_cache=False)
             
-            if success:
-                # Clear cache
-                if hasattr(self.client, 'clear_cache'):
-                    self.client.clear_cache()
-                return True
-            return False
+            cache.delete(f"event_{event_id}")
+            
         except Exception as e:
-            logger.error(f"Error adding interested: {e}")
-            return False
+            logger.error(f"Error updating popularity: {e}")
     
-    def remove_interested(self, event_id, student_username):
-        """Remove interested for an event"""
-        try:
-            success = self.client.delete('event_interested', {
-                'event_id': event_id,
-                'student_username': student_username
-            })
-            
-            if success:
-                # Clear cache
-                if hasattr(self.client, 'clear_cache'):
-                    self.client.clear_cache()
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"Error removing interested: {e}")
-            return False
-    
-    def is_event_interested(self, event_id, student_username):
-        """Check if student is interested in an event"""
+    def _get_event_registration_count(self, event_id):
+        """Get registration count for event"""
         try:
             if self.use_supabase:
-                results = self.client.select('event_interested', {
-                    'event_id': event_id,
-                    'student_username': student_username
-                }, limit=1, cache_ttl=30)
-                return bool(results)
+                regs = self.client.select('registrations', {'event_id': event_id}, use_cache=False)
+                return len(regs) if regs else 0
             else:
                 result = self.client.execute_query(
-                    "SELECT id FROM event_interested WHERE event_id = ? AND student_username = ?",
-                    (event_id, student_username), fetchone=True, cache_ttl=30
-                )
-                return result is not None
-        except Exception as e:
-            logger.error(f"Error checking interested: {e}")
-            return False
-    
-    def get_event_interested_count(self, event_id):
-        """Get total interested count for an event"""
-        try:
-            if self.use_supabase:
-                interested = self.client.select('event_interested', {'event_id': event_id}, cache_ttl=30)
-                return len(interested) if interested else 0
-            else:
-                result = self.client.execute_query(
-                    "SELECT COUNT(*) as count FROM event_interested WHERE event_id = ?",
-                    (event_id,), fetchone=True, cache_ttl=30
+                    "SELECT COUNT(*) as count FROM registrations WHERE event_id = ?",
+                    (event_id,), fetchone=True, use_cache=False
                 )
                 return result['count'] if result else 0
-        except Exception as e:
-            logger.error(f"Error getting interested count: {e}")
+        except:
             return 0
     
-    def get_student_liked_events(self, student_username):
-        """Get all events liked by a student - FIXED"""
-        try:
-            if self.use_supabase:
-                # Get all liked event IDs first
-                likes = self.client.select('event_likes', {'student_username': student_username}, cache_ttl=60)
-                if not likes:
-                    return []
-                
-                # Get all events
-                all_events = self.get_all_events(cache_ttl=60)
-                if not all_events:
-                    return []
-                
-                # Filter events that are liked
-                liked_event_ids = {like['event_id'] for like in likes}
-                liked_events = [event for event in all_events if event.get('id') in liked_event_ids]
-                
-                # Sort by most recent like (we'll approximate by event date)
-                liked_events.sort(key=lambda x: x.get('event_date', ''), reverse=True)
-                
-                return liked_events
-            else:
-                return self.client.execute_query(
-                    "SELECT e.* FROM events e JOIN event_likes l ON e.id = l.event_id WHERE l.student_username = ? ORDER BY e.event_date DESC",
-                    (student_username,), fetchall=True, cache_ttl=60
-                ) or []
-        except Exception as e:
-            logger.error(f"Error getting liked events: {e}")
-            return []
-    
-    def get_student_interested_events(self, student_username):
-        """Get all events student is interested in - FIXED"""
-        try:
-            if self.use_supabase:
-                # Get all interested event IDs first
-                interests = self.client.select('event_interested', {'student_username': student_username}, cache_ttl=60)
-                if not interests:
-                    return []
-                
-                # Get all events
-                all_events = self.get_all_events(cache_ttl=60)
-                if not all_events:
-                    return []
-                
-                # Filter events that are interested
-                interested_event_ids = {interest['event_id'] for interest in interests}
-                interested_events = [event for event in all_events if event.get('id') in interested_event_ids]
-                
-                # Sort by most recent interest (approximate by event date)
-                interested_events.sort(key=lambda x: x.get('event_date', ''), reverse=True)
-                
-                return interested_events
-            else:
-                return self.client.execute_query(
-                    "SELECT e.* FROM events e JOIN event_interested i ON e.id = i.event_id WHERE i.student_username = ? ORDER BY e.event_date DESC",
-                    (student_username,), fetchall=True, cache_ttl=60
-                ) or []
-        except Exception as e:
-            logger.error(f"Error getting interested events: {e}")
-            return []
-    
     # ============================================
-    # GAMIFICATION METHODS
-    # ============================================
-    
-    def get_student_points(self, username):
-        """Get student's total points"""
-        try:
-            user = self.get_user(username)
-            if user:
-                return user.get('total_points', 0)
-            return 0
-        except Exception as e:
-            logger.error(f"Error getting points: {e}")
-            return 0
-    
-    def get_leaderboard(self, limit=15, department=None, cache_ttl=300):
-        """Get leaderboard of top students"""
-        try:
-            if self.use_supabase:
-                # Get all students
-                filters = {'role': 'student'}
-                if department:
-                    filters['department'] = department
-                
-                users = self.client.select('users', filters, limit=1000, cache_ttl=cache_ttl)
-                if not users:
-                    return []
-                
-                # Sort by points
-                users.sort(key=lambda x: x.get('total_points', 0), reverse=True)
-                
-                # Add rank
-                for i, user in enumerate(users[:limit], 1):
-                    user['rank'] = i
-                
-                return users[:limit]
-            else:
-                query = "SELECT * FROM users WHERE role = 'student'"
-                params = []
-                
-                if department:
-                    query += " AND department = ?"
-                    params.append(department)
-                
-                query += " ORDER BY total_points DESC, name ASC LIMIT ?"
-                params.append(limit)
-                
-                results = self.client.execute_query(query, tuple(params), fetchall=True, cache_ttl=cache_ttl) or []
-                
-                # Add rank
-                for i, result in enumerate(results, 1):
-                    result['rank'] = i
-                
-                return results
-        except Exception as e:
-            logger.error(f"Error getting leaderboard: {e}")
-            return []
-    
-    def get_student_rank(self, username):
-        """Get student's rank in leaderboard"""
-        try:
-            leaderboard = self.get_leaderboard(limit=1000, cache_ttl=300)
-            for i, student in enumerate(leaderboard, 1):
-                if student['username'] == username:
-                    return i
-            return None
-        except Exception as e:
-            logger.error(f"Error getting student rank: {e}")
-            return None
-    
-    # ============================================
-    # DEFAULT USERS - NO PASSWORD FIX NEEDED
+    # DEFAULT USERS - ENHANCED
     # ============================================
     
     def _add_default_users(self):
@@ -1257,7 +2395,8 @@ class DatabaseManager:
                     'name': 'Administrator',
                     'role': 'admin',
                     'email': 'admin@ghraisoni.edu',
-                    'department': 'Administration'
+                    'department': 'Administration',
+                    'avatar_url': '👨‍💼'
                 },
                 {
                     'id': '00000000-0000-0000-0000-000000000002',
@@ -1266,14 +2405,27 @@ class DatabaseManager:
                     'name': 'Faculty Coordinator',
                     'role': 'faculty',
                     'email': 'faculty@ghraisoni.edu',
-                    'department': 'Faculty'
+                    'department': 'Faculty',
+                    'avatar_url': '👨‍🏫'
+                },
+                {
+                    'id': '00000000-0000-0000-0000-000000000003',
+                    'username': 'mentor@raisoni',
+                    'password': 'Mentor@12345',
+                    'name': 'Senior Mentor',
+                    'role': 'mentor',
+                    'email': 'mentor@ghraisoni.edu',
+                    'department': 'Mentorship',
+                    'avatar_url': '👨‍🏫'
                 }
             ]
             
             for user_data in default_users:
-                existing = self.get_user(user_data['username'])
+                existing = self.get_user(user_data['username'], use_cache=False)
                 if not existing:
                     success, message = self.add_user(user_data)
+                    if success:
+                        logger.info(f"Added default user: {user_data['username']}")
             
             # Add default students
             self._add_default_students()
@@ -1296,7 +2448,10 @@ class DatabaseManager:
                     'department': 'Computer Science & Engineering',
                     'year': 'III',
                     'email': 'rohan.sharma@ghraisoni.edu',
-                    'mobile': '9876543210'
+                    'mobile': '9876543210',
+                    'avatar_url': '👨‍🎓',
+                    'bio': 'Passionate about AI and Machine Learning',
+                    'skills': ['Python', 'Machine Learning', 'Web Development']
                 },
                 {
                     'name': 'Priya Patel',
@@ -1306,12 +2461,28 @@ class DatabaseManager:
                     'department': 'Artificial Intelligence & Machine Learning',
                     'year': 'II',
                     'email': 'priya.patel@ghraisoni.edu',
-                    'mobile': '9876543211'
+                    'mobile': '9876543211',
+                    'avatar_url': '👩‍🎓',
+                    'bio': 'Data Science enthusiast and competitive programmer',
+                    'skills': ['Data Science', 'Python', 'SQL', 'Statistics']
+                },
+                {
+                    'name': 'Amit Kumar',
+                    'username': 'amit@student',
+                    'password': 'Student@123',
+                    'roll_no': 'ECE2023003',
+                    'department': 'Electronics & Communication',
+                    'year': 'IV',
+                    'email': 'amit.kumar@ghraisoni.edu',
+                    'mobile': '9876543212',
+                    'avatar_url': '👨‍🔬',
+                    'bio': 'IoT and Embedded Systems developer',
+                    'skills': ['Embedded Systems', 'C++', 'IoT', 'Circuit Design']
                 }
             ]
             
             for student in default_students:
-                existing = self.get_user(student['username'])
+                existing = self.get_user(student['username'], use_cache=False)
                 if not existing:
                     user_data = {
                         'name': student['name'],
@@ -1322,10 +2493,17 @@ class DatabaseManager:
                         'year': student['year'],
                         'email': student['email'],
                         'mobile': student['mobile'],
+                        'avatar_url': student.get('avatar_url', '👤'),
+                        'bio': student.get('bio', ''),
+                        'skills': student.get('skills', []),
                         'role': 'student'
                     }
                     
                     success, message = self.add_user(user_data)
+                    if success:
+                        # Award some initial points
+                        self.award_points(student['username'], 250, "welcome", "Welcome bonus")
+                        logger.info(f"Added default student: {student['username']}")
             
             return True
             
@@ -1334,14 +2512,14 @@ class DatabaseManager:
             return False
 
 # ============================================
-# DATABASE INITIALIZATION - FIXED
+# DATABASE INITIALIZATION
 # ============================================
 
 # Initialize database
 db = DatabaseManager(use_supabase=USE_SUPABASE)
 
 # ============================================
-# HELPER FUNCTIONS
+# HELPER FUNCTIONS - ENHANCED
 # ============================================
 
 @st.cache_data(ttl=300)
@@ -1366,9 +2544,55 @@ def format_date(date_str):
     except:
         return str(date_str)
 
-def get_event_status(event_date):
+@st.cache_data(ttl=300)
+def format_date_relative(date_str):
+    """Format date as relative time (e.g., "2 days ago")"""
+    try:
+        if isinstance(date_str, str):
+            # Try to parse date
+            for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                try:
+                    dt = datetime.strptime(date_str, fmt)
+                    break
+                except:
+                    continue
+            else:
+                # Try ISO format
+                dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        else:
+            dt = date_str
+        
+        now = datetime.now()
+        diff = now - dt
+        
+        if diff.days > 365:
+            years = diff.days // 365
+            return f"{years} year{'s' if years > 1 else ''} ago"
+        elif diff.days > 30:
+            months = diff.days // 30
+            return f"{months} month{'s' if months > 1 else ''} ago"
+        elif diff.days > 0:
+            return f"{diff.days} day{'s' if diff.days > 1 else ''} ago"
+        elif diff.seconds > 3600:
+            hours = diff.seconds // 3600
+            return f"{hours} hour{'s' if hours > 1 else ''} ago"
+        elif diff.seconds > 60:
+            minutes = diff.seconds // 60
+            return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+        else:
+            return "Just now"
+    except:
+        return "Unknown time"
+
+def get_event_status(event_date, end_date=None, status=None):
     """Get event status badge"""
     try:
+        if status and status in ['cancelled', 'completed']:
+            if status == 'cancelled':
+                return '<span style="background: #F3F4F6; color: #6B7280; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">⚫ Cancelled</span>'
+            else:
+                return '<span style="background: #E5E7EB; color: #374151; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🔴 Completed</span>'
+        
         if isinstance(event_date, str):
             # Try to parse date
             for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
@@ -1384,10 +2608,30 @@ def get_event_status(event_date):
             dt = event_date
         
         now = datetime.now()
+        
+        # Check if event has end date
+        if end_date:
+            try:
+                if isinstance(end_date, str):
+                    end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                else:
+                    end_dt = end_date
+                
+                if end_dt < now:
+                    return '<span style="background: #E5E7EB; color: #374151; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🔴 Completed</span>'
+                elif dt <= now <= end_dt:
+                    return '<span style="background: #FEF3C7; color: #92400E; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🟡 Ongoing</span>'
+            except:
+                pass
+        
         if dt > now:
-            return '<span style="background: #D1FAE5; color: #065F46; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🟢 Upcoming</span>'
+            days_diff = (dt - now).days
+            if days_diff <= 7:
+                return '<span style="background: #D1FAE5; color: #065F46; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🟢 Soon</span>'
+            else:
+                return '<span style="background: #D1FAE5; color: #065F46; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🟢 Upcoming</span>'
         elif dt.date() == now.date():
-            return '<span style="background: #FEF3C7; color: #92400E; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🟡 Ongoing</span>'
+            return '<span style="background: #FEF3C7; color: #92400E; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🟡 Today</span>'
         else:
             return '<span style="background: #FEE2E2; color: #DC2626; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🔴 Past</span>'
     except:
@@ -1400,7 +2644,8 @@ def save_flyer_image(uploaded_file):
     
     try:
         image_bytes = uploaded_file.getvalue()
-        if len(image_bytes) > 5 * 1024 * 1024:  # 5MB limit
+        if len(image_bytes) > 10 * 1024 * 1024:  # 10MB limit
+            st.warning("Image size too large. Please use images under 10MB.")
             return None
         
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
@@ -1411,7 +2656,8 @@ def save_flyer_image(uploaded_file):
             '.jpeg': 'image/jpeg',
             '.png': 'image/png',
             '.gif': 'image/gif',
-            '.webp': 'image/webp'
+            '.webp': 'image/webp',
+            '.svg': 'image/svg+xml'
         }
         
         mime_type = mime_types.get(file_ext, 'image/jpeg')
@@ -1420,12 +2666,141 @@ def save_flyer_image(uploaded_file):
         logger.error(f"Error processing flyer image: {e}")
         return None
 
+def generate_avatar_url(name, size=100):
+    """Generate avatar URL based on name"""
+    # Using DiceBear avatars (free service)
+    style = "avataaars"  # Options: avataaars, personas, initials, etc.
+    seed = name.replace(" ", "").lower()
+    return f"https://api.dicebear.com/7.x/{style}/png?seed={seed}&size={size}"
+
+def calculate_level_progress(points, current_level):
+    """Calculate level progress percentage"""
+    level_config = GAMIFICATION_CONFIG['levels'].get(current_level, {})
+    next_level_config = GAMIFICATION_CONFIG['levels'].get(current_level + 1, {})
+    
+    if not next_level_config:
+        return 100
+    
+    current_level_points = level_config.get('points_required', 0)
+    next_level_points = next_level_config.get('points_required', 0)
+    
+    if next_level_points <= current_level_points:
+        return 100
+    
+    points_in_level = points - current_level_points
+    points_needed = next_level_points - current_level_points
+    
+    progress = (points_in_level / points_needed) * 100
+    return min(100, max(0, progress))
+
 # ============================================
-# EVENT CARD DISPLAY - COMPLETELY FIXED
+# VISUALIZATION FUNCTIONS - NEW
 # ============================================
 
-def display_event_card(event, current_user=None):
-    """Display event card with all interactions - COMPLETELY FIXED"""
+def create_points_chart(points_history):
+    """Create a chart showing points progression"""
+    if not points_history:
+        return None
+    
+    df = pd.DataFrame(points_history)
+    if 'date' in df.columns and 'points' in df.columns:
+        fig = px.line(df, x='date', y='points', 
+                     title='Points Progression',
+                     labels={'date': 'Date', 'points': 'Points'},
+                     template='plotly_white')
+        fig.update_traces(mode='lines+markers', line=dict(width=3))
+        fig.update_layout(
+            xaxis_title='Date',
+            yaxis_title='Points',
+            hovermode='x unified'
+        )
+        return fig
+    return None
+
+def create_department_stats_chart(department_stats):
+    """Create a bar chart for department statistics"""
+    if not department_stats:
+        return None
+    
+    df = pd.DataFrame(department_stats)
+    if 'department' in df.columns and 'total_points' in df.columns:
+        fig = px.bar(df, x='department', y='total_points',
+                    title='Department Points Comparison',
+                    labels={'department': 'Department', 'total_points': 'Total Points'},
+                    color='total_points',
+                    color_continuous_scale='Viridis',
+                    template='plotly_white')
+        fig.update_layout(
+            xaxis_title='Department',
+            yaxis_title='Total Points',
+            xaxis_tickangle=-45
+        )
+        return fig
+    return None
+
+def create_event_type_chart(event_stats):
+    """Create a pie chart for event type distribution"""
+    if not event_stats or 'type_counts' not in event_stats:
+        return None
+    
+    type_counts = event_stats['type_counts']
+    if not type_counts:
+        return None
+    
+    labels = list(type_counts.keys())
+    values = list(type_counts.values())
+    
+    fig = px.pie(names=labels, values=values,
+                title='Event Type Distribution',
+                hole=0.3,
+                template='plotly_white')
+    fig.update_traces(textposition='inside', textinfo='percent+label')
+    
+    return fig
+
+def create_leaderboard_visualization(leaderboard_data, title="Top Performers"):
+    """Create a horizontal bar chart for leaderboard"""
+    if not leaderboard_data:
+        return None
+    
+    df = pd.DataFrame(leaderboard_data)
+    if 'name' in df.columns and 'points' in df.columns:
+        # Sort by points
+        df = df.sort_values('points', ascending=True)
+        
+        fig = px.bar(df, y='name', x='points',
+                    title=title,
+                    labels={'name': 'Student', 'points': 'Points'},
+                    color='points',
+                    color_continuous_scale='Viridis',
+                    orientation='h',
+                    template='plotly_white')
+        
+        fig.update_layout(
+            yaxis_title='Student',
+            xaxis_title='Points',
+            showlegend=False
+        )
+        
+        # Add rank labels
+        for i, row in enumerate(df.itertuples()):
+            fig.add_annotation(
+                x=row.points + (df['points'].max() * 0.02),
+                y=row.name,
+                text=f"#{i+1}",
+                showarrow=False,
+                font=dict(size=12, color='white')
+            )
+        
+        return fig
+    return None
+
+# ============================================
+# EVENT CARD DISPLAY - ENHANCED
+# ============================================
+
+def display_event_card(event, current_user=None, show_actions=True):
+    """Display event card with all interactions - ENHANCED"""
     if not event or not event.get('id'):
         return
     
@@ -1434,7 +2809,7 @@ def display_event_card(event, current_user=None):
     with st.container():
         st.markdown('<div class="event-card">', unsafe_allow_html=True)
         
-        # Create two-column layout
+        # Create columns layout
         col_img, col_info = st.columns([1, 3], gap="medium")
         
         with col_img:
@@ -1446,24 +2821,67 @@ def display_event_card(event, current_user=None):
                 except:
                     st.markdown('<div style="width: 100%; height: 150px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; border-radius: 8px;"><span style="font-size: 32px; color: white;">🎯</span></div>', unsafe_allow_html=True)
             else:
-                st.markdown('<div style="width: 100%; height: 150px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; border-radius: 8px;"><span style="font-size: 32px; color: white;">🎯</span></div>', unsafe_allow_html=True)
+                # Generate gradient based on event type
+                event_type = event.get('event_type', 'Event').lower()
+                colors = {
+                    'workshop': ('#4F46E5', '#7C3AED'),
+                    'hackathon': ('#059669', '#10B981'),
+                    'seminar': ('#DC2626', '#EA580C'),
+                    'conference': ('#7C3AED', '#A78BFA'),
+                    'cultural': ('#DB2777', '#EC4899')
+                }
+                color_from, color_to = colors.get(event_type, ('#667eea', '#764ba2'))
+                
+                st.markdown(f'''
+                <div style="width: 100%; height: 150px; background: linear-gradient(135deg, {color_from} 0%, {color_to} 100%); 
+                display: flex; align-items: center; justify-content: center; border-radius: 8px; position: relative;">
+                    <span style="font-size: 48px; color: white;">{get_event_emoji(event.get('event_type'))}</span>
+                    <div style="position: absolute; bottom: 8px; right: 8px; background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 12px; font-size: 0.7rem; color: white;">
+                        {event.get('event_category', 'Event')}
+                    </div>
+                </div>
+                ''', unsafe_allow_html=True)
         
         with col_info:
-            # Header with title
+            # Header with title and badges
             title = event.get('title', 'Untitled Event')
             if len(title) > 60:
                 title = title[:57] + "..."
-            st.markdown(f'<div class="card-title">{title}</div>', unsafe_allow_html=True)
+            
+            # Difficulty badge
+            difficulty = event.get('difficulty_level', 'Beginner')
+            difficulty_colors = {
+                'Beginner': '#10B981',
+                'Intermediate': '#F59E0B',
+                'Advanced': '#DC2626',
+                'Expert': '#7C3AED'
+            }
+            difficulty_color = difficulty_colors.get(difficulty, '#6B7280')
+            
+            st.markdown(f'''
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                <div class="card-title">{title}</div>
+                <div style="background: {difficulty_color}; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.7rem;">
+                    {difficulty}
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
             
             # Status and date
             event_date = event.get('event_date')
-            status_html = get_event_status(event_date)
+            end_date = event.get('end_date')
+            status = event.get('status')
+            status_html = get_event_status(event_date, end_date, status)
             formatted_date = format_date(event_date)
+            
+            # Duration
+            duration = event.get('estimated_duration')
+            duration_text = f"⏱️ {duration} min" if duration else ""
             
             st.markdown(f'''
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <div>{status_html}</div>
-                <div style="color: #666; font-size: 0.9rem;">📅 {formatted_date}</div>
+                <div style="color: #666; font-size: 0.9rem;">📅 {formatted_date} {duration_text}</div>
             </div>
             ''', unsafe_allow_html=True)
             
@@ -1476,19 +2894,34 @@ def display_event_card(event, current_user=None):
             max_participants = event.get('max_participants', 100)
             current_participants = event.get('current_participants', 0)
             
-            st.caption(f"📍 {venue} | 🏷️ {event_type} | 👥 {current_participants}/{max_participants}")
+            # Progress bar for participants
+            participation_rate = (current_participants / max_participants) * 100 if max_participants > 0 else 0
+            progress_color = '#10B981' if participation_rate < 80 else '#F59E0B' if participation_rate < 95 else '#DC2626'
+            
+            st.markdown(f'''
+            <div style="margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; font-size: 0.9rem; margin-bottom: 4px;">
+                    <span>📍 {venue} | 🏷️ {event_type}</span>
+                    <span>👥 {current_participants}/{max_participants}</span>
+                </div>
+                <div style="width: 100%; height: 6px; background: #E5E7EB; border-radius: 3px; overflow: hidden;">
+                    <div style="width: {participation_rate}%; height: 100%; background: {progress_color}; border-radius: 3px;"></div>
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
             
             # Engagement metrics
             likes_count = db.get_event_likes_count(event_id)
             interested_count = db.get_event_interested_count(event_id)
+            views_count = event.get('views_count', 0)
             
             # Create buttons container
-            if current_user:
+            if current_user and show_actions:
                 # Engagement buttons
-                button_col1, button_col2, button_col3 = st.columns(3)
+                button_col1, button_col2, button_col3, button_col4 = st.columns(4)
                 
                 with button_col1:
-                    # Like button - FIXED
+                    # Like button
                     is_liked = db.is_event_liked(event_id, current_user)
                     like_btn_text = "❤️ Liked" if is_liked else "🤍 Like"
                     like_btn_type = "secondary" if is_liked else "primary"
@@ -1499,16 +2932,16 @@ def display_event_card(event, current_user=None):
                         if is_liked:
                             if db.remove_like(event_id, current_user):
                                 st.success("Like removed!")
-                                time.sleep(0.5)
+                                time.sleep(0.3)
                                 st.rerun()
                         else:
                             if db.add_like(event_id, current_user):
                                 st.success("Event liked!")
-                                time.sleep(0.5)
+                                time.sleep(0.3)
                                 st.rerun()
                 
                 with button_col2:
-                    # Interested button - FIXED
+                    # Interested button
                     is_interested = db.is_event_interested(event_id, current_user)
                     interested_btn_text = "⭐ Interested" if is_interested else "☆ Interested"
                     interested_btn_type = "secondary" if is_interested else "primary"
@@ -1519,47 +2952,65 @@ def display_event_card(event, current_user=None):
                         if is_interested:
                             if db.remove_interested(event_id, current_user):
                                 st.success("Removed from interested!")
-                                time.sleep(0.5)
+                                time.sleep(0.3)
                                 st.rerun()
                         else:
                             if db.add_interested(event_id, current_user):
                                 st.success("Marked as interested!")
-                                time.sleep(0.5)
+                                time.sleep(0.3)
                                 st.rerun()
                 
                 with button_col3:
-                    # Share button - FIXED with better feedback
+                    # Share button
                     if st.button("📤 Share", key=f"share_{event_id}_{current_user}",
                                use_container_width=True, type="secondary",
                                help="Share this event"):
                         event_title = event.get('title', 'Cool Event')
                         share_text = f"Check out '{event_title}' at G H Raisoni College Event Manager!\n\nEvent Date: {formatted_date}\nVenue: {venue}\n\nJoin the platform to discover more events!"
                         
-                        # Show success message
-                        st.success("📋 Share message copied to clipboard!")
-                        
-                        # Create a temporary text area to copy from
-                        import pyperclip
-                        try:
-                            pyperclip.copy(share_text)
-                        except:
-                            # Fallback if pyperclip doesn't work
-                            st.code(share_text)
-                            st.info("Please copy the text above to share")
+                        # Create copy to clipboard functionality
+                        st.code(share_text)
+                        st.info("📋 Copy the text above to share")
+                
+                with button_col4:
+                    # Save/Bookmark button (placeholder)
+                    if st.button("🔖 Save", key=f"save_{event_id}_{current_user}",
+                               use_container_width=True, type="secondary",
+                               help="Save for later"):
+                        st.info("Save feature coming soon!")
             
             # Show engagement counts
-            st.caption(f"❤️ {likes_count} Likes | ⭐ {interested_count} Interested")
+            st.caption(f"❤️ {likes_count} Likes | ⭐ {interested_count} Interested | 👁️ {views_count} Views")
+            
+            # Tags
+            tags = event.get('tags')
+            if tags and isinstance(tags, str):
+                try:
+                    tags_list = json.loads(tags)
+                    if tags_list:
+                        tags_html = " ".join([f'<span style="background: #E0F2FE; color: #0369A1; padding: 2px 8px; border-radius: 12px; font-size: 0.75rem; margin-right: 4px;">{tag}</span>' for tag in tags_list[:3]])
+                        st.markdown(f'<div style="margin-top: 8px;">{tags_html}</div>', unsafe_allow_html=True)
+                except:
+                    pass
             
             # Event links
             event_link = event.get('event_link', '')
             registration_link = event.get('registration_link', '')
             
             if event_link or registration_link:
-                with st.expander("🔗 Event Links", expanded=False):
+                with st.expander("🔗 Event Links & Details", expanded=False):
                     if event_link:
                         st.markdown(f"**🌐 Event Page:** [Click here]({event_link})")
                     if registration_link:
                         st.markdown(f"**📝 Registration:** [Click here]({registration_link})")
+                    
+                    # Additional details
+                    if event.get('has_certificate'):
+                        st.markdown("**🎓 Certificate:** Yes")
+                    
+                    prerequisites = event.get('prerequisites')
+                    if prerequisites:
+                        st.markdown(f"**📋 Prerequisites:** {prerequisites}")
             
             # Description
             desc = event.get('description', '')
@@ -1570,14 +3021,23 @@ def display_event_card(event, current_user=None):
                 else:
                     st.caption(desc[:150] + "..." if len(desc) > 150 else desc)
         
-        # Registration Section - FIXED
-        if current_user and st.session_state.get('role') == 'student':
+        # Registration Section
+        if current_user and st.session_state.get('role') == 'student' and show_actions:
             st.markdown('<div class="registration-section">', unsafe_allow_html=True)
             
             is_registered = db.is_student_registered(event_id, current_user)
             
             if is_registered:
                 st.success("✅ You are already registered for this event")
+                
+                # Check if event allows feedback
+                event_status = event.get('status')
+                if event_status in ['completed', 'ongoing']:
+                    # Feedback button
+                    if st.button("💬 Provide Feedback", key=f"feedback_{event_id}_{current_user}",
+                               use_container_width=True, type="secondary"):
+                        st.session_state.feedback_event_id = event_id
+                        st.rerun()
                 
                 # External registration button
                 if registration_link:
@@ -1589,7 +3049,8 @@ def display_event_card(event, current_user=None):
                         if db.use_supabase:
                             success = db.client.update('registrations', 
                                                      {'event_id': event_id, 'student_username': current_user},
-                                                     {'status': 'confirmed', 'updated_at': datetime.now().isoformat()})
+                                                     {'status': 'confirmed', 'updated_at': datetime.now().isoformat()},
+                                                     use_cache=False)
                         else:
                             cursor = db.client.conn.cursor()
                             cursor.execute("UPDATE registrations SET status = 'confirmed', updated_at = ? WHERE event_id = ? AND student_username = ?",
@@ -1599,14 +3060,14 @@ def display_event_card(event, current_user=None):
                         
                         if success:
                             st.success("✅ External registration recorded!")
-                            time.sleep(0.5)
+                            time.sleep(0.3)
                             st.rerun()
             else:
                 # Registration options
                 reg_col1, reg_col2 = st.columns(2)
                 
                 with reg_col1:
-                    # Register in App button - FIXED
+                    # Register in App button
                     if st.button("📱 Register in App", 
                                 key=f"app_reg_{event_id}_{current_user}",
                                 use_container_width=True,
@@ -1624,7 +3085,7 @@ def display_event_card(event, current_user=None):
                             reg_id, message = db.add_registration(reg_data)
                             if reg_id:
                                 st.success("✅ Registered in college system!")
-                                time.sleep(0.5)
+                                time.sleep(0.3)
                                 st.rerun()
                             else:
                                 st.error(message)
@@ -1639,57 +3100,126 @@ def display_event_card(event, current_user=None):
             
             st.markdown('</div>', unsafe_allow_html=True)
         
-        # Creator info
+        # Creator info and popularity
         created_by = event.get('created_by_name', 'Unknown')
-        st.caption(f"👤 Created by: {created_by}")
+        popularity = event.get('popularity_score', 0)
+        
+        col_creator, col_pop = st.columns([3, 1])
+        with col_creator:
+            st.caption(f"👤 Created by: {created_by}")
+        with col_pop:
+            if popularity > 0:
+                st.caption(f"🔥 {popularity:.1f}")
         
         st.markdown('</div>', unsafe_allow_html=True)
 
+def get_event_emoji(event_type):
+    """Get emoji for event type"""
+    emoji_map = {
+        'Workshop': '🔧',
+        'Hackathon': '💻',
+        'Competition': '🏆',
+        'Bootcamp': '🚀',
+        'Seminar': '🎓',
+        'Conference': '👥',
+        'Webinar': '🖥️',
+        'Training': '📚',
+        'Symposium': '🗣️',
+        'Cultural Event': '🎭',
+        'Guest Lecture': '🎤',
+        'Industrial Visit': '🏭',
+        'Sports Event': '⚽',
+        'Technical Fest': '🔬',
+        'Placement Drive': '💼',
+        'Alumni Talk': '👨‍🎓',
+        'Research Symposium': '🔍'
+    }
+    return emoji_map.get(event_type, '🎯')
+
 # ============================================
-# STUDENT DASHBOARD - FIXED
+# STUDENT DASHBOARD - ENHANCED
 # ============================================
 
 def student_dashboard():
-    """Student dashboard with all features - FIXED"""
+    """Student dashboard with enhanced features"""
     # Sidebar
     st.sidebar.title("👨‍🎓 Student Panel")
-    st.sidebar.markdown(f"**User:** {st.session_state.name}")
     
-    # Get student info
+    # Student info
     student = db.get_user(st.session_state.username)
     if student:
-        st.sidebar.markdown(f"**Roll No:** {student.get('roll_no', 'N/A')}")
-        st.sidebar.markdown(f"**Department:** {student.get('department', 'N/A')}")
-        st.sidebar.markdown(f"**Year:** {student.get('year', 'N/A')}")
+        # Avatar and name
+        col_avatar, col_name = st.sidebar.columns([1, 3])
+        with col_avatar:
+            avatar = student.get('avatar_url', '👤')
+            st.markdown(f'<div style="font-size: 2rem;">{avatar}</div>', unsafe_allow_html=True)
+        with col_name:
+            st.markdown(f"**{student.get('name')}**")
+            st.caption(f"@{student.get('username')}")
+        
+        st.sidebar.markdown("---")
+        
+        # Level and points
+        current_level = db.get_student_level(st.session_state.username)
+        current_points = db.get_student_points(st.session_state.username)
+        level_config = GAMIFICATION_CONFIG['levels'].get(current_level, {})
+        
+        st.sidebar.markdown(f"### Level {current_level}: {level_config.get('name', 'Beginner')}")
+        
+        # Progress bar
+        progress = db.get_level_progress(st.session_state.username)
+        st.sidebar.progress(progress / 100)
+        st.sidebar.caption(f"{progress:.1f}% to next level")
+        
+        st.sidebar.markdown(f"**🏆 Points:** {current_points}")
+        
+        # Quick stats
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### 📊 Quick Stats")
+        
+        registrations = db.get_registrations_by_student(st.session_state.username)
+        liked_events = db.get_student_liked_events(st.session_state.username)
+        interested_events = db.get_student_interested_events(st.session_state.username)
+        
+        col_stat1, col_stat2 = st.sidebar.columns(2)
+        with col_stat1:
+            st.metric("Events", len(registrations))
+            st.metric("Liked", len(liked_events))
+        with col_stat2:
+            st.metric("Interested", len(interested_events))
+            rank = db.get_student_rank(st.session_state.username)
+            if rank:
+                st.metric("Rank", f"#{rank}")
     
     # Navigation
     with st.sidebar:
+        st.markdown("---")
         st.markdown("### Navigation")
-        nav_options = ["Events Feed", "My Registrations", "Liked Events", "Interested Events", "Leaderboard", "My Profile"]
+        
+        nav_options = [
+            "🎯 Events Feed", 
+            "📋 My Registrations", 
+            "❤️ Liked Events", 
+            "⭐ Interested Events",
+            "🏆 Leaderboard", 
+            "📊 Analytics",
+            "🔔 Notifications",
+            "👤 My Profile"
+        ]
         
         if 'student_page' not in st.session_state:
-            st.session_state.student_page = "Events Feed"
+            st.session_state.student_page = "🎯 Events Feed"
         
         for option in nav_options:
             if st.button(option, key=f"student_{option}", use_container_width=True):
                 st.session_state.student_page = option
                 st.rerun()
         
-        # Quick stats
-        st.markdown("---")
-        st.markdown("### My Stats")
-        
-        # Get counts
-        registrations = db.get_registrations_by_student(st.session_state.username)
-        liked_events = db.get_student_liked_events(st.session_state.username)
-        interested_events = db.get_student_interested_events(st.session_state.username)
-        points = db.get_student_points(st.session_state.username)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("📝 Events", len(registrations))
-        with col2:
-            st.metric("🏆 Points", points)
+        # Notifications badge
+        notifications = db.get_user_notifications(st.session_state.username, unread_only=True)
+        unread_count = len(notifications)
+        if unread_count > 0:
+            st.sidebar.markdown(f'<div style="background: #EF4444; color: white; padding: 4px 8px; border-radius: 12px; font-size: 0.8rem; text-align: center; margin-top: 8px;">{unread_count} unread notifications</div>', unsafe_allow_html=True)
         
         st.markdown("---")
         if st.button("🚪 Logout", use_container_width=True, type="secondary"):
@@ -1701,219 +3231,716 @@ def student_dashboard():
     # Main content
     selected = st.session_state.student_page
     
-    if selected == "Events Feed":
-        st.markdown('<h1 class="main-header">🎯 Discover Events</h1>', unsafe_allow_html=True)
+    if selected == "🎯 Events Feed":
+        events_feed_page()
+    
+    elif selected == "📋 My Registrations":
+        my_registrations_page()
+    
+    elif selected == "❤️ Liked Events":
+        liked_events_page()
+    
+    elif selected == "⭐ Interested Events":
+        interested_events_page()
+    
+    elif selected == "🏆 Leaderboard":
+        leaderboard_page()
+    
+    elif selected == "📊 Analytics":
+        analytics_page()
+    
+    elif selected == "🔔 Notifications":
+        notifications_page()
+    
+    elif selected == "👤 My Profile":
+        profile_page()
+
+def events_feed_page():
+    """Events feed page with enhanced filtering"""
+    st.markdown('<h1 class="main-header">🎯 Discover Events</h1>', unsafe_allow_html=True)
+    
+    # Update event status
+    try:
+        db.update_event_status()
+    except:
+        pass
+    
+    # Get events
+    with st.spinner("Loading events..."):
+        events = db.get_all_events(cache_ttl=60)
+    
+    if not events:
+        st.info("No events found. Check back later!")
+        return
+    
+    # Filters in expandable section
+    with st.expander("🔍 Filters & Search", expanded=False):
+        col1, col2, col3, col4 = st.columns(4)
         
-        # Update event status (but don't show errors)
-        try:
-            db.update_event_status()
-        except:
-            pass
-        
-        # Get events
-        with st.spinner("Loading events..."):
-            events = db.get_all_events(cache_ttl=60)
-        
-        if not events:
-            st.info("No events found.")
-            return
-        
-        # Filters
-        col1, col2, col3 = st.columns(3)
         with col1:
-            search = st.text_input("🔍 Search events", placeholder="Search...")
+            search = st.text_input("Search events", placeholder="Title, description...")
+        
         with col2:
             event_type = st.selectbox("Type", ["All"] + COLLEGE_CONFIG['event_types'])
+        
         with col3:
-            show_status = st.selectbox("Status", ["All", "Upcoming", "Ongoing", "Past"])
+            event_category = st.selectbox("Category", ["All"] + COLLEGE_CONFIG['event_categories'])
         
-        # Apply filters
-        filtered_events = events
+        with col4:
+            show_status = st.selectbox("Status", ["All", "Upcoming", "Ongoing", "Past", "Completed"])
         
-        if search:
-            search_lower = search.lower()
-            filtered_events = [e for e in filtered_events 
-                             if search_lower in e.get('title', '').lower() or 
-                             search_lower in e.get('description', '').lower()]
+        # Advanced filters
+        col5, col6, col7 = st.columns(3)
         
-        if event_type != "All":
-            filtered_events = [e for e in filtered_events if e.get('event_type') == event_type]
+        with col5:
+            difficulty = st.selectbox("Difficulty", ["All", "Beginner", "Intermediate", "Advanced", "Expert"])
         
-        if show_status != "All":
-            # Determine status based on date
-            now = datetime.now()
-            for event in filtered_events[:]:  # Use copy to modify while iterating
-                event_date = event.get('event_date')
-                if isinstance(event_date, str):
-                    try:
-                        # Try to parse date
-                        for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
-                            try:
-                                event_dt = datetime.strptime(event_date, fmt)
-                                break
-                            except:
-                                continue
-                        else:
-                            event_dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
-                        
-                        if show_status == "Upcoming" and event_dt <= now:
-                            filtered_events.remove(event)
-                        elif show_status == "Ongoing" and event_dt.date() != now.date():
-                            filtered_events.remove(event)
-                        elif show_status == "Past" and event_dt >= now:
-                            filtered_events.remove(event)
-                    except:
-                        pass
+        with col6:
+            has_certificate = st.selectbox("Certificate", ["All", "Yes", "No"])
         
-        # Display events
-        st.caption(f"Found {len(filtered_events)} events")
-        
+        with col7:
+            sort_by = st.selectbox("Sort by", ["Date (Newest)", "Date (Oldest)", "Popularity", "Participants"])
+    
+    # Apply filters
+    filtered_events = events
+    
+    if search:
+        search_lower = search.lower()
+        filtered_events = [e for e in filtered_events 
+                         if search_lower in e.get('title', '').lower() or 
+                         search_lower in e.get('description', '').lower() or
+                         search_lower in e.get('tags', '').lower()]
+    
+    if event_type != "All":
+        filtered_events = [e for e in filtered_events if e.get('event_type') == event_type]
+    
+    if event_category != "All":
+        filtered_events = [e for e in filtered_events if e.get('event_category') == event_category]
+    
+    if show_status != "All":
+        now = datetime.now()
+        for event in filtered_events[:]:
+            event_date = event.get('event_date')
+            event_status = event.get('status', 'upcoming')
+            
+            if show_status == "Upcoming" and (event_status != 'upcoming' or 
+                                             (isinstance(event_date, str) and 
+                                              datetime.fromisoformat(event_date.replace('Z', '+00:00')) <= now)):
+                filtered_events.remove(event)
+            elif show_status == "Ongoing" and event_status != 'ongoing':
+                filtered_events.remove(event)
+            elif show_status == "Past" and event_status not in ['completed', 'past']:
+                filtered_events.remove(event)
+            elif show_status == "Completed" and event_status != 'completed':
+                filtered_events.remove(event)
+    
+    if difficulty != "All":
+        filtered_events = [e for e in filtered_events if e.get('difficulty_level') == difficulty]
+    
+    if has_certificate != "All":
+        cert_value = 1 if has_certificate == "Yes" else 0
+        filtered_events = [e for e in filtered_events if e.get('has_certificate', 0) == cert_value]
+    
+    # Sort events
+    if sort_by == "Date (Newest)":
+        filtered_events.sort(key=lambda x: x.get('event_date', ''), reverse=True)
+    elif sort_by == "Date (Oldest)":
+        filtered_events.sort(key=lambda x: x.get('event_date', ''))
+    elif sort_by == "Popularity":
+        filtered_events.sort(key=lambda x: x.get('popularity_score', 0), reverse=True)
+    elif sort_by == "Participants":
+        filtered_events.sort(key=lambda x: x.get('current_participants', 0), reverse=True)
+    
+    # Display events
+    if not filtered_events:
+        st.warning("No events match your filters. Try adjusting your search criteria.")
+        return
+    
+    st.caption(f"Found {len(filtered_events)} events")
+    
+    # Display as grid or list
+    view_mode = st.radio("View mode:", ["List", "Grid"], horizontal=True)
+    
+    if view_mode == "Grid":
+        # Display in grid (2 columns)
+        cols = st.columns(2)
+        for i, event in enumerate(filtered_events):
+            with cols[i % 2]:
+                display_event_card(event, st.session_state.username, show_actions=False)
+                if st.button("View Details", key=f"view_{event['id']}", use_container_width=True):
+                    st.session_state.view_event_id = event['id']
+                    st.rerun()
+    else:
+        # Display in list
         for event in filtered_events:
             display_event_card(event, st.session_state.username)
+
+def my_registrations_page():
+    """My registrations page"""
+    st.header("📋 My Registrations")
     
-    elif selected == "My Registrations":
-        st.header("📋 My Registrations")
-        
-        registrations = db.get_registrations_by_student(st.session_state.username)
-        
-        if not registrations:
-            st.info("You haven't registered for any events yet.")
-            return
-        
-        for reg in registrations:
-            with st.container():
-                st.markdown('<div class="event-card">', unsafe_allow_html=True)
-                
-                col1, col2 = st.columns([3, 1])
-                
-                with col1:
-                    event_title = reg.get('event_title', 'Unknown Event')
-                    st.markdown(f'<div class="card-title">{event_title}</div>', unsafe_allow_html=True)
-                    
-                    event_date = reg.get('event_date')
-                    if event_date:
-                        st.caption(f"📅 {format_date(event_date)}")
-                    
-                    reg_status = reg.get('status', 'pending').title()
-                    st.caption(f"📝 Status: {reg_status}")
-                
-                with col2:
-                    points = reg.get('points_awarded', 0)
-                    if points > 0:
-                        st.markdown(f'<div style="font-size: 1.5rem; font-weight: bold; text-align: center; color: #3B82F6;">{points}</div>', unsafe_allow_html=True)
-                        st.caption("Points")
-                
-                st.markdown('</div>', unsafe_allow_html=True)
+    registrations = db.get_registrations_by_student(st.session_state.username)
     
-    elif selected == "Liked Events":
-        st.header("❤️ Liked Events")
-        
-        liked_events = db.get_student_liked_events(st.session_state.username)
-        
-        if not liked_events:
-            st.info("You haven't liked any events yet.")
-            st.markdown("""
-            **How to like events:**
-            1. Go to **Events Feed**
-            2. Click the **🤍 Like** button on any event
-            3. Your liked events will appear here
-            """)
-            return
-        
-        st.caption(f"Total liked events: {len(liked_events)}")
-        
-        for event in liked_events:
-            display_event_card(event, st.session_state.username)
+    if not registrations:
+        st.info("You haven't registered for any events yet.")
+        st.markdown("""
+        **Get started:**
+        1. Go to **Events Feed**
+        2. Find interesting events
+        3. Click **Register** to participate
+        4. Your registrations will appear here
+        """)
+        return
     
-    elif selected == "Interested Events":
-        st.header("⭐ Interested Events")
-        
-        interested_events = db.get_student_interested_events(st.session_state.username)
-        
-        if not interested_events:
-            st.info("You haven't marked any events as interested yet.")
-            st.markdown("""
-            **How to mark interest:**
-            1. Go to **Events Feed**
-            2. Click the **☆ Interested** button on any event
-            3. Your interested events will appear here
-            """)
-            return
-        
-        st.caption(f"Total interested events: {len(interested_events)}")
-        
-        for event in interested_events:
-            display_event_card(event, st.session_state.username)
+    # Tabs for different statuses
+    tab_upcoming, tab_ongoing, tab_completed, tab_all = st.tabs(["Upcoming", "Ongoing", "Completed", "All"])
     
-    elif selected == "Leaderboard":
-        st.markdown('<h1 class="main-header">🏆 College Leaderboard</h1>', unsafe_allow_html=True)
-        
-        leaderboard = db.get_leaderboard(limit=15)
-        
-        if not leaderboard:
-            st.info("No students found in leaderboard.")
-            return
-        
-        # Display leaderboard
-        for student in leaderboard:
-            with st.container():
-                st.markdown('<div class="leaderboard-card">', unsafe_allow_html=True)
+    with tab_upcoming:
+        upcoming_regs = [r for r in registrations if r.get('event_status') == 'upcoming']
+        display_registrations_table(upcoming_regs, "Upcoming Events")
+    
+    with tab_ongoing:
+        ongoing_regs = [r for r in registrations if r.get('event_status') == 'ongoing']
+        display_registrations_table(ongoing_regs, "Ongoing Events")
+    
+    with tab_completed:
+        completed_regs = [r for r in registrations if r.get('event_status') in ['completed', 'past']]
+        display_registrations_table(completed_regs, "Completed Events")
+    
+    with tab_all:
+        display_registrations_table(registrations, "All Registrations")
+
+def display_registrations_table(registrations, title):
+    """Display registrations in a table format"""
+    if not registrations:
+        st.info(f"No {title.lower()}.")
+        return
+    
+    st.subheader(title)
+    
+    for reg in registrations:
+        with st.container():
+            st.markdown('<div class="registration-card">', unsafe_allow_html=True)
+            
+            col1, col2, col3 = st.columns([3, 1, 1])
+            
+            with col1:
+                event_title = reg.get('event_title', 'Unknown Event')
+                st.markdown(f'**{event_title}**')
                 
-                col1, col2, col3 = st.columns([1, 3, 1])
+                event_date = reg.get('event_date')
+                if event_date:
+                    st.caption(f"📅 {format_date(event_date)}")
                 
-                with col1:
-                    rank = student.get('rank', 0)
-                    if rank <= 3:
-                        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-                        st.markdown(f'<div style="font-size: 2rem; text-align: center;">{medals.get(rank, f"{rank}.")}</div>', unsafe_allow_html=True)
-                    else:
-                        st.markdown(f'<div style="font-size: 1.5rem; text-align: center; font-weight: bold;">{rank}.</div>', unsafe_allow_html=True)
+                reg_status = reg.get('status', 'pending').title()
+                badge_color = {
+                    'Confirmed': 'green',
+                    'Pending': 'orange',
+                    'Cancelled': 'red',
+                    'Waitlisted': 'blue'
+                }.get(reg_status, 'gray')
                 
-                with col2:
-                    st.markdown(f'<div style="font-weight: bold; font-size: 1.1rem;">{student.get("name")}</div>', unsafe_allow_html=True)
-                    st.caption(f"{student.get('roll_no', '')} | {student.get('department', '')}")
-                
-                with col3:
-                    points = student.get('total_points', 0)
-                    st.markdown(f'<div style="font-size: 1.8rem; font-weight: bold; text-align: center; color: #3B82F6;">{points}</div>', unsafe_allow_html=True)
+                st.markdown(f'<span style="background: {badge_color}20; color: {badge_color}; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">{reg_status}</span>', unsafe_allow_html=True)
+            
+            with col2:
+                points = reg.get('points_awarded', 0)
+                if points > 0:
+                    st.markdown(f'<div style="font-size: 1.2rem; font-weight: bold; text-align: center; color: #3B82F6;">{points}</div>', unsafe_allow_html=True)
                     st.caption("Points")
-                
-                st.markdown('</div>', unsafe_allow_html=True)
-                st.markdown("---")
+                else:
+                    st.caption("No points yet")
+            
+            with col3:
+                # Action buttons
+                event_id = reg.get('event_id')
+                if st.button("View", key=f"view_reg_{event_id}", use_container_width=True):
+                    st.session_state.view_event_id = event_id
+                    st.rerun()
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown("---")
+
+def liked_events_page():
+    """Liked events page"""
+    st.header("❤️ Liked Events")
     
-    elif selected == "My Profile":
-        st.header("👤 My Profile")
+    liked_events = db.get_student_liked_events(st.session_state.username)
+    
+    if not liked_events:
+        st.info("You haven't liked any events yet.")
+        st.markdown("""
+        **How to like events:**
+        1. Go to **Events Feed**
+        2. Click the **🤍 Like** button on any event
+        3. Your liked events will appear here
+        """)
+        return
+    
+    st.caption(f"Total liked events: {len(liked_events)}")
+    
+    # Group by category
+    categories = {}
+    for event in liked_events:
+        category = event.get('event_category', 'Uncategorized')
+        if category not in categories:
+            categories[category] = []
+        categories[category].append(event)
+    
+    for category, events in categories.items():
+        with st.expander(f"{category} ({len(events)})", expanded=True):
+            for event in events:
+                display_event_card(event, st.session_state.username, show_actions=False)
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    if st.button("Unlike", key=f"unlike_{event['id']}", use_container_width=True):
+                        if db.remove_like(event['id'], st.session_state.username):
+                            st.success("Removed from liked events!")
+                            time.sleep(0.3)
+                            st.rerun()
+                st.markdown("---")
+
+def interested_events_page():
+    """Interested events page"""
+    st.header("⭐ Interested Events")
+    
+    interested_events = db.get_student_interested_events(st.session_state.username)
+    
+    if not interested_events:
+        st.info("You haven't marked any events as interested yet.")
+        st.markdown("""
+        **How to mark interest:**
+        1. Go to **Events Feed**
+        2. Click the **☆ Interested** button on any event
+        3. Your interested events will appear here
+        """)
+        return
+    
+    st.caption(f"Total interested events: {len(interested_events)}")
+    
+    for event in interested_events:
+        with st.container():
+            display_event_card(event, st.session_state.username, show_actions=False)
+            
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                # Check if registered
+                is_registered = db.is_student_registered(event['id'], st.session_state.username)
+                if not is_registered:
+                    if st.button("Register Now", key=f"reg_from_int_{event['id']}", use_container_width=True):
+                        student = db.get_user(st.session_state.username)
+                        if student:
+                            reg_data = {
+                                'event_id': event['id'],
+                                'event_title': event.get('title'),
+                                'student_username': st.session_state.username,
+                                'student_name': student.get('name', st.session_state.username),
+                                'student_roll': student.get('roll_no', 'N/A'),
+                                'student_dept': student.get('department', 'N/A')
+                            }
+                            reg_id, message = db.add_registration(reg_data)
+                            if reg_id:
+                                st.success("Registered!")
+                                time.sleep(0.3)
+                                st.rerun()
+            with col2:
+                if st.button("Remove", key=f"remove_int_{event['id']}", use_container_width=True):
+                    if db.remove_interested(event['id'], st.session_state.username):
+                        st.success("Removed from interested!")
+                        time.sleep(0.3)
+                        st.rerun()
+            
+            st.markdown("---")
+
+def leaderboard_page():
+    """Leaderboard page with enhanced features"""
+    st.markdown('<h1 class="main-header">🏆 College Leaderboard</h1>', unsafe_allow_html=True)
+    
+    # Timeframe selector
+    col1, col2, col3 = st.columns([2, 2, 1])
+    with col1:
+        timeframe = st.selectbox("Timeframe", ["All Time", "This Month", "This Week"])
+    with col2:
+        department = st.selectbox("Department", ["All Departments"] + COLLEGE_CONFIG['departments'])
+    with col3:
+        limit = st.selectbox("Top N", [10, 20, 50, 100])
+    
+    # Map timeframe to database parameter
+    timeframe_map = {
+        "All Time": "all",
+        "This Month": "monthly",
+        "This Week": "weekly"
+    }
+    
+    dept_param = department if department != "All Departments" else None
+    
+    # Get leaderboard
+    leaderboard = db.get_leaderboard(
+        limit=limit,
+        department=dept_param,
+        timeframe=timeframe_map[timeframe]
+    )
+    
+    if not leaderboard:
+        st.info("No students found in leaderboard.")
+        return
+    
+    # Display leaderboard
+    st.subheader(f"Top {len(leaderboard)} Students")
+    
+    # Create visualization
+    fig = create_leaderboard_visualization(leaderboard, f"Top {len(leaderboard)} Performers")
+    if fig:
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Detailed list
+    st.markdown("### Detailed Ranking")
+    
+    for student in leaderboard:
+        with st.container():
+            st.markdown('<div class="leaderboard-card">', unsafe_allow_html=True)
+            
+            col_rank, col_info, col_points, col_level = st.columns([1, 4, 2, 2])
+            
+            with col_rank:
+                rank = student.get('rank', 0)
+                if rank <= 3:
+                    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+                    st.markdown(f'<div style="font-size: 2rem; text-align: center;">{medals.get(rank, "")}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div style="font-size: 1.5rem; text-align: center; font-weight: bold;">{rank}</div>', unsafe_allow_html=True)
+            
+            with col_info:
+                # Avatar and name
+                avatar = student.get('avatar_url', '👤')
+                st.markdown(f'<div style="display: flex; align-items: center; gap: 10px;"><span style="font-size: 1.5rem;">{avatar}</span><div><div style="font-weight: bold; font-size: 1.1rem;">{student.get("name")}</div><div style="color: #666; font-size: 0.9rem;">{student.get("roll_no", "")} | {student.get("department", "")}</div></div></div>', unsafe_allow_html=True)
+            
+            with col_points:
+                points = student.get('points', student.get('total_points', 0))
+                st.markdown(f'<div style="font-size: 1.8rem; font-weight: bold; text-align: center; color: #3B82F6;">{points}</div>', unsafe_allow_html=True)
+                st.caption("Points")
+            
+            with col_level:
+                level = student.get('current_level', 1)
+                level_config = GAMIFICATION_CONFIG['levels'].get(level, {})
+                st.markdown(f'<div style="font-size: 1.2rem; font-weight: bold; text-align: center; color: #10B981;">{level}</div>', unsafe_allow_html=True)
+                st.caption(f"Level: {level_config.get('name', 'Beginner')}")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown("---")
+    
+    # Department statistics
+    if department == "All Departments":
+        st.markdown("### Department Statistics")
+        dept_stats = db.get_department_stats()
         
-        student = db.get_user(st.session_state.username)
+        if dept_stats:
+            fig = create_department_stats_chart(dept_stats)
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Display as table
+            st.dataframe(
+                pd.DataFrame(dept_stats)[['department', 'total_students', 'total_points', 'average_points']],
+                use_container_width=True,
+                column_config={
+                    "department": "Department",
+                    "total_students": "Students",
+                    "total_points": "Total Points",
+                    "average_points": "Avg Points"
+                }
+            )
+
+def analytics_page():
+    """Analytics page for students"""
+    st.header("📊 My Analytics")
+    
+    student = db.get_user(st.session_state.username)
+    if not student:
+        st.error("User not found!")
+        return
+    
+    # Points and level analytics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        points = db.get_student_points(st.session_state.username)
+        st.metric("🏆 Total Points", points)
+    
+    with col2:
+        level = db.get_student_level(st.session_state.username)
+        level_config = GAMIFICATION_CONFIG['levels'].get(level, {})
+        st.metric("📈 Current Level", f"{level}: {level_config.get('name', 'Beginner')}")
+    
+    with col3:
+        progress = db.get_level_progress(st.session_state.username)
+        st.metric("📊 Level Progress", f"{progress:.1f}%")
+    
+    with col4:
+        rank = db.get_student_rank(st.session_state.username)
+        if rank:
+            st.metric("🏅 Global Rank", f"#{rank}")
+        else:
+            st.metric("🏅 Global Rank", "Unranked")
+    
+    st.markdown("---")
+    
+    # Event participation analytics
+    st.subheader("Event Participation")
+    
+    registrations = db.get_registrations_by_student(st.session_state.username)
+    
+    if registrations:
+        # Create participation chart
+        df = pd.DataFrame(registrations)
         
-        if not student:
-            st.error("User not found!")
-            return
+        # Count by event type
+        if 'event_status' in df.columns:
+            status_counts = df['event_status'].value_counts()
+            
+            col_chart1, col_chart2 = st.columns(2)
+            
+            with col_chart1:
+                fig1 = go.Figure(data=[go.Pie(
+                    labels=status_counts.index,
+                    values=status_counts.values,
+                    hole=.3,
+                    marker_colors=px.colors.qualitative.Set3
+                )])
+                fig1.update_layout(title="Event Status Distribution")
+                st.plotly_chart(fig1, use_container_width=True)
+            
+            with col_chart2:
+                # Monthly participation
+                if 'registered_at' in df.columns:
+                    df['month'] = pd.to_datetime(df['registered_at']).dt.to_period('M')
+                    monthly_counts = df.groupby('month').size().reset_index(name='count')
+                    monthly_counts['month'] = monthly_counts['month'].dt.strftime('%Y-%m')
+                    
+                    fig2 = px.bar(monthly_counts, x='month', y='count',
+                                 title="Monthly Participation",
+                                 labels={'month': 'Month', 'count': 'Events'},
+                                 color='count',
+                                 color_continuous_scale='Viridis')
+                    st.plotly_chart(fig2, use_container_width=True)
         
+        # Points earned breakdown
+        st.subheader("Points Breakdown")
+        
+        # Simulate points breakdown (in a real system, you'd track this)
+        points_breakdown = {
+            "Event Registrations": len(registrations) * GAMIFICATION_CONFIG['points']['registration'],
+            "Daily Logins": 7 * GAMIFICATION_CONFIG['points']['daily_login'],  # Assuming 7 days
+            "Feedback Submitted": 3 * GAMIFICATION_CONFIG['points']['feedback_submission'],  # Assuming 3 feedbacks
+            "Profile Completion": GAMIFICATION_CONFIG['points']['complete_profile']
+        }
+        
+        breakdown_df = pd.DataFrame({
+            'Category': list(points_breakdown.keys()),
+            'Points': list(points_breakdown.values())
+        })
+        
+        fig3 = px.bar(breakdown_df, x='Category', y='Points',
+                     title="Points by Category",
+                     color='Points',
+                     color_continuous_scale='Viridis')
+        st.plotly_chart(fig3, use_container_width=True)
+    
+    else:
+        st.info("No participation data yet. Start registering for events!")
+    
+    # Department comparison
+    st.markdown("---")
+    st.subheader("Department Comparison")
+    
+    dept_stats = db.get_department_stats()
+    if dept_stats:
+        student_dept = student.get('department')
+        if student_dept:
+            dept_data = [d for d in dept_stats if d['department'] == student_dept]
+            if dept_data:
+                dept_data = dept_data[0]
+                
+                cols = st.columns(4)
+                with cols[0]:
+                    st.metric("Department Rank", f"#{dept_stats.index(next(d for d in dept_stats if d['department'] == student_dept)) + 1}")
+                with cols[1]:
+                    st.metric("Department Points", dept_data['total_points'])
+                with cols[2]:
+                    st.metric("Department Students", dept_data['total_students'])
+                with cols[3]:
+                    st.metric("Avg Points/Student", f"{dept_data['average_points']:.1f}")
+
+def notifications_page():
+    """Notifications page"""
+    st.header("🔔 Notifications")
+    
+    # Get notifications
+    notifications = db.get_user_notifications(st.session_state.username, limit=50)
+    
+    if not notifications:
+        st.info("No notifications yet.")
+        return
+    
+    # Mark all as read button
+    if st.button("Mark All as Read", type="primary"):
+        if db.mark_all_notifications_read(st.session_state.username):
+            st.success("All notifications marked as read!")
+            time.sleep(0.5)
+            st.rerun()
+    
+    # Filter buttons
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("Show All", use_container_width=True):
+            st.session_state.notif_filter = "all"
+            st.rerun()
+    with col2:
+        if st.button("Unread Only", use_container_width=True):
+            st.session_state.notif_filter = "unread"
+            st.rerun()
+    with col3:
+        if st.button("Read Only", use_container_width=True):
+            st.session_state.notif_filter = "read"
+            st.rerun()
+    
+    # Apply filter
+    filter_type = st.session_state.get('notif_filter', 'all')
+    if filter_type == 'unread':
+        notifications = [n for n in notifications if n.get('read', 0) == 0]
+    elif filter_type == 'read':
+        notifications = [n for n in notifications if n.get('read', 0) == 1]
+    
+    # Display notifications
+    for notif in notifications:
+        with st.container():
+            read_status = "📌" if notif.get('read', 0) == 0 else "📎"
+            bg_color = "#F0F9FF" if notif.get('read', 0) == 0 else "#FFFFFF"
+            
+            st.markdown(f'<div style="background: {bg_color}; padding: 12px; border-radius: 8px; border-left: 4px solid #3B82F6; margin: 8px 0;">', unsafe_allow_html=True)
+            
+            col1, col2 = st.columns([4, 1])
+            
+            with col1:
+                st.markdown(f"**{read_status} {notif.get('title', 'Notification')}**")
+                st.caption(notif.get('message', ''))
+                
+                notif_type = notif.get('notification_type', 'general')
+                created_at = notif.get('created_at', '')
+                if created_at:
+                    st.caption(f"🕒 {format_date_relative(created_at)} | Type: {notif_type}")
+            
+            with col2:
+                if notif.get('read', 0) == 0:
+                    if st.button("Mark Read", key=f"read_{notif['id']}", use_container_width=True):
+                        if db.mark_notification_read(notif['id'], st.session_state.username):
+                            st.success("Marked as read!")
+                            time.sleep(0.3)
+                            st.rerun()
+                
+                # Action button if available
+                action_url = notif.get('action_url')
+                if action_url:
+                    if st.button("View", key=f"action_{notif['id']}", use_container_width=True):
+                        st.session_state.view_event_id = action_url
+                        st.rerun()
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+
+def profile_page():
+    """Enhanced profile page"""
+    st.header("👤 My Profile")
+    
+    student = db.get_user(st.session_state.username)
+    
+    if not student:
+        st.error("User not found!")
+        return
+    
+    # Profile header
+    col_avatar, col_info = st.columns([1, 3])
+    
+    with col_avatar:
+        avatar = student.get('avatar_url', '👤')
+        st.markdown(f'<div style="font-size: 4rem; text-align: center;">{avatar}</div>', unsafe_allow_html=True)
+        
+        # Change avatar button
+        if st.button("Change Avatar", use_container_width=True):
+            st.session_state.profile_edit = "avatar"
+            st.rerun()
+    
+    with col_info:
+        st.markdown(f"# {student.get('name', 'Student')}")
+        st.caption(f"@{student.get('username')}")
+        
+        # Level badge
+        level = db.get_student_level(st.session_state.username)
+        level_config = GAMIFICATION_CONFIG['levels'].get(level, {})
+        st.markdown(f'<span style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 4px 12px; border-radius: 20px; font-size: 0.9rem;">Level {level}: {level_config.get("name", "Beginner")}</span>', unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Edit profile button
+    if st.button("✏️ Edit Profile", type="primary"):
+        st.session_state.profile_edit = "details"
+        st.rerun()
+    
+    # Check if editing
+    if st.session_state.get('profile_edit') == "details":
+        edit_profile_form(student)
+        return
+    
+    # Display profile information in tabs
+    tab1, tab2, tab3, tab4 = st.tabs(["Personal Info", "Academic Info", "Statistics", "Achievements"])
+    
+    with tab1:
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("### Personal Information")
-            st.markdown(f"**Full Name:** {student.get('name', 'N/A')}")
+            st.markdown("### Contact Information")
+            st.markdown(f"**Email:** {student.get('email', 'N/A')}")
+            st.markdown(f"**Mobile:** {student.get('mobile', 'N/A')}")
+        
+        with col2:
+            st.markdown("### Additional Info")
+            bio = student.get('bio', '')
+            if bio:
+                st.markdown(f"**Bio:** {bio}")
+            
+            skills = student.get('skills', '[]')
+            if skills:
+                try:
+                    skills_list = json.loads(skills)
+                    if skills_list:
+                        st.markdown("**Skills:**")
+                        for skill in skills_list:
+                            st.markdown(f'- {skill}')
+                except:
+                    pass
+    
+    with tab2:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### Academic Information")
             st.markdown(f"**Roll Number:** {student.get('roll_no', 'N/A')}")
             st.markdown(f"**Department:** {student.get('department', 'N/A')}")
             st.markdown(f"**Year:** {student.get('year', 'N/A')}")
         
         with col2:
-            st.markdown("### Contact Information")
-            st.markdown(f"**Email:** {student.get('email', 'N/A')}")
-            st.markdown(f"**Mobile:** {student.get('mobile', 'N/A')}")
+            st.markdown("### Account Information")
             st.markdown(f"**Username:** {student.get('username', 'N/A')}")
-        
+            st.markdown(f"**Member Since:** {format_date(student.get('created_at', 'N/A'))}")
+            st.markdown(f"**Last Login:** {format_date_relative(student.get('last_login', 'N/A'))}")
+    
+    with tab3:
         # Statistics
-        st.markdown("---")
-        st.subheader("📊 My Statistics")
-        
         points = db.get_student_points(st.session_state.username)
         rank = db.get_student_rank(st.session_state.username)
         registrations = db.get_registrations_by_student(st.session_state.username)
+        liked_events = db.get_student_liked_events(st.session_state.username)
+        interested_events = db.get_student_interested_events(st.session_state.username)
         
-        col_stat1, col_stat2, col_stat3 = st.columns(3)
+        col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
         with col_stat1:
             st.metric("Events Registered", len(registrations))
         with col_stat2:
@@ -1922,42 +3949,324 @@ def student_dashboard():
             if rank:
                 st.metric("📊 Rank", f"#{rank}")
             else:
-                st.metric("📊 Rank", "Not Ranked")
+                st.metric("📊 Rank", "Unranked")
+        with col_stat4:
+            st.metric("❤️ Liked Events", len(liked_events))
+        
+        col_stat5, col_stat6, col_stat7 = st.columns(3)
+        with col_stat5:
+            st.metric("⭐ Interested", len(interested_events))
+        with col_stat6:
+            streak = student.get('daily_login_streak', 0)
+            st.metric("🔥 Login Streak", f"{streak} days")
+        with col_stat7:
+            level_progress = db.get_level_progress(st.session_state.username)
+            st.metric("📈 Level Progress", f"{level_progress:.1f}%")
+        
+        # Points progression chart (simulated)
+        st.subheader("Points Progression")
+        # In a real system, you would have historical points data
+        # Here we simulate some data
+        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"]
+        points_data = [0, 100, 250, 450, 700, points]
+        
+        fig = go.Figure(data=go.Scatter(
+            x=months,
+            y=points_data,
+            mode='lines+markers',
+            line=dict(width=3, color='#3B82F6'),
+            marker=dict(size=8, color='#3B82F6')
+        ))
+        
+        fig.update_layout(
+            title="Points Growth Over Time",
+            xaxis_title="Month",
+            yaxis_title="Points",
+            template='plotly_white'
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with tab4:
+        # Achievements and badges
+        badges = student.get('badges_earned', '[]')
+        try:
+            badges_list = json.loads(badges)
+            if badges_list:
+                st.subheader("🏅 Badges Earned")
+                
+                cols = st.columns(4)
+                for i, badge in enumerate(badges_list):
+                    with cols[i % 4]:
+                        st.markdown(f'<div style="text-align: center; padding: 10px; background: #F3F4F6; border-radius: 10px;"><div style="font-size: 2rem;">{get_badge_emoji(badge)}</div><div style="font-size: 0.8rem; margin-top: 5px;">{badge.replace("_", " ").title()}</div></div>', unsafe_allow_html=True)
+            else:
+                st.info("No badges earned yet. Participate in events to earn badges!")
+        except:
+            st.info("No badges earned yet.")
+        
+        # Level milestones
+        st.subheader("🎯 Level Milestones")
+        
+        for level_num, config in GAMIFICATION_CONFIG['levels'].items():
+            points_needed = config['points_required']
+            current_points = points
+            achieved = current_points >= points_needed
+            
+            progress_color = "#10B981" if achieved else "#E5E7EB"
+            text_color = "white" if achieved else "#6B7280"
+            
+            st.markdown(f'''
+            <div style="background: {progress_color}; color: {text_color}; padding: 8px 12px; border-radius: 8px; margin: 4px 0; display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <strong>Level {level_num}: {config['name']}</strong>
+                    <div style="font-size: 0.8rem;">{points_needed} points required</div>
+                </div>
+                <div>
+                    {'✅' if achieved else '⏳'}
+                </div>
+            </div>
+            ''', unsafe_allow_html=True)
+
+def edit_profile_form(student):
+    """Form to edit profile"""
+    st.subheader("✏️ Edit Profile")
+    
+    with st.form("edit_profile"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            name = st.text_input("Full Name", value=student.get('name', ''))
+            email = st.text_input("Email", value=student.get('email', ''))
+            mobile = st.text_input("Mobile Number", value=student.get('mobile', ''))
+        
+        with col2:
+            bio = st.text_area("Bio", value=student.get('bio', ''), height=100)
+            skills_input = st.text_input("Skills (comma-separated)", 
+                                        value=", ".join(json.loads(student.get('skills', '[]'))))
+        
+        col_submit, col_cancel = st.columns(2)
+        with col_submit:
+            submit = st.form_submit_button("Save Changes", use_container_width=True, type="primary")
+        with col_cancel:
+            cancel = st.form_submit_button("Cancel", use_container_width=True, type="secondary")
+        
+        if cancel:
+            st.session_state.profile_edit = None
+            st.rerun()
+        
+        if submit:
+            # Validate inputs
+            errors = []
+            
+            if not name:
+                errors.append("Name is required")
+            
+            if email:
+                is_valid_email, email_msg = Validators.validate_email(email)
+                if not is_valid_email:
+                    errors.append(email_msg)
+            
+            if mobile:
+                is_valid_mobile, mobile_msg = Validators.validate_mobile(mobile)
+                if not is_valid_mobile:
+                    errors.append(mobile_msg)
+            
+            if errors:
+                for error in errors:
+                    st.error(error)
+            else:
+                # Prepare update data
+                update_data = {
+                    'name': name,
+                    'email': email,
+                    'mobile': mobile,
+                    'bio': bio
+                }
+                
+                # Parse skills
+                if skills_input:
+                    skills_list = [s.strip() for s in skills_input.split(',') if s.strip()]
+                    update_data['skills'] = json.dumps(skills_list)
+                
+                # Update profile
+                success, message = db.update_user_profile(st.session_state.username, update_data)
+                
+                if success:
+                    st.success("Profile updated successfully!")
+                    st.session_state.profile_edit = None
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error(f"Failed to update profile: {message}")
+
+def get_badge_emoji(badge_name):
+    """Get emoji for badge"""
+    emoji_map = {
+        'legend_badge': '👑',
+        'master_badge': '🌟',
+        'expert_badge': '🎖️',
+        'contributor_badge': '⭐',
+        'learner_badge': '📚',
+        'beginner_badge': '🆕'
+    }
+    return emoji_map.get(badge_name, '🏅')
 
 # ============================================
-# LANDING PAGE WITH LOGIN
+# FEEDBACK FORM - NEW
+# ============================================
+
+def feedback_form(event_id):
+    """Display feedback form for an event"""
+    st.header("💬 Event Feedback")
+    
+    event = db.get_event_by_id(event_id)
+    if not event:
+        st.error("Event not found!")
+        return
+    
+    st.subheader(event.get('title', 'Event'))
+    
+    with st.form("feedback_form"):
+        # Rating
+        rating = st.slider("Rating", 1, 5, 3, 
+                          help="1 = Poor, 5 = Excellent")
+        
+        # Star display
+        stars = "⭐" * rating
+        st.markdown(f"**Your rating:** {stars}")
+        
+        # Comments
+        comments = st.text_area("Comments (optional)", 
+                               placeholder="Share your thoughts about the event...",
+                               height=150)
+        
+        # Anonymous submission
+        anonymous = st.checkbox("Submit anonymously")
+        
+        col_submit, col_cancel = st.columns(2)
+        with col_submit:
+            submit = st.form_submit_button("Submit Feedback", use_container_width=True, type="primary")
+        with col_cancel:
+            cancel = st.form_submit_button("Cancel", use_container_width=True, type="secondary")
+        
+        if cancel:
+            st.session_state.feedback_event_id = None
+            st.rerun()
+        
+        if submit:
+            success, message = db.submit_feedback(event_id, st.session_state.username, 
+                                                 rating, comments, anonymous)
+            if success:
+                st.success("Thank you for your feedback!")
+                st.session_state.feedback_event_id = None
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error(message)
+
+# ============================================
+# LANDING PAGE WITH LOGIN - ENHANCED
 # ============================================
 
 def landing_page():
-    """Landing page with app info and login"""
-    # Display logo
-    try:
-        logo_path = "ghribmjal-logo.jpg"
-        if os.path.exists(logo_path):
-            st.image(logo_path, width=150)
-    except:
-        pass
+    """Enhanced landing page with app info and login"""
+    # Display logo and header
+    col_logo, col_header = st.columns([1, 3])
     
-    st.markdown(f'<div class="college-header"><h2>{COLLEGE_CONFIG["name"]}</h2><p>Advanced Event Management System with Gamification</p></div>', 
-                unsafe_allow_html=True)
+    with col_logo:
+        try:
+            logo_path = "ghribmjal-logo.jpg"
+            if os.path.exists(logo_path):
+                st.image(logo_path, width=100)
+            else:
+                st.markdown('<div style="font-size: 3rem;">🎓</div>', unsafe_allow_html=True)
+        except:
+            st.markdown('<div style="font-size: 3rem;">🎓</div>', unsafe_allow_html=True)
     
-    # App Information
-    with st.expander("📱 About This App", expanded=True):
+    with col_header:
+        st.markdown(f'<div class="college-header"><h1>G H Raisoni College</h1><h3>Advanced Event Management System</h3></div>', 
+                    unsafe_allow_html=True)
+    
+    # App Information with tabs
+    st.markdown("---")
+    
+    tab_about, tab_features, tab_stats = st.tabs(["About", "Features", "Live Stats"])
+    
+    with tab_about:
         st.markdown("""
         ### Welcome to G H Raisoni Event Management System
         
-        **New Features:**
-        - 🏆 **Leaderboard:** Compete with other students
-        - 🎮 **Points System:** Earn points for participation
-        - 🏅 **Badges:** Collect achievements
-        - 📊 **Progress Tracking:** Monitor your growth
+        **Your all-in-one platform for:**
+        - Discovering college events and activities
+        - Registering for workshops, hackathons, seminars
+        - Tracking your participation and achievements
+        - Competing with peers on the leaderboard
+        - Earning points and badges for participation
         
-        **Getting Started:**
-        1. Select your role
-        2. Enter your credentials
-        3. Students can register for new accounts
-        4. Start exploring events!
+        **Powered by advanced features:**
+        - Real-time notifications
+        - Gamification system
+        - Analytics dashboard
+        - Feedback system
+        - Certificate generation
         """)
+    
+    with tab_features:
+        col_feat1, col_feat2 = st.columns(2)
+        
+        with col_feat1:
+            st.markdown("""
+            **🎮 Gamification**
+            - Earn points for participation
+            - Unlock badges and achievements
+            - Level up based on activity
+            - Daily login streaks
+            
+            **📊 Analytics**
+            - Personal progress tracking
+            - Department comparisons
+            - Event participation stats
+            - Points history
+            """)
+        
+        with col_feat2:
+            st.markdown("""
+            **🔔 Smart Notifications**
+            - Event reminders
+            - Registration confirmations
+            - Achievement unlocks
+            - System announcements
+            
+            **🎯 Event Features**
+            - Advanced search and filtering
+            - Like and interest tracking
+            - Feedback system
+            - Certificate management
+            """)
+    
+    with tab_stats:
+        # Display live statistics
+        try:
+            events = db.get_all_events(cache_ttl=60)
+            students = db.get_leaderboard(limit=1000) if db.use_supabase else []
+            
+            col_stat1, col_stat2, col_stat3 = st.columns(3)
+            with col_stat1:
+                st.metric("Total Events", len(events))
+            with col_stat2:
+                st.metric("Active Students", len(students))
+            with col_stat3:
+                upcoming = len([e for e in events if e.get('status') == 'upcoming'])
+                st.metric("Upcoming Events", upcoming)
+            
+            # Show upcoming events
+            upcoming_events = db.get_upcoming_events(limit=5)
+            if upcoming_events:
+                st.markdown("**Next 5 Events:**")
+                for event in upcoming_events:
+                    st.markdown(f"- **{event.get('title', 'Event')}** ({format_date(event.get('event_date'))})")
+        except:
+            st.info("Statistics loading...")
     
     # Login Section
     st.markdown("---")
@@ -1974,16 +4283,24 @@ def landing_page():
         col1, col2 = st.columns(2)
         
         with col1:
-            username = st.text_input("Username", key="login_username")
+            username = st.text_input("Username", key="login_username",
+                                    placeholder="Enter your username")
         
         with col2:
-            password = st.text_input("Password", type="password", key="login_password")
+            password = st.text_input("Password", type="password", key="login_password",
+                                    placeholder="Enter your password")
         
         # Remember me
-        remember_me = st.checkbox("Remember Me", help="Stay logged in on this device")
+        col_remember, col_forgot = st.columns(2)
+        with col_remember:
+            remember_me = st.checkbox("Remember Me", help="Stay logged in on this device")
+        
+        with col_forgot:
+            if st.button("Forgot Password?"):
+                st.info("Password reset feature coming soon!")
         
         # Login button
-        if st.button("Login", use_container_width=True, type="primary"):
+        if st.button("Login", use_container_width=True, type="primary", key="login_button"):
             if not username or not password:
                 st.error("Please enter username and password")
             else:
@@ -2004,54 +4321,94 @@ def landing_page():
                         st.session_state.username = username
                         st.session_state.name = user.get('name', username)
                         st.session_state.session_start = datetime.now()
-                        st.success("Login successful!")
+                        st.success(f"Welcome back, {user.get('name', username)}! 🎉")
+                        
+                        # Send welcome notification
+                        db.create_notification(
+                            user_id=username,
+                            title="👋 Welcome Back!",
+                            message="Great to see you again! Check out the latest events.",
+                            notification_type="welcome"
+                        )
+                        
                         st.rerun()
                     else:
                         st.error("User not found in database")
                 else:
-                    st.error("Invalid credentials")
+                    st.error("Invalid credentials. Please check your username and password.")
         
         # Student registration
         if role == "Student":
             st.markdown("---")
             st.subheader("👨‍🎓 New Student Registration")
             
-            if st.button("Create New Student Account", use_container_width=True, type="secondary"):
-                st.session_state.page = "student_register"
-                st.rerun()
+            col_reg1, col_reg2 = st.columns([3, 1])
+            with col_reg1:
+                st.markdown("Don't have an account yet? Create one now!")
+            with col_reg2:
+                if st.button("Create Account", use_container_width=True, type="secondary"):
+                    st.session_state.page = "student_register"
+                    st.rerun()
 
 # ============================================
-# STUDENT REGISTRATION PAGE
+# STUDENT REGISTRATION PAGE - ENHANCED
 # ============================================
 
 def student_registration_page():
-    """Student registration page"""
-    st.markdown('<div class="college-header"><h2>👨‍🎓 Student Registration</h2></div>', 
+    """Enhanced student registration page"""
+    st.markdown('<div class="college-header"><h2>👨‍🎓 Student Registration</h2><p>Join the G H Raisoni community</p></div>', 
                 unsafe_allow_html=True)
     
     with st.form("student_registration"):
         st.markdown("### Create Your Student Account")
         
+        # Personal Information
+        st.markdown("#### Personal Information")
         col1, col2 = st.columns(2)
         
         with col1:
-            name = st.text_input("Full Name *")
-            roll_no = st.text_input("Roll Number *")
+            name = st.text_input("Full Name *", placeholder="Enter your full name")
+            roll_no = st.text_input("Roll Number *", placeholder="e.g., CSE2023001")
             department = st.selectbox("Department *", COLLEGE_CONFIG['departments'])
-            year = st.selectbox("Year *", COLLEGE_CONFIG['academic_years'])
         
         with col2:
-            email = st.text_input("Email *")
+            email = st.text_input("Email *", placeholder="student@ghraisoni.edu")
             mobile = st.text_input("Mobile Number *", placeholder="9876543210")
-            username = st.text_input("Username *")
-            password = st.text_input("Password *", type="password")
+            year = st.selectbox("Year *", COLLEGE_CONFIG['academic_years'])
+        
+        # Account Information
+        st.markdown("#### Account Information")
+        col3, col4 = st.columns(2)
+        
+        with col3:
+            username = st.text_input("Username *", placeholder="Choose a username")
+            password = st.text_input("Password *", type="password", 
+                                    help=f"Minimum {PASSWORD_MIN_LENGTH} characters with uppercase, lowercase, number, and special character")
+        
+        with col4:
             confirm_pass = st.text_input("Confirm Password *", type="password")
+            
+            # Skills (optional)
+            skills = st.text_input("Skills (optional)", 
+                                  placeholder="e.g., Python, Machine Learning, Web Development",
+                                  help="Comma-separated list of your skills")
         
-        terms = st.checkbox("I agree to the Terms & Conditions *", value=False)
+        # Bio (optional)
+        bio = st.text_area("Bio (optional)", 
+                          placeholder="Tell us about yourself...",
+                          height=100)
         
+        # Terms and conditions
+        col_terms, col_consent = st.columns(2)
+        with col_terms:
+            terms = st.checkbox("I agree to the Terms & Conditions *", value=False)
+        with col_consent:
+            newsletter = st.checkbox("Receive event notifications and updates", value=True)
+        
+        # Submit buttons
         col_submit, col_back = st.columns(2)
         with col_submit:
-            submit = st.form_submit_button("Register", use_container_width=True, type="primary")
+            submit = st.form_submit_button("Create Account", use_container_width=True, type="primary")
         with col_back:
             back = st.form_submit_button("← Back to Login", use_container_width=True, type="secondary")
         
@@ -2072,6 +4429,11 @@ def student_registration_page():
             if not terms:
                 errors.append("You must agree to the Terms & Conditions")
             
+            # Validate roll number
+            is_valid_roll, roll_msg = Validators.validate_roll_number(roll_no)
+            if not is_valid_roll:
+                errors.append(roll_msg)
+            
             # Validate mobile
             is_valid_mobile, mobile_msg = Validators.validate_mobile(mobile)
             if not is_valid_mobile:
@@ -2082,15 +4444,21 @@ def student_registration_page():
             if not is_valid_pass:
                 errors.append(pass_msg)
             
+            # Validate email
+            is_valid_email, email_msg = Validators.validate_email(email)
+            if not is_valid_email:
+                errors.append(email_msg)
+            
             if errors:
                 for error in errors:
                     st.error(error)
             else:
                 # Check if username exists
-                existing_user = db.get_user(username)
+                existing_user = db.get_user(username, use_cache=False)
                 if existing_user:
-                    st.error("Username already exists")
+                    st.error("Username already exists. Please choose a different username.")
                 else:
+                    # Prepare user data
                     user_data = {
                         'name': name,
                         'roll_no': roll_no,
@@ -2100,124 +4468,340 @@ def student_registration_page():
                         'mobile': mobile,
                         'username': username,
                         'password': password,
-                        'role': 'student'
+                        'role': 'student',
+                        'bio': bio,
+                        'skills': [s.strip() for s in skills.split(',')] if skills else [],
+                        'avatar_url': generate_avatar_url(name, size=100)
                     }
                     
                     success, message = db.add_user(user_data)
                     if success:
-                        st.success("✅ Registration successful!")
+                        st.success("✅ Account created successfully!")
+                        st.balloons()
+                        
+                        # Show welcome message
+                        st.markdown(f"""
+                        ### Welcome to G H Raisoni, {name}! 🎉
+                        
+                        **Your account has been created successfully.**
+                        
+                        **Next steps:**
+                        1. You've been awarded **{GAMIFICATION_CONFIG['points']['complete_profile']} points** for completing your profile
+                        2. Explore **Events Feed** to discover upcoming events
+                        3. Register for events to earn more points
+                        4. Check your **Leaderboard** ranking
+                        
+                        **Account Details:**
+                        - **Username:** {username}
+                        - **Email:** {email}
+                        - **Department:** {department}
+                        
+                        You will be automatically logged in...
+                        """)
                         
                         # Auto-login
+                        time.sleep(2)
                         st.session_state.role = 'student'
                         st.session_state.username = username
                         st.session_state.name = name
                         st.session_state.session_start = datetime.now()
                         
-                        st.balloons()
-                        st.info("You have been automatically logged in. Redirecting...")
-                        time.sleep(2)
+                        # Send welcome notification
+                        db.create_notification(
+                            user_id=username,
+                            title="🎉 Welcome to G H Raisoni!",
+                            message=f"Hello {name}! Welcome to our event management system. Start exploring events to earn points and badges!",
+                            notification_type="welcome"
+                        )
+                        
                         st.rerun()
                     else:
                         st.error(f"Registration failed: {message}")
 
 # ============================================
-# CUSTOM CSS
+# ENHANCED CUSTOM CSS
 # ============================================
 
 st.markdown("""
 <style>
+    /* Main Header */
     .main-header {
-        font-size: 2.2rem;
+        font-size: 2.5rem;
         color: #1E3A8A;
         text-align: center;
-        padding: 0.75rem;
-        margin-bottom: 1.5rem;
+        padding: 1rem;
+        margin-bottom: 2rem;
         font-weight: 800;
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border-bottom: 3px solid linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     }
     
+    /* College Header */
     .college-header {
         background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
-        padding: 1rem;
-        border-radius: 12px;
+        padding: 1.5rem;
+        border-radius: 16px;
         color: white;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        margin-bottom: 2rem;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
         text-align: center;
         border: 1px solid rgba(255,255,255,0.2);
+        position: relative;
+        overflow: hidden;
     }
     
-    /* Event Card */
+    .college-header::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%);
+        animation: shimmer 3s infinite;
+    }
+    
+    @keyframes shimmer {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(100%); }
+    }
+    
+    /* Event Card - Enhanced */
     .event-card {
         border: 1px solid #E5E7EB;
-        border-radius: 12px;
-        padding: 16px;
-        margin: 10px 0;
+        border-radius: 16px;
+        padding: 20px;
+        margin: 12px 0;
         background: white;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-        transition: all 0.3s ease;
-        border-left: 4px solid #3B82F6;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        border-left: 5px solid #3B82F6;
         position: relative;
         overflow: hidden;
     }
     
     .event-card:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 8px 24px rgba(59, 130, 246, 0.15);
+        transform: translateY(-6px) scale(1.01);
+        box-shadow: 0 12px 32px rgba(59, 130, 246, 0.2);
         border-color: #2563EB;
     }
     
+    .event-card::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, #3B82F6, #8B5CF6);
+        opacity: 0;
+        transition: opacity 0.3s;
+    }
+    
+    .event-card:hover::after {
+        opacity: 1;
+    }
+    
     .card-title {
-        font-size: 1.2rem;
+        font-size: 1.3rem;
         font-weight: 700;
         color: #1E293B;
-        margin-bottom: 6px;
-        line-height: 1.3;
+        margin-bottom: 8px;
+        line-height: 1.4;
+        background: linear-gradient(90deg, #1E293B, #374151);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
     }
     
     /* Registration Section */
     .registration-section {
         background: linear-gradient(135deg, #F0F9FF 0%, #E0F2FE 100%);
-        padding: 8px;
-        border-radius: 6px;
-        margin-top: 8px;
-        border-left: 3px solid #3B82F6;
+        padding: 12px;
+        border-radius: 10px;
+        margin-top: 12px;
+        border-left: 4px solid #3B82F6;
         font-size: 0.9rem;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .registration-section::before {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -50%;
+        width: 200%;
+        height: 200%;
+        background: linear-gradient(45deg, transparent 30%, rgba(59, 130, 246, 0.1) 50%, transparent 70%);
+        animation: shimmer 3s infinite;
     }
     
     /* Leaderboard Card */
     .leaderboard-card {
         background: white;
+        border-radius: 16px;
+        padding: 1.25rem;
+        margin: 1rem 0;
+        border: 1px solid #E5E7EB;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        transition: all 0.3s ease;
+        position: relative;
+    }
+    
+    .leaderboard-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+        border-color: #3B82F6;
+    }
+    
+    /* Registration Card */
+    .registration-card {
+        background: white;
         border-radius: 12px;
         padding: 1rem;
         margin: 0.75rem 0;
         border: 1px solid #E5E7EB;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        transition: all 0.2s ease;
+    }
+    
+    .registration-card:hover {
+        border-color: #3B82F6;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+    }
+    
+    /* Notification Card */
+    .notification-card {
+        background: linear-gradient(135deg, #F8FAFC 0%, #F1F5F9 100%);
+        border-radius: 12px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        border-left: 4px solid #3B82F6;
+        transition: all 0.2s ease;
+    }
+    
+    .notification-card:hover {
+        transform: translateX(4px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    }
+    
+    /* Stats Cards */
+    .stats-card {
+        background: white;
+        border-radius: 12px;
+        padding: 1.5rem;
+        border: 1px solid #E5E7EB;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        text-align: center;
         transition: all 0.3s ease;
     }
     
-    .leaderboard-card:hover {
+    .stats-card:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-        border-color: #3B82F6;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+    }
+    
+    /* Badge Display */
+    .badge-display {
+        background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
+        border-radius: 50%;
+        width: 80px;
+        height: 80px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto;
+        font-size: 2.5rem;
+        box-shadow: 0 4px 12px rgba(251, 191, 36, 0.3);
+    }
+    
+    /* Progress Bar */
+    .stProgress > div > div > div > div {
+        background: linear-gradient(90deg, #3B82F6, #8B5CF6);
+    }
+    
+    /* Button Enhancements */
+    .stButton > button {
+        transition: all 0.3s ease;
+        border-radius: 10px;
+        font-weight: 600;
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    
+    /* Metric Cards */
+    .stMetric {
+        background: white;
+        padding: 1rem;
+        border-radius: 12px;
+        border: 1px solid #E5E7EB;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+    
+    /* Tab Enhancement */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 8px 8px 0 0;
+        padding: 12px 24px;
+        font-weight: 600;
     }
     
     /* Mobile responsive */
     @media (max-width: 768px) {
         .main-header {
-            font-size: 1.8rem;
+            font-size: 2rem;
+            padding: 0.75rem;
+        }
+        
+        .college-header {
+            padding: 1rem;
+            margin-bottom: 1.5rem;
         }
         
         .event-card {
-            padding: 12px;
-            margin: 8px 0;
+            padding: 16px;
+            margin: 10px 0;
+        }
+        
+        .card-title {
+            font-size: 1.1rem;
         }
         
         .leaderboard-card {
-            padding: 0.75rem;
+            padding: 1rem;
+        }
+        
+        .stats-card {
+            padding: 1rem;
+        }
+    }
+    
+    /* Dark mode support */
+    @media (prefers-color-scheme: dark) {
+        .event-card, .leaderboard-card, .registration-card, .stats-card {
+            background: #1F2937;
+            border-color: #374151;
+            color: #F9FAFB;
+        }
+        
+        .card-title {
+            background: linear-gradient(90deg, #F9FAFB, #D1D5DB);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .registration-section {
+            background: linear-gradient(135deg, #111827 0%, #1F2937 100%);
+            border-color: #3B82F6;
         }
     }
 </style>
@@ -2239,13 +4823,54 @@ def main():
         st.session_state.name = None
     if 'page' not in st.session_state:
         st.session_state.page = "login"
+    if 'student_page' not in st.session_state:
+        st.session_state.student_page = "🎯 Events Feed"
+    if 'profile_edit' not in st.session_state:
+        st.session_state.profile_edit = None
+    if 'feedback_event_id' not in st.session_state:
+        st.session_state.feedback_event_id = None
+    if 'view_event_id' not in st.session_state:
+        st.session_state.view_event_id = None
+    if 'notif_filter' not in st.session_state:
+        st.session_state.notif_filter = "all"
     
-    # Show database info in sidebar
-    st.sidebar.title("System Info")
-    if db.use_supabase:
-        st.sidebar.success("✅ Using Supabase PostgreSQL")
-    else:
-        st.sidebar.info("💾 Using SQLite (Local)")
+    # Show system info in sidebar
+    with st.sidebar:
+        st.title("⚙️ System Info")
+        
+        if db.use_supabase:
+            st.success("✅ Using Supabase PostgreSQL")
+        else:
+            st.info("💾 Using SQLite (Local)")
+        
+        # Cache statistics
+        if CACHE_ENABLED:
+            cache_stats = cache.get_stats()
+            st.metric("Cache Hit Rate", cache_stats['hit_rate'])
+            st.caption(f"Size: {cache_stats['size']}/{cache_stats['max_size']}")
+        
+        # Database status
+        try:
+            events_count = len(db.get_all_events(cache_ttl=0, use_cache=False))
+            st.metric("Total Events", events_count)
+        except:
+            st.caption("Database connection active")
+    
+    # Check for feedback form
+    if st.session_state.get('feedback_event_id'):
+        feedback_form(st.session_state.feedback_event_id)
+        return
+    
+    # Check for event view
+    if st.session_state.get('view_event_id'):
+        event = db.get_event_by_id(st.session_state.view_event_id)
+        if event:
+            st.button("← Back", on_click=lambda: setattr(st.session_state, 'view_event_id', None))
+            display_event_card(event, st.session_state.get('username'))
+        else:
+            st.error("Event not found!")
+            st.session_state.view_event_id = None
+        return
     
     # Route based on page/role
     if st.session_state.page == "student_register":
