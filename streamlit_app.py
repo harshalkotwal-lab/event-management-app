@@ -3146,17 +3146,27 @@ def format_date(date_str):
             if 'Z' in date_str or '+' in date_str:
                 dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
             else:
-                dt = datetime.fromisoformat
+                dt = datetime.fromisoformat(date_str)
+                
+            return dt.strftime("%d %b %Y, %I:%M %p")
+        else:
+            dt = date_str
+            # Handle timezone-aware datetime objects
+            if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+                dt = dt.replace(tzinfo=None)
+            return dt.strftime("%d %b %Y, %I:%M %p")
+    except:
+        return str(date_str)
                 
 def get_event_status(event_date, end_date=None, status=None):
     """Get event status badge"""
+    if status and status in ['cancelled', 'completed']:
+        if status == 'cancelled':
+            return '<span style="background: #F3F4F6; color: #6B7280; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">⚫ Cancelled</span>'
+        else:
+            return '<span style="background: #E5E7EB; color: #374151; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🔴 Completed</span>'
+    
     try:
-        if status and status in ['cancelled', 'completed']:
-            if status == 'cancelled':
-                return '<span style="background: #F3F4F6; color: #6B7280; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">⚫ Cancelled</span>'
-            else:
-                return '<span style="background: #E5E7EB; color: #374151; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🔴 Completed</span>'
-        
         if isinstance(event_date, str):
             # Parse date string
             if 'Z' in event_date or '+' in event_date:
@@ -3206,7 +3216,6 @@ def get_event_status(event_date, end_date=None, status=None):
             return '<span style="background: #FEE2E2; color: #DC2626; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🔴 Past</span>'
     except:
         return '<span style="background: #E5E7EB; color: #374151; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">Unknown</span>'
-
 def save_flyer_image(uploaded_file):
     """Save uploaded flyer image and return base64 string"""
     if uploaded_file is None:
