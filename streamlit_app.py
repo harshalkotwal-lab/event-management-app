@@ -1899,111 +1899,7 @@ def add_event(self, event_data):
         except:
             return False
     
-    def update_event_status(self):
-        """Update event status based on current time"""
-        try:
-            now = datetime.now()
         
-            if self.use_supabase:
-                events = self.get_all_events(cache_ttl=0, use_cache=False)
-            
-                for event in events:
-                    event_date = event.get('event_date')
-                    event_id = event.get('id')
-                    current_status = event.get('status', 'upcoming')
-                    end_date = event.get('end_date')
-                
-                    if isinstance(event_date, str):
-                        try:
-                            # Parse date string to datetime
-                            event_dt = None
-                        
-                            # Try different date formats
-                            for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
-                                try:
-                                    event_dt = datetime.strptime(event_date, fmt)
-                                    break
-                                except:
-                                    continue
-                        
-                            # If no format matched, try ISO format
-                            if event_dt is None:
-                                try:
-                                    if 'Z' in event_date or '+' in event_date:
-                                        # Timezone-aware datetime
-                                        event_dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
-                                        event_dt = event_dt.replace(tzinfo=None)  # Make naive
-                                    else:
-                                        # Naive datetime
-                                        event_dt = datetime.fromisoformat(event_date)
-                                except:
-                                    logger.warning(f"Could not parse event date: {event_date}")
-                                    continue
-                        
-                            if end_date:
-                                end_dt = None
-                                try:
-                                    # Parse end date
-                                    for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
-                                        try:
-                                            end_dt = datetime.strptime(end_date, fmt)
-                                            break
-                                        except:
-                                            continue
-                                
-                                    if end_dt is None:
-                                        if 'Z' in end_date or '+' in end_date:
-                                            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-                                            end_dt = end_dt.replace(tzinfo=None)
-                                        else:
-                                            end_dt = datetime.fromisoformat(end_date)
-                                
-                                    if end_dt < now and current_status != 'completed':
-                                        self.client.update('events', {'id': event_id}, {
-                                            'status': 'completed',
-                                            'updated_at': now.isoformat()
-                                        }, use_cache=False)
-                                except:
-                                    pass  # Skip if end_date parsing fails
-                        
-                            elif event_dt <= now and current_status == 'upcoming':
-                                self.client.update('events', {'id': event_id}, {
-                                    'status': 'ongoing',
-                                    'updated_at': now.isoformat()
-                                }, use_cache=False)
-                        
-                            elif event_dt < now and current_status not in ['completed', 'cancelled']:
-                                self.client.update('events', {'id': event_id}, {
-                                    'status': 'completed',
-                                    'updated_at': now.isoformat()
-                                }, use_cache=False)
-                            
-                        except Exception as e:
-                            logger.warning(f"Error parsing event date {event_date}: {e}")
-                            continue
-                        
-            else:
-                # For SQLite - use string comparison for simplicity
-                now_str = now.strftime('%Y-%m-%d %H:%M:%S')
-                self.client.execute_query(
-                    "UPDATE events SET status = 'ongoing', updated_at = ? WHERE event_date <= ? AND status = 'upcoming'",
-                    (now_str, now_str), commit=True
-                )
-            
-                self.client.execute_query(
-                    "UPDATE events SET status = 'completed', updated_at = ? WHERE event_date < ? AND status IN ('upcoming', 'ongoing')",
-                    (now_str, now_str), commit=True
-                )
-        
-            cache.delete("events_all")
-            cache.delete("events_upcoming")
-        
-            return True
-        
-        except Exception as e:
-            logger.error(f"Error updating event status: {e}")
-            return False
-    
     # ============================================
     # MENTOR MANAGEMENT METHODS
     # ============================================
@@ -3474,7 +3370,9 @@ def format_date(date_str):
             return dt.strftime("%d %b %Y, %I:%M %p")
     except:
         return str(date_str)
-                
+
+
+          
 def get_event_status(event_date, end_date=None, status=None):
     """Get event status badge"""
     if status and status in ['cancelled', 'completed']:
@@ -3555,6 +3453,111 @@ def get_event_status(event_date, end_date=None, status=None):
             return '<span style="background: #FEE2E2; color: #DC2626; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">🔴 Past</span>'
     except:
         return '<span style="background: #E5E7EB; color: #374151; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">Unknown</span>'
+
+def update_event_status(self):
+    """Update event status based on current time"""
+    try:
+        now = datetime.now()
+        
+        if self.use_supabase:
+            events = self.get_all_events(cache_ttl=0, use_cache=False)
+            
+            for event in events:
+                event_date = event.get('event_date')
+                event_id = event.get('id')
+                current_status = event.get('status', 'upcoming')
+                end_date = event.get('end_date')
+                
+                if isinstance(event_date, str):
+                    try:
+                        # Parse date string to datetime
+                        event_dt = None
+                        
+                        # Try different date formats
+                        for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                            try:
+                                event_dt = datetime.strptime(event_date, fmt)
+                                break
+                            except:
+                                continue
+                        
+                        # If no format matched, try ISO format
+                        if event_dt is None:
+                            try:
+                                if 'Z' in event_date or '+' in event_date:
+                                    # Timezone-aware datetime
+                                    event_dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+                                    event_dt = event_dt.replace(tzinfo=None)  # Make naive
+                                else:
+                                    # Naive datetime
+                                    event_dt = datetime.fromisoformat(event_date)
+                            except:
+                                logger.warning(f"Could not parse event date: {event_date}")
+                                continue
+                        
+                        if end_date:
+                            end_dt = None
+                            try:
+                                # Parse end date
+                                for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                                    try:
+                                        end_dt = datetime.strptime(end_date, fmt)
+                                        break
+                                    except:
+                                        continue
+                                
+                                if end_dt is None:
+                                    if 'Z' in end_date or '+' in end_date:
+                                        end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+                                        end_dt = end_dt.replace(tzinfo=None)
+                                    else:
+                                        end_dt = datetime.fromisoformat(end_date)
+                                
+                                if end_dt < now and current_status != 'completed':
+                                    self.client.update('events', {'id': event_id}, {
+                                        'status': 'completed',
+                                        'updated_at': now.isoformat()
+                                    }, use_cache=False)
+                            except:
+                                pass  # Skip if end_date parsing fails
+                        
+                        elif event_dt <= now and current_status == 'upcoming':
+                            self.client.update('events', {'id': event_id}, {
+                                'status': 'ongoing',
+                                'updated_at': now.isoformat()
+                            }, use_cache=False)
+                        
+                        elif event_dt < now and current_status not in ['completed', 'cancelled']:
+                            self.client.update('events', {'id': event_id}, {
+                                'status': 'completed',
+                                'updated_at': now.isoformat()
+                            }, use_cache=False)
+                            
+                    except Exception as e:
+                        logger.warning(f"Error parsing event date {event_date}: {e}")
+                        continue
+                        
+        else:
+            # For SQLite - use string comparison for simplicity
+            now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+            self.client.execute_query(
+                "UPDATE events SET status = 'ongoing', updated_at = ? WHERE event_date <= ? AND status = 'upcoming'",
+                (now_str, now_str), commit=True
+            )
+            
+            self.client.execute_query(
+                "UPDATE events SET status = 'completed', updated_at = ? WHERE event_date < ? AND status IN ('upcoming', 'ongoing')",
+                (now_str, now_str), commit=True
+            )
+        
+        cache.delete("events_all")
+        cache.delete("events_upcoming")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error updating event status: {e}")
+        return False
 
 def save_flyer_image(uploaded_file):
     """Save uploaded flyer image and return base64 string"""
