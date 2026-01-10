@@ -1169,97 +1169,122 @@ class DatabaseManager:
         """Update event status based on current time - SIMPLIFIED VERSION"""
         try:
             now = datetime.now()
-            now_str = now.strftime('%Y-%m-%d %H:%M:%S')
-            now_date = now.strftime('%Y-%m-%d')
+        
+            # Format timestamps properly for Supabase
+            now_iso = now.isoformat()  # ISO format: 2026-01-10T15:41:47.123456
+            now_date_str = now.strftime('%Y-%m-%d')
         
             if self.use_supabase:
                 try:
-                    # Update events that should be ongoing (happening today or in progress)
-                    # Use proper Supabase filter syntax: status=in.(upcoming,ongoing)
-                    self.client.update('events', 
-                        {
-                            'event_date': f'lte.{now_str}',
-                            'status': 'eq.upcoming'
-                        },
-                        {'status': 'ongoing', 'updated_at': now.isoformat()},
-                        use_cache=False
-                    )
+                    # Format 1: Update ongoing events (events happening now or today)
+                    # Note: This might be too restrictive - events might span multiple days
+                    # We'll use a simpler approach instead
                 
-                    # Update events that should be completed (past events)
-                    # For multiple status values, we need to update separately or use a different approach
-                    # First update upcoming events that are past
-                    self.client.update('events',
-                        {
-                            'event_date': f'lt.{now_date}',
-                            'status': 'eq.upcoming'
-                        },
-                        {'status': 'completed', 'updated_at': now.isoformat()},
-                        use_cache=False
-                    )
-                
-                    # Then update ongoing events that are past
-                    self.client.update('events',
-                        {
-                            'event_date': f'lt.{now_date}',
-                            'status': 'eq.ongoing'
-                        },
-                        {'status': 'completed', 'updated_at': now.isoformat()},
-                        use_cache=False
-                    )
-                
-                except Exception as supabase_error:
-                    logger.warning(f"Supabase update error, trying alternative: {supabase_error}")
-                    # Fallback approach - fetch and update individually
-                    try:
+                    # SIMPLER APPROACH: Get all upcoming and ongoing events and check dates
+                    try:    
                         # Get upcoming events
                         upcoming_events = self.client.select('events', {'status': 'eq.upcoming'}, use_cache=False)
-                        ongoing_events = self.client.select('events', {'status': 'eq.ongoing'}, use_cache=False)
-                    
-                        all_events = []
                         if upcoming_events:
-                            all_events.extend(upcoming_events)
-                        if ongoing_events:
-                            all_events.extend(ongoing_events)
-                    
-                        if all_events:
-                            for event in all_events:
+                            for event in upcoming_events:
                                 event_date = event.get('event_date')
                                 if event_date:
                                     try:
-                                        # Parse date
+                                        # Parse event date
                                         if isinstance(event_date, str):
-                                            # Extract date part
+                                            # Try to parse ISO format
                                             if 'T' in event_date:
-                                                event_date_str = event_date.split('T')[0]
+                                                event_datetime_str = event_date.split('+')[0] if '+' in event_date else event_date.split('Z')[0] if 'Z' in event_date else event_date
+                                                event_dt = datetime.fromisoformat(event_datetime_str)
                                             else:
-                                                event_date_str = event_date
+                                                # Just date
+                                                event_dt = datetime.strptime(event_date, '%Y-%m-%d')
                                         
-                                            if event_date_str < now_date:
-                                                # Event is in the past
+                                            # Check if event should be ongoing
+                                            if event_dt.date() == now.date():
+                                                # Event is today, mark as ongoing
                                                 self.client.update('events', {'id': f'eq.{event["id"]}'}, 
-                                                             {'status': 'completed', 'updated_at': now.isoformat()},
+                                                             {'status': 'ongoing', 'updated_at': now_iso},
                                                              use_cache=False)
-                                            elif event_date_str == now_date and event.get('status') == 'upcoming':
-                                                # Event is today and still marked as upcoming
+                                            elif event_dt.date() < now.date():
+                                                # Event is in the past, mark as completed
                                                 self.client.update('events', {'id': f'eq.{event["id"]}'}, 
-                                                             {'status': 'ongoing', 'updated_at': now.isoformat()},
+                                                             {'status': 'completed', 'updated_at': now_iso},
                                                              use_cache=False)
-                                    except Exception as e:
-                                        logger.warning(f"Error processing event {event.get('id')}: {e}")
+                                    except Exception as parse_error:
+                                        logger.warning(f"Could not parse event date {event_date}: {parse_error}")
                                         continue
-                    except Exception as fallback_error:
-                        logger.error(f"Fallback also failed: {fallback_error}")
+                
+                    except Exception as e:
+                        logger.warning(f"Error processing upcoming events: {e}")
+                
+                    # Process ongoing events to mark as completed if past
+                    try:
+                        ongoing_events = self.client.select('events', {'status': 'eq.ongoing'}, use_cache=False)
+                        if ongoing_events:
+                            for event in ongoing_events:
+                                event_date = event.get('event_date')
+                                end_date = event.get('end_date')
+                            
+                                if event_date:
+                                    try:
+                                        if isinstance(event_date, str):
+                                            # Try to parse ISO format
+                                            if 'T' in event_date:
+                                                event_datetime_str = event_date.split('+')[0] if '+' in event_date else event_date.split('Z')[0] if 'Z' in event_date else event_date
+                                                event_dt = datetime.fromisoformat(event_datetime_str)
+                                            else:
+                                                event_dt = datetime.strptime(event_date, '%Y-%m-%d')
+                                        
+                                            # Check end date if available
+                                            should_complete = False
+                                            if end_date:
+                                                try:
+                                                    if isinstance(end_date, str):
+                                                        if 'T' in end_date:
+                                                            end_datetime_str = end_date.split('+')[0] if '+' in end_date else end_date.split('Z')[0] if 'Z' in end_date else end_date
+                                                            end_dt = datetime.fromisoformat(end_datetime_str)
+                                                        else:
+                                                            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+                                                
+                                                        if end_dt.date() < now.date():
+                                                            should_complete = True
+                                                except:
+                                                    pass
+                                        
+                                            # If no end date or couldn't parse, check event date
+                                            if not should_complete and event_dt.date() < now.date():
+                                                should_complete = True
+                                        
+                                            if should_complete:
+                                                self.client.update('events', {'id': f'eq.{event["id"]}'}, 
+                                                             {'status': 'completed', 'updated_at': now_iso},
+                                                             use_cache=False)
+                                    except Exception as parse_error:
+                                        logger.warning(f"Could not parse ongoing event date {event_date}: {parse_error}")
+                                        continue
+                
+                    except Exception as e:
+                        logger.warning(f"Error processing ongoing events: {e}")
+                
+                except Exception as supabase_error:
+                    logger.error(f"Supabase update error: {supabase_error}")
             else:
-                # For SQLite
-                self.client.execute_query(
-                    "UPDATE events SET status = 'ongoing', updated_at = ? WHERE date(event_date) <= date(?) AND status = 'upcoming'",
-                    (now_str, now_str), commit=True
-                )
-            
-                self.client.execute_query(
-                    "UPDATE events SET status = 'completed', updated_at = ? WHERE date(event_date) < date(?) AND status IN ('upcoming', 'ongoing')",
-                    (now_str, now_str), commit=True
-                )
+                # For SQLite - simplified approach
+                try:
+                    # Mark today's upcoming events as ongoing
+                    today_str = now.strftime('%Y-%m-%d')
+                    self.client.execute_query(
+                        "UPDATE events SET status = 'ongoing', updated_at = ? WHERE date(event_date) = date(?) AND status = 'upcoming'",
+                        (now_iso, today_str), commit=True
+                    )
+                
+                    # Mark past events as completed
+                    self.client.execute_query(
+                        "UPDATE events SET status = 'completed', updated_at = ? WHERE date(event_date) < date(?) AND status IN ('upcoming', 'ongoing')",
+                        (now_iso, today_str), commit=True
+                    )
+                except Exception as sqlite_error:
+                    logger.error(f"SQLite update error: {sqlite_error}")
         
             # Clear cache
             cache.delete("events_all")
