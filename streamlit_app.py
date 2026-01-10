@@ -1109,10 +1109,11 @@ class DatabaseManager:
         """Background maintenance tasks"""
         while True:
             try:
-                self.update_event_status()
+                # Call the method directly
+                self._update_event_status()  # Changed from self.update_event_status()
                 self._clean_old_cache()
                 self._update_analytics_cache()
-                time.sleep(300)
+                time.sleep(300)  # Run every 5 minutes
             except Exception as e:
                 logger.error(f"Background maintenance error: {e}")
                 time.sleep(60)
@@ -3454,7 +3455,7 @@ def get_event_status(event_date, end_date=None, status=None):
     except:
         return '<span style="background: #E5E7EB; color: #374151; padding: 4px 12px; border-radius: 20px; font-size: 0.85rem;">Unknown</span>'
 
-def update_event_status(self):
+def _update_event_status(self):
     """Update event status based on current time"""
     try:
         now = datetime.now()
@@ -4627,7 +4628,7 @@ def events_feed_page():
     st.markdown('<h1 class="main-header">🎯 Discover Events</h1>', unsafe_allow_html=True)
     
     try:
-        db.update_event_status()
+        db._update_event_status()
     except Exception as e:
         logger.debug(f"Event status update skipped: {e}")
     
@@ -6798,7 +6799,7 @@ def admin_dashboard_page():
     st.markdown('<h1 class="main-header">Admin Dashboard</h1>', unsafe_allow_html=True)
     
     try:
-        db.update_event_status()
+        db._update_event_status()
     except:
         pass
     
@@ -7879,7 +7880,7 @@ def main():
     
     if (datetime.now() - st.session_state.last_status_update).total_seconds() > 300:
         try:
-            db.update_event_status()
+            db._update_event_status()
             st.session_state.last_status_update = datetime.now()
         except:
             pass
