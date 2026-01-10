@@ -1048,12 +1048,12 @@ class DatabaseManager:
         
         # Initialize database
         self._initialize_database()
-        self._add_default_users()
+        # REMOVE THIS LINE: self._add_default_users()  # This is causing the error
         self._initialized = True
         
         # Start background tasks
         self._start_background_tasks()
-    
+        
     def _start_background_tasks(self):
         """Start background maintenance tasks"""
         threading.Thread(target=self._background_maintenance, daemon=True).start()
@@ -3173,61 +3173,7 @@ def add_event(self, event_data):
         except Exception as e:
             logger.error(f"Error getting event feedback: {e}")
             return []
-    
-    # ============================================
-    # DEFAULT USERS
-    # ============================================
-    
-    def _add_default_users(self):
-        """Add default admin and faculty users"""
-        try:
-            default_users = [
-                {
-                    'id': '00000000-0000-0000-0000-000000000001',
-                    'username': 'admin@raisoni',
-                    'password': 'Admin@12345',
-                    'name': 'Administrator',
-                    'role': 'admin',
-                    'email': 'admin@ghraisoni.edu',
-                    'department': 'Administration',
-                    'avatar_url': '👨‍💼'
-                },
-                {
-                    'id': '00000000-0000-0000-0000-000000000002',
-                    'username': 'faculty@raisoni',
-                    'password': 'Faculty@12345',
-                    'name': 'Faculty Coordinator',
-                    'role': 'faculty',
-                    'email': 'faculty@ghraisoni.edu',
-                    'department': 'Faculty',
-                    'avatar_url': '👨‍🏫'
-                },
-                {
-                    'id': '00000000-0000-0000-0000-000000000003',
-                    'username': 'mentor@raisoni',
-                    'password': 'Mentor@12345',
-                    'name': 'Senior Mentor',
-                    'role': 'mentor',
-                    'email': 'mentor@ghraisoni.edu',
-                    'department': 'Mentorship',
-                    'avatar_url': '👨‍🏫'
-                }
-            ]
-            
-            for user_data in default_users:
-                existing = self.get_user(user_data['username'], use_cache=False)
-                if not existing:
-                    success, message = self.add_user(user_data)
-                    if success:
-                        logger.info(f"Added default user: {user_data['username']}")
-            
-            self._add_default_students()
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error adding default users: {e}")
-            return False
+
     
     def _add_default_students(self):
         """Add default student accounts"""
@@ -3379,6 +3325,105 @@ def add_event(self, event_data):
 
 # Initialize database
 db = DatabaseManager(use_supabase=USE_SUPABASE)
+
+# Call add_default_users AFTER db is initialized
+try:
+    # Check and add default users if they don't exist
+    default_users = [
+        {
+            'id': '00000000-0000-0000-0000-000000000001',
+            'username': 'admin@raisoni',
+            'password': 'Admin@12345',
+            'name': 'Administrator',
+            'role': 'admin',
+            'email': 'admin@ghraisoni.edu',
+            'department': 'Administration',
+            'avatar_url': '👨‍💼'
+        },
+        {
+            'id': '00000000-0000-0000-0000-000000000002',
+            'username': 'faculty@raisoni',
+            'password': 'Faculty@12345',
+            'name': 'Faculty Coordinator',
+            'role': 'faculty',
+            'email': 'faculty@ghraisoni.edu',
+            'department': 'Faculty',
+            'avatar_url': '👨‍🏫'
+        },
+        {
+            'id': '00000000-0000-0000-0000-000000000003',
+            'username': 'mentor@raisoni',
+            'password': 'Mentor@12345',
+            'name': 'Senior Mentor',
+            'role': 'mentor',
+            'email': 'mentor@ghraisoni.edu',
+            'department': 'Mentorship',
+            'avatar_url': '👨‍🏫'
+        }
+    ]
+    
+    for user_data in default_users:
+        existing = db.get_user(user_data['username'], use_cache=False)
+        if not existing:
+            success, message = db.add_user(user_data)
+            if success:
+                logger.info(f"Added default user: {user_data['username']}")
+    
+    # Add default students
+    default_students = [
+        {
+            'name': 'Rohan Sharma',
+            'username': 'rohan@student',
+            'password': 'Student@123',
+            'roll_no': 'CSE2023001',
+            'department': 'Computer Science & Engineering',
+            'year': 'III',
+            'email': 'rohan.sharma@ghraisoni.edu',
+            'mobile': '9876543210',
+            'avatar_url': '👨‍🎓',
+            'bio': 'Passionate about AI and Machine Learning',
+            'skills': ['Python', 'Machine Learning', 'Web Development']
+        },
+        {
+            'name': 'Priya Patel',
+            'username': 'priya@student',
+            'password': 'Student@123',
+            'roll_no': 'AIML2023002',
+            'department': 'Artificial Intelligence & Machine Learning',
+            'year': 'II',
+            'email': 'priya.patel@ghraisoni.edu',
+            'mobile': '9876543211',
+            'avatar_url': '👩‍🎓',
+            'bio': 'Data Science enthusiast and competitive programmer',
+            'skills': ['Data Science', 'Python', 'SQL', 'Statistics']
+        }
+    ]
+    
+    for student in default_students:
+        existing = db.get_user(student['username'], use_cache=False)
+        if not existing:
+            user_data = {
+                'name': student['name'],
+                'username': student['username'],
+                'password': student['password'],
+                'roll_no': student['roll_no'],
+                'department': student['department'],
+                'year': student['year'],
+                'email': student['email'],
+                'mobile': student['mobile'],
+                'avatar_url': student.get('avatar_url', '👤'),
+                'bio': student.get('bio', ''),
+                'skills': student.get('skills', []),
+                'role': 'student'
+            }
+            
+            success, message = db.add_user(user_data)
+            if success:
+                db.award_points(student['username'], 250, "welcome", "Welcome bonus")
+                logger.info(f"Added default student: {student['username']}")
+    
+except Exception as e:
+    logger.error(f"Error adding default users: {e}")
 
 # Initialize password reset manager
 password_reset_manager = PasswordResetManager(db)
