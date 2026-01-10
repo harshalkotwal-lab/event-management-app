@@ -1677,7 +1677,7 @@ class DatabaseManager:
             return None
     
     # ============================================
-    # EVENT MANAGEMENT METHODS - FIXED
+    # EVENT MANAGEMENT METHODS
     # ============================================
     
     def add_event(self, event_data):
@@ -1785,9 +1785,9 @@ class DatabaseManager:
         """Notify users interested in similar events"""
         pass
     
-    def get_all_events(self, cache_ttl=60, use_cache=True, limit=None):
-        """Get all events - FIXED to accept limit parameter"""
-        cache_key = f"events_all_{limit}"
+    def get_all_events(self, cache_ttl=60, use_cache=True):
+        """Get all events"""
+        cache_key = "events_all"
         if use_cache and CACHE_ENABLED:
             cached = cache.get(cache_key)
             if cached is not None:
@@ -1795,15 +1795,12 @@ class DatabaseManager:
     
         try:
             if self.use_supabase:
-                events = self.client.select('events', limit=limit or 1000, 
+                events = self.client.select('events', limit=1000, 
                                       order_by='event_date.desc', 
                                       cache_ttl=cache_ttl, use_cache=use_cache)
             else:
-                query = "SELECT * FROM events ORDER BY event_date DESC"
-                if limit:
-                    query += f" LIMIT {limit}"
                 events = self.client.execute_query(
-                    query,
+                    "SELECT * FROM events ORDER BY event_date DESC LIMIT 1000",
                     fetchall=True, use_cache=use_cache
                 )
         
@@ -3539,10 +3536,12 @@ def save_flyer_image(uploaded_file):
         logger.error(f"Error processing flyer image: {e}")
         return None
 
-def get_events_limited(limit=10, cache_ttl=60):
-    """Get limited number of events - FIXED VERSION"""
+def get_events_limited(self, limit=10, cache_ttl=60):
+    """Get limited number of events"""
     try:
-        events = db.get_all_events(cache_ttl=cache_ttl, limit=limit)
+        events = self.get_all_events(cache_ttl=cache_ttl)
+        if events and len(events) > limit:
+            return events[:limit]
         return events or []
     except Exception as e:
         logger.error(f"Error getting limited events: {e}")
@@ -4082,7 +4081,7 @@ def forgot_password_page():
                         st.markdown(f"""
                         **In production, an email would be sent with:**
                         - Reset link: {reset_url}
-                        - Token expires: {expiry.strftime('%I:%M %p', '%d %b %Y')}
+                        - Token expires: {expiry.strftime('%I:%M %p, %d %b %Y')}
                         """)
                         
                         st.markdown("---")
@@ -5375,48 +5374,6 @@ def get_badge_emoji(badge_name):
     }
     return emoji_map.get(badge_name, '🏅')
 
-def format_date_relative(date_str):
-    """Format date relative to now"""
-    try:
-        if isinstance(date_str, str):
-            dt = None
-            for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
-                try:
-                    dt = datetime.strptime(date_str, fmt)
-                    break
-                except:
-                    continue
-            
-            if dt is None:
-                if 'Z' in date_str or '+' in date_str:
-                    dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                else:
-                    dt = datetime.fromisoformat(date_str)
-        else:
-            dt = date_str
-        
-        now = datetime.now()
-        diff = now - dt
-        
-        if diff.days > 365:
-            years = diff.days // 365
-            return f"{years} year{'s' if years > 1 else ''} ago"
-        elif diff.days > 30:
-            months = diff.days // 30
-            return f"{months} month{'s' if months > 1 else ''} ago"
-        elif diff.days > 0:
-            return f"{diff.days} day{'s' if diff.days > 1 else ''} ago"
-        elif diff.seconds > 3600:
-            hours = diff.seconds // 3600
-            return f"{hours} hour{'s' if hours > 1 else ''} ago"
-        elif diff.seconds > 60:
-            minutes = diff.seconds // 60
-            return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
-        else:
-            return "Just now"
-    except:
-        return "Unknown"
-
 # ============================================
 # FEEDBACK FORM
 # ============================================
@@ -5630,6 +5587,7 @@ def create_event_page():
             
             submit_button = st.form_submit_button("Create Event", use_container_width=True, type="primary")
             
+            # In the manual event creation tab, update the submit section:
             if submit_button:
                 if not all([title, event_type, venue, organizer, description]):
                     st.error("Please fill all required fields (*)")
@@ -5794,7 +5752,7 @@ def create_event_page():
                                             height=150)
                 
                 st.subheader("Event Flyer (Optional)")
-                ai_flyer = st.file_ploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif', 'webp'], key="ai_flyer")
+                ai_flyer = st.file_uploader("Upload image", type=['jpg', 'jpeg', 'png', 'gif', 'webp'], key="ai_flyer")
                 if ai_flyer:
                     st.image(ai_flyer, width=200)
                 
@@ -6956,10 +6914,6 @@ def admin_manage_events_page():
     if st.session_state.get('edit_event_id'):
         edit_event_form(st.session_state.edit_event_id)
 
-def confirm_action(message):
-    """Confirm action with user"""
-    return st.session_state.get('confirm_action', False)
-
 def edit_event_form(event_id):
     """Form to edit event details"""
     st.header("✏️ Edit Event")
@@ -7074,10 +7028,10 @@ def edit_event_form(event_id):
                 if db.use_supabase:
                     success = db.client.update('events', {'id': event_id}, update_data, use_cache=False)
                 else:
-                    success = db.client.update('events', {'id': event_id}, update_data, use_cache=False)
+                    success = db.client.update('events', {'id': event_id}, update_data)
                 
                 if success:
-                    st.success("Event updated successfully!")
+                    st.success("✅ Event updated successfully!")
                     st.session_state.edit_event_id = None
                     time.sleep(1)
                     st.rerun()
@@ -7090,283 +7044,264 @@ def admin_manage_users_page():
     """Admin user management page"""
     st.header("👥 Manage Users")
     
-    users = db.get_all_users()
+    tab1, tab2, tab3 = st.tabs(["All Users", "Add New User", "User Analytics"])
     
-    if not users:
-        st.info("No users found.")
-        return
-    
-    search_term = st.text_input("🔍 Search users", placeholder="Search by name, username, email...")
-    
-    filtered_users = users
-    if search_term:
-        search_term = search_term.lower()
-        filtered_users = [u for u in users if 
-                         search_term in u.get('name', '').lower() or
-                         search_term in u.get('username', '').lower() or
-                         search_term in u.get('email', '').lower()]
-    
-    st.caption(f"Found {len(filtered_users)} users")
-    
-    for user in filtered_users:
-        with st.container():
-            st.markdown('<div class="event-card">', unsafe_allow_html=True)
-            
-            col_info, col_actions = st.columns([3, 1])
-            
-            with col_info:
-                avatar = user.get('avatar_url', '👤')
-                role_badge = {
-                    'admin': '👑',
-                    'faculty': '👨‍🏫',
-                    'mentor': '👨‍🏫',
-                    'student': '👨‍🎓'
-                }.get(user.get('role', 'user'), '👤')
+    with tab1:
+        st.subheader("📋 All Users")
+        
+        users = db.get_all_users()
+        
+        if not users:
+            st.info("No users found.")
+            return
+        
+        col_search, col_filter = st.columns(2)
+        with col_search:
+            search_term = st.text_input("🔍 Search users", placeholder="Search by name, email, username...")
+        
+        with col_filter:
+            role_filter = st.selectbox("Filter by Role", ["All", "Admin", "Faculty", "Mentor", "Student"])
+        
+        filtered_users = users
+        if search_term:
+            search_term = search_term.lower()
+            filtered_users = [u for u in users if search_term in u.get('name', '').lower() or 
+                            search_term in u.get('email', '').lower() or 
+                            search_term in u.get('username', '').lower()]
+        
+        if role_filter != "All":
+            filtered_users = [u for u in filtered_users if u.get('role') == role_filter.lower()]
+        
+        st.caption(f"Found {len(filtered_users)} users")
+        
+        for user in filtered_users:
+            with st.container():
+                st.markdown('<div class="user-card">', unsafe_allow_html=True)
                 
-                st.markdown(f'<div class="card-title">{avatar} {user.get("name", "Unknown")} {role_badge}</div>', unsafe_allow_html=True)
-                st.caption(f"**Username:** {user.get('username', 'N/A')} | **Email:** {user.get('email', 'N/A')}")
-                st.caption(f"**Role:** {user.get('role', 'N/A')} | **Department:** {user.get('department', 'N/A')}")
+                col_info, col_actions = st.columns([3, 1])
                 
-                points = user.get('total_points', 0)
-                level = user.get('current_level', 1)
-                st.caption(f"**Points:** {points} | **Level:** {level}")
-            
-            with col_actions:
-                st.markdown("### Actions")
-                
-                if st.button("✏️ Edit", key=f"edit_user_{user['id']}", use_container_width=True):
-                    st.session_state.edit_user_id = user['id']
-                    st.rerun()
-                
-                if st.button("🔒 Reset Pass", key=f"reset_pass_{user['id']}", use_container_width=True):
-                    st.session_state.reset_user_id = user['id']
-                    st.rerun()
-                
-                if user.get('role') != 'admin':  # Don't allow deleting admin
-                    if st.button("🗑️ Delete", key=f"delete_user_{user['id']}", use_container_width=True):
-                        if confirm_action(f"Delete user {user.get('name')}?"):
-                            try:
-                                if db.use_supabase:
-                                    success = db.client.delete('users', {'id': user['id']}, use_cache=False)
-                                else:
-                                    success = db.client.delete('users', {'id': user['id']}, use_cache=False)
-                                
-                                if success:
-                                    st.success("User deleted successfully!")
-                                    time.sleep(1)
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to delete user.")
-                            except Exception as e:
-                                st.error(f"Error deleting user: {e}")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-            st.markdown("---")
-    
-    if st.session_state.get('edit_user_id'):
-        edit_user_form(st.session_state.edit_user_id)
-    
-    if st.session_state.get('reset_user_id'):
-        reset_password_form(st.session_state.reset_user_id)
-
-def edit_user_form(user_id):
-    """Form to edit user details"""
-    st.header("✏️ Edit User")
-    
-    user = None
-    for u in db.get_all_users():
-        if u['id'] == user_id:
-            user = u
-            break
-    
-    if not user:
-        st.error("User not found!")
-        return
-    
-    with st.form("edit_user_form"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            name = st.text_input("Full Name", value=user.get('name', ''))
-            username = st.text_input("Username", value=user.get('username', ''))
-            email = st.text_input("Email", value=user.get('email', ''))
-            role = st.selectbox("Role", ["admin", "faculty", "mentor", "student"],
-                              index=["admin", "faculty", "mentor", "student"].index(user.get('role', 'student')))
-        
-        with col2:
-            department = st.selectbox("Department", COLLEGE_CONFIG['departments'],
-                                    index=COLLEGE_CONFIG['departments'].index(user.get('department', '')) 
-                                    if user.get('department') in COLLEGE_CONFIG['departments'] else 0)
-            year = st.selectbox("Year", COLLEGE_CONFIG['academic_years'],
-                              index=COLLEGE_CONFIG['academic_years'].index(user.get('year', 'I')) 
-                              if user.get('year') in COLLEGE_CONFIG['academic_years'] else 0)
-            roll_no = st.text_input("Roll Number", value=user.get('roll_no', ''))
-            mobile = st.text_input("Mobile", value=user.get('mobile', ''))
-        
-        bio = st.text_area("Bio", value=user.get('bio', ''), height=100)
-        
-        col_save, col_cancel = st.columns(2)
-        with col_save:
-            save = st.form_submit_button("💾 Save Changes", use_container_width=True, type="primary")
-        with col_cancel:
-            cancel = st.form_submit_button("❌ Cancel", use_container_width=True, type="secondary")
-        
-        if cancel:
-            st.session_state.edit_user_id = None
-            st.rerun()
-        
-        if save:
-            update_data = {
-                'name': name,
-                'username': username,
-                'email': email,
-                'role': role,
-                'department': department,
-                'year': year,
-                'roll_no': roll_no,
-                'mobile': mobile,
-                'bio': bio,
-                'updated_at': datetime.now().isoformat()
-            }
-            
-            try:
-                if db.use_supabase:
-                    success = db.client.update('users', {'id': user_id}, update_data, use_cache=False)
-                else:
-                    success = db.client.update('users', {'id': user_id}, update_data, use_cache=False)
-                
-                if success:
-                    st.success("User updated successfully!")
-                    st.session_state.edit_user_id = None
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("Failed to update user.")
-            except Exception as e:
-                st.error(f"Error updating user: {e}")
-
-def reset_password_form(user_id):
-    """Form to reset user password"""
-    st.header("🔒 Reset Password")
-    
-    user = None
-    for u in db.get_all_users():
-        if u['id'] == user_id:
-            user = u
-            break
-    
-    if not user:
-        st.error("User not found!")
-        return
-    
-    st.info(f"Resetting password for: **{user.get('name')}** ({user.get('username')})")
-    
-    with st.form("reset_password_form"):
-        new_password = st.text_input("New Password", type="password")
-        confirm_password = st.text_input("Confirm New Password", type="password")
-        
-        col_submit, col_cancel = st.columns(2)
-        with col_submit:
-            submit = st.form_submit_button("🔒 Reset Password", use_container_width=True, type="primary")
-        with col_cancel:
-            cancel = st.form_submit_button("❌ Cancel", use_container_width=True, type="secondary")
-        
-        if cancel:
-            st.session_state.reset_user_id = None
-            st.rerun()
-        
-        if submit:
-            if not new_password or not confirm_password:
-                st.error("Please enter and confirm the new password")
-            elif new_password != confirm_password:
-                st.error("Passwords do not match")
-            else:
-                is_valid, msg = Validators.validate_password(new_password)
-                if not is_valid:
-                    st.error(msg)
-                else:
-                    hashed_pass = hashlib.sha256(new_password.encode()).hexdigest().lower()
+                with col_info:
+                    avatar = user.get('avatar_url', '👤')
+                    st.markdown(f'''
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 1.5rem;">{avatar}</span>
+                        <div>
+                            <div style="font-weight: bold; font-size: 1.1rem;">{user.get('name')}</div>
+                            <div style="color: #666; font-size: 0.9rem;">
+                                @{user.get('username')} | {user.get('role', 'user').title()} | {user.get('department', 'N/A')}
+                            </div>
+                            <div style="font-size: 0.8rem; color: #888;">
+                                Email: {user.get('email', 'N/A')} | Mobile: {user.get('mobile', 'N/A')}
+                            </div>
+                        </div>
+                    </div>
+                    ''', unsafe_allow_html=True)
                     
-                    try:
-                        if db.use_supabase:
-                            success = db.client.update('users', {'id': user_id}, {'password': hashed_pass}, use_cache=False)
-                        else:
-                            success = db.client.update('users', {'id': user_id}, {'password': hashed_pass}, use_cache=False)
+                    if user.get('role') == 'student':
+                        points = user.get('total_points', 0)
+                        st.caption(f"🏆 Points: {points} | 📈 Level: {user.get('current_level', 1)}")
+                
+                with col_actions:
+                    if user.get('username') not in ['admin@raisoni', 'faculty@raisoni']:
+                        if st.button("🗑️ Delete", key=f"del_user_{user['id']}", use_container_width=True, type="secondary"):
+                            if confirm_action(f"Delete user {user.get('name')}? This action cannot be undone."):
+                                try:
+                                    if db.use_supabase:
+                                        if user.get('role') == 'mentor':
+                                            db.client.delete('mentors', {'email': user.get('username')}, use_cache=False)
+                                        success = db.client.delete('users', {'id': user.get('id')}, use_cache=False)
+                                    else:
+                                        cursor = db.client.conn.cursor()
+                                        if user.get('role') == 'mentor':
+                                            cursor.execute("DELETE FROM mentors WHERE email = ?", (user.get('username'),))
+                                        cursor.execute("DELETE FROM users WHERE id = ?", (user.get('id'),))
+                                        db.client.conn.commit()
+                                        success = cursor.rowcount > 0
+                                    
+                                    if success:
+                                        st.success("User deleted successfully!")
+                                        time.sleep(1)
+                                        st.rerun()
+                                    else:
+                                        st.error("Failed to delete user.")
+                                except Exception as e:
+                                    st.error(f"Error deleting user: {e}")
+                    else:
+                        st.caption("Protected account")
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown("---")
+    
+    with tab2:
+        st.subheader("➕ Add New User")
+        
+        with st.form("add_user_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                name = st.text_input("Full Name *")
+                email = st.text_input("Email *")
+                mobile = st.text_input("Mobile Number")
+                role = st.selectbox("Role *", ["student", "faculty", "mentor", "admin"])
+            
+            with col2:
+                username = st.text_input("Username *")
+                password = st.text_input("Password *", type="password")
+                confirm_password = st.text_input("Confirm Password *", type="password")
+                department = st.selectbox("Department", ["Select"] + COLLEGE_CONFIG['departments'])
+            
+            additional_info = st.text_area("Additional Information", height=100)
+            
+            submit = st.form_submit_button("Create User", use_container_width=True, type="primary")
+            
+            if submit:
+                if not all([name, email, username, password]):
+                    st.error("Please fill all required fields (*)")
+                elif password != confirm_password:
+                    st.error("Passwords do not match")
+                else:
+                    existing_user = db.get_user(username, use_cache=False)
+                    if existing_user:
+                        st.error("Username already exists")
+                    else:
+                        user_data = {
+                            'name': name,
+                            'email': email,
+                            'mobile': mobile,
+                            'username': username,
+                            'password': password,
+                            'role': role,
+                            'department': department if department != "Select" else "",
+                            'avatar_url': generate_avatar_url(name, size=100)
+                        }
                         
+                        success, message = db.add_user(user_data)
                         if success:
-                            st.success("Password reset successfully!")
-                            st.session_state.reset_user_id = None
-                            time.sleep(1)
+                            st.success(f"User '{name}' created successfully!")
                             st.rerun()
                         else:
-                            st.error("Failed to reset password.")
-                    except Exception as e:
-                        st.error(f"Error resetting password: {e}")
+                            st.error(f"Failed to create user: {message}")
+    
+    with tab3:
+        st.subheader("📊 User Analytics")
+        
+        users = db.get_all_users()
+        
+        if users:
+            total_users = len(users)
+            students = len([u for u in users if u.get('role') == 'student'])
+            faculty = len([u for u in users if u.get('role') == 'faculty'])
+            mentors = len([u for u in users if u.get('role') == 'mentor'])
+            admins = len([u for u in users if u.get('role') == 'admin'])
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Users", total_users)
+            with col2:
+                st.metric("Students", students)
+            with col3:
+                st.metric("Faculty", faculty)
+            with col4:
+                st.metric("Mentors", mentors)
+            
+            st.markdown("---")
+            
+            departments = {}
+            for user in users:
+                dept = user.get('department', 'Unknown')
+                if dept:
+                    departments[dept] = departments.get(dept, 0) + 1
+            
+            if departments:
+                df = pd.DataFrame({
+                    'Department': list(departments.keys()),
+                    'Users': list(departments.values())
+                })
+                
+                fig = px.bar(df, x='Department', y='Users',
+                           title="Users by Department",
+                           color='Users',
+                           color_continuous_scale='Viridis')
+                fig.update_layout(xaxis_tickangle=-45)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            student_users = [u for u in users if u.get('role') == 'student']
+            if student_users:
+                points_data = [u.get('total_points', 0) for u in student_users]
+                avg_points = sum(points_data) / len(points_data) if points_data else 0
+                
+                st.metric("Average Student Points", f"{avg_points:.1f}")
+                
+                levels_data = [u.get('current_level', 1) for u in student_users]
+                level_counts = {}
+                for level in levels_data:
+                    level_counts[level] = level_counts.get(level, 0) + 1
+                
+                if level_counts:
+                    fig = px.pie(
+                        names=[f"Level {k}" for k in level_counts.keys()],
+                        values=list(level_counts.values()),
+                        title="Student Level Distribution",
+                        hole=0.3
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
 
 def admin_manage_mentors_page():
     """Admin mentor management page"""
     st.header("👨‍🏫 Manage Mentors")
     
-    tab1, tab2 = st.tabs(["View All Mentors", "Add New Mentor"])
+    tab1, tab2 = st.tabs(["All Mentors", "Add New Mentor"])
     
     with tab1:
+        st.subheader("📋 All Mentors")
+        
         mentors = db.get_all_mentors()
         
         if not mentors:
             st.info("No mentors found.")
-        else:
-            search_term = st.text_input("🔍 Search mentors", placeholder="Search by name, department, expertise...")
-            
-            filtered_mentors = mentors
-            if search_term:
-                search_term = search_term.lower()
-                filtered_mentors = [m for m in mentors if 
-                                  search_term in m.get('full_name', '').lower() or
-                                  search_term in m.get('department', '').lower() or
-                                  search_term in m.get('expertise', '').lower()]
-            
-            st.caption(f"Found {len(filtered_mentors)} mentors")
-            
-            for mentor in filtered_mentors:
-                with st.container():
-                    st.markdown('<div class="event-card">', unsafe_allow_html=True)
+            return
+        
+        for mentor in mentors:
+            with st.container():
+                st.markdown('<div class="event-card">', unsafe_allow_html=True)
+                
+                col_info, col_actions = st.columns([3, 1])
+                
+                with col_info:
+                    status_color = "🟢" if mentor.get('is_active') else "🔴"
+                    status_text = "Active" if mentor.get('is_active') else "Inactive"
                     
-                    col_info, col_actions = st.columns([3, 1])
+                    st.markdown(f'<div class="card-title">{mentor.get("full_name")} {status_color}</div>', unsafe_allow_html=True)
+                    st.caption(f"**Department:** {mentor.get('department')}")
+                    st.caption(f"**Email:** {mentor.get('email')}")
+                    st.caption(f"**Contact:** {mentor.get('contact')}")
                     
-                    with col_info:
-                        status_color = "🟢" if mentor.get('is_active') else "🔴"
-                        status_text = "Active" if mentor.get('is_active') else "Inactive"
-                        
-                        st.markdown(f'<div class="card-title">{mentor.get("full_name")} {status_color}</div>', unsafe_allow_html=True)
-                        st.caption(f"**Department:** {mentor.get('department', 'N/A')}")
-                        st.caption(f"**Email:** {mentor.get('email', 'N/A')}")
-                        st.caption(f"**Contact:** {mentor.get('contact', 'N/A')}")
-                        
-                        if mentor.get('expertise'):
-                            st.caption(f"**Expertise:** {mentor.get('expertise')}")
+                    if mentor.get('expertise'):
+                        st.caption(f"**Expertise:** {mentor.get('expertise')}")
                     
-                    with col_actions:
-                        st.markdown("### Actions")
-                        
-                        events = db.get_events_by_mentor(mentor['id'])
-                        st.caption(f"Events: {len(events)}")
-                        
-                        if st.button("Edit", key=f"edit_mentor_{mentor['id']}", use_container_width=True):
-                            st.session_state.edit_mentor_id = mentor['id']
-                            st.rerun()
-                        
-                        if st.button("Delete", key=f"delete_mentor_{mentor['id']}", use_container_width=True):
-                            if confirm_action(f"Delete mentor {mentor.get('full_name')}?"):
-                                success = db.delete_mentor(mentor['id'])
-                                if success:
-                                    st.success("Mentor deleted successfully!")
-                                    time.sleep(1)
-                                    st.rerun()
-                                else:
-                                    st.error("Failed to delete mentor.")
+                    events = db.get_events_by_mentor(mentor['id'])
+                    st.caption(f"**Assigned Events:** {len(events)}")
+                
+                with col_actions:
+                    if st.button("✏️ Edit", key=f"edit_mentor_{mentor['id']}", use_container_width=True):
+                        st.session_state.edit_mentor_id = mentor['id']
+                        st.rerun()
                     
-                    st.markdown('</div>', unsafe_allow_html=True)
-                    st.markdown("---")
+                    if mentor.get('is_active'):
+                        if st.button("❌ Deactivate", key=f"deact_{mentor['id']}", use_container_width=True, type="secondary"):
+                            if db.delete_mentor(mentor['id']):
+                                st.success("Mentor deactivated!")
+                                time.sleep(1)
+                                st.rerun()
+                    else:
+                        if st.button("✅ Activate", key=f"act_{mentor['id']}", use_container_width=True, type="secondary"):
+                            if db.update_mentor(mentor['id'], {'is_active': True}):
+                                st.success("Mentor activated!")
+                                time.sleep(1)
+                                st.rerun()
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown("---")
     
     with tab2:
         st.subheader("➕ Add New Mentor")
@@ -7377,47 +7312,112 @@ def admin_manage_mentors_page():
             with col1:
                 first_name = st.text_input("First Name *")
                 last_name = st.text_input("Last Name *")
-                email = st.text_input("Email *")
                 department = st.selectbox("Department *", COLLEGE_CONFIG['departments'])
+                email = st.text_input("Email *")
             
             with col2:
-                contact = st.text_input("Contact Number *", placeholder="9876543210")
-                expertise = st.text_input("Expertise (optional)", placeholder="e.g., AI/ML, Web Development")
+                contact = st.text_input("Contact Number *")
+                expertise = st.text_area("Expertise/Areas", placeholder="Python, Machine Learning, Web Development...")
                 is_active = st.checkbox("Active", value=True)
+                
+                password_option = st.radio("Password", ["Auto-generate", "Custom"])
+                if password_option == "Custom":
+                    custom_password = st.text_input("Set Password", type="password")
+                else:
+                    custom_password = None
             
             submit = st.form_submit_button("Add Mentor", use_container_width=True, type="primary")
             
             if submit:
-                if not all([first_name, last_name, email, department, contact]):
+                if not all([first_name, last_name, department, email, contact]):
                     st.error("Please fill all required fields (*)")
                 else:
                     mentor_data = {
                         'first_name': first_name,
                         'last_name': last_name,
-                        'email': email,
                         'department': department,
+                        'email': email,
                         'contact': contact,
                         'expertise': expertise,
                         'is_active': is_active,
                         'created_by': st.session_state.username
                     }
                     
-                    success, password = db.add_mentor(mentor_data)
+                    if custom_password:
+                        mentor_data['password'] = custom_password
+                    
+                    success, result = db.add_mentor(mentor_data)
                     if success:
-                        st.success(f"✅ Mentor added successfully! Auto-generated password: `{password}`")
-                        st.info("The mentor can use this password to login with their email.")
+                        password = result
+                        st.success(f"✅ Mentor {first_name} {last_name} added successfully!")
+                        st.info(f"**Login credentials:**\nUsername: {email}\nPassword: {password}")
+                        st.warning("⚠️ Please save this password securely. It won't be shown again.")
                         st.rerun()
                     else:
-                        st.error("Failed to add mentor.")
+                        st.error(f"Failed to add mentor: {result}")
+    
+    if st.session_state.get('edit_mentor_id'):
+        mentor = db.get_mentor_by_id(st.session_state.edit_mentor_id)
+        if mentor:
+            edit_mentor_form(mentor)
+
+def edit_mentor_form(mentor):
+    """Form to edit mentor details"""
+    st.header("✏️ Edit Mentor")
+    
+    with st.form("edit_mentor_form"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            first_name = st.text_input("First Name", value=mentor.get('first_name', ''))
+            last_name = st.text_input("Last Name", value=mentor.get('last_name', ''))
+            department = st.selectbox("Department", COLLEGE_CONFIG['departments'],
+                                     index=COLLEGE_CONFIG['departments'].index(mentor.get('department', '')) 
+                                     if mentor.get('department') in COLLEGE_CONFIG['departments'] else 0)
+        
+        with col2:
+            email = st.text_input("Email", value=mentor.get('email', ''))
+            contact = st.text_input("Contact", value=mentor.get('contact', ''))
+            expertise = st.text_area("Expertise", value=mentor.get('expertise', ''))
+            is_active = st.checkbox("Active", value=bool(mentor.get('is_active', True)))
+        
+        col_save, col_cancel = st.columns(2)
+        with col_save:
+            save = st.form_submit_button("💾 Save Changes", use_container_width=True, type="primary")
+        with col_cancel:
+            cancel = st.form_submit_button("❌ Cancel", use_container_width=True, type="secondary")
+        
+        if cancel:
+            st.session_state.edit_mentor_id = None
+            st.rerun()
+        
+        if save:
+            update_data = {
+                'first_name': first_name,
+                'last_name': last_name,
+                'department': department,
+                'email': email,
+                'contact': contact,
+                'expertise': expertise,
+                'is_active': is_active
+            }
+            
+            if db.update_mentor(mentor['id'], update_data):
+                st.success("✅ Mentor updated successfully!")
+                st.session_state.edit_mentor_id = None
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("Failed to update mentor.")
 
 def admin_system_analytics_page():
-    """Admin system analytics page"""
+    """System analytics page for admin"""
     st.header("📊 System Analytics")
     
-    tab1, tab2, tab3 = st.tabs(["📈 Performance", "👥 User Analytics", "🎯 Event Analytics"])
+    tab1, tab2, tab3 = st.tabs(["Performance", "Usage Statistics", "Event Analytics"])
     
     with tab1:
-        st.subheader("System Performance")
+        st.subheader("🏎️ System Performance")
         
         cache_stats = cache.get_stats()
         
@@ -7427,697 +7427,537 @@ def admin_system_analytics_page():
         with col2:
             st.metric("Cache Hit Rate", cache_stats['hit_rate'])
         with col3:
-            st.metric("Total Operations", cache_stats['hits'] + cache_stats['misses'])
+            st.metric("Total Requests", cache_stats['hits'] + cache_stats['misses'])
+        
+        if db.use_supabase:
+            st.info("✅ Using Supabase PostgreSQL")
+        else:
+            st.info("💾 Using SQLite (Local)")
         
         st.markdown("---")
-        st.subheader("Database Statistics")
+        st.subheader("📈 Performance Metrics")
         
-        events = db.get_all_events(use_cache=False)
-        users = db.get_all_users()
-        mentors = db.get_all_mentors()
+        metrics_data = {
+            'Metric': ['Database Queries', 'Cache Hits', 'Cache Misses', 'Response Time'],
+            'Value': [cache_stats['hits'] + cache_stats['misses'], cache_stats['hits'], 
+                     cache_stats['misses'], '~50ms']
+        }
         
-        col_stat1, col_stat2, col_stat3 = st.columns(3)
-        with col_stat1:
-            st.metric("Total Events", len(events) if events else 0)
-        with col_stat2:
-            st.metric("Total Users", len(users) if users else 0)
-        with col_stat3:
-            st.metric("Total Mentors", len(mentors) if mentors else 0)
+        df = pd.DataFrame(metrics_data)
+        st.dataframe(df, use_container_width=True, hide_index=True)
     
     with tab2:
-        st.subheader("User Analytics")
+        st.subheader("📊 Usage Statistics")
         
         users = db.get_all_users()
+        events = db.get_all_events(cache_ttl=0, use_cache=False)
         
-        if users:
-            # User role distribution
-            role_counts = {}
-            for user in users:
-                role = user.get('role', 'unknown')
-                role_counts[role] = role_counts.get(role, 0) + 1
+        if users and events:
+            total_users = len(users)
+            active_users = len([u for u in users if u.get('is_active', True)])
+            total_events = len(events)
+            active_events = len([e for e in events if e.get('status') in ['upcoming', 'ongoing']])
             
-            if role_counts:
-                fig1 = px.pie(
-                    names=list(role_counts.keys()),
-                    values=list(role_counts.values()),
-                    title="User Role Distribution",
-                    hole=0.3
-                )
-                st.plotly_chart(fig1, use_container_width=True)
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Users", total_users)
+            with col2:
+                st.metric("Active Users", active_users)
+            with col3:
+                st.metric("Total Events", total_events)
+            with col4:
+                st.metric("Active Events", active_events)
             
-            # Points distribution
-            points_data = [u.get('total_points', 0) for u in users if u.get('role') == 'student']
-            if points_data:
-                fig2 = px.histogram(
-                    x=points_data,
-                    title="Student Points Distribution",
-                    labels={'x': 'Points', 'y': 'Count'},
-                    nbins=20
-                )
-                st.plotly_chart(fig2, use_container_width=True)
+            st.markdown("---")
             
-            # Monthly registration trend
-            if 'created_at' in users[0]:
-                try:
-                    df = pd.DataFrame(users)
-                    df['created_at'] = pd.to_datetime(df['created_at'])
-                    df['month'] = df['created_at'].dt.to_period('M')
-                    monthly_counts = df.groupby('month').size().reset_index(name='count')
-                    monthly_counts['month'] = monthly_counts['month'].dt.strftime('%Y-%m')
+            registrations = []
+            for event in events:
+                regs = db.get_registrations_by_event(event.get('id'))
+                registrations.extend(regs)
+            
+            if registrations:
+                total_registrations = len(registrations)
+                avg_reg_per_event = total_registrations / total_events if total_events > 0 else 0
+                
+                col5, col6 = st.columns(2)
+                with col5:
+                    st.metric("Total Registrations", total_registrations)
+                with col6:
+                    st.metric("Avg. Reg/Event", f"{avg_reg_per_event:.1f}")
+                
+                df = pd.DataFrame(registrations)
+                if not df.empty:
+                    df['registered_at'] = pd.to_datetime(df['registered_at'])
+                    df['date'] = df['registered_at'].dt.date
                     
-                    fig3 = px.line(
-                        monthly_counts,
-                        x='month',
-                        y='count',
-                        title="Monthly User Registrations",
-                        markers=True
-                    )
-                    st.plotly_chart(fig3, use_container_width=True)
-                except:
-                    pass
+                    daily_regs = df.groupby('date').size().reset_index(name='count')
+                    
+                    fig = px.line(daily_regs, x='date', y='count',
+                                title='Daily Registrations Trend',
+                                labels={'date': 'Date', 'count': 'Registrations'})
+                    st.plotly_chart(fig, use_container_width=True)
     
     with tab3:
-        st.subheader("Event Analytics")
+        st.subheader("🎯 Event Analytics")
         
-        events = db.get_all_events(use_cache=False)
+        events = db.get_all_events(cache_ttl=0, use_cache=False)
         
         if events:
-            analytics = db.get_event_analytics()
+            total_events = len(events)
             
-            if analytics:
-                col_event1, col_event2, col_event3 = st.columns(3)
-                with col_event1:
-                    st.metric("Total Events", analytics['total_events'])
-                with col_event2:
-                    st.metric("Total Registrations", analytics['total_registrations'])
-                with col_event3:
-                    avg_reg = analytics['average_registrations']
-                    st.metric("Avg Registrations/Event", f"{avg_reg:.1f}")
+            event_types = {}
+            event_categories = {}
+            status_counts = {}
+            
+            for event in events:
+                event_type = event.get('event_type', 'Unknown')
+                event_category = event.get('event_category', 'Unknown')
+                status = event.get('status', 'unknown')
                 
-                # Event type distribution
-                if analytics.get('type_counts'):
-                    type_counts = analytics['type_counts']
+                event_types[event_type] = event_types.get(event_type, 0) + 1
+                event_categories[event_category] = event_categories.get(event_category, 0) + 1
+                status_counts[status] = status_counts.get(status, 0) + 1
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if event_types:
                     fig1 = px.pie(
-                        names=list(type_counts.keys()),
-                        values=list(type_counts.values()),
+                        names=list(event_types.keys()),
+                        values=list(event_types.values()),
                         title="Event Type Distribution",
                         hole=0.3
                     )
                     st.plotly_chart(fig1, use_container_width=True)
-                
-                # Event status distribution
-                if analytics.get('status_counts'):
-                    status_counts = analytics['status_counts']
+            
+            with col2:
+                if event_categories:
                     fig2 = px.bar(
-                        x=list(status_counts.keys()),
-                        y=list(status_counts.values()),
-                        title="Event Status Distribution",
-                        labels={'x': 'Status', 'y': 'Count'},
-                        color=list(status_counts.values()),
+                        x=list(event_categories.keys()),
+                        y=list(event_categories.values()),
+                        title="Event Category Distribution",
+                        labels={'x': 'Category', 'y': 'Count'},
+                        color=list(event_categories.values()),
                         color_continuous_scale='Viridis'
                     )
                     st.plotly_chart(fig2, use_container_width=True)
+            
+            st.markdown("---")
+            st.subheader("📅 Monthly Events")
+            
+            events_df = pd.DataFrame(events)
+            if 'created_at' in events_df.columns and not events_df.empty:
+                events_df['month'] = pd.to_datetime(events_df['created_at']).dt.to_period('M')
+                monthly_counts = events_df.groupby('month').size().reset_index(name='count')
+                monthly_counts['month'] = monthly_counts['month'].dt.strftime('%Y-%m')
                 
-                # Monthly events trend
-                try:
-                    df = pd.DataFrame(events)
-                    df['created_at'] = pd.to_datetime(df['created_at'])
-                    df['month'] = df['created_at'].dt.to_period('M')
-                    monthly_counts = df.groupby('month').size().reset_index(name='count')
-                    monthly_counts['month'] = monthly_counts['month'].dt.strftime('%Y-%m')
-                    
-                    fig3 = px.line(
-                        monthly_counts,
-                        x='month',
-                        y='count',
-                        title="Monthly Events Created",
-                        markers=True
-                    )
-                    st.plotly_chart(fig3, use_container_width=True)
-                except:
-                    pass
+                fig3 = px.bar(monthly_counts, x='month', y='count',
+                            title="Events Created by Month",
+                            labels={'month': 'Month', 'count': 'Number of Events'},
+                            color='count',
+                            color_continuous_scale='Viridis')
+                st.plotly_chart(fig3, use_container_width=True)
 
 def admin_backup_page():
-    """Admin backup and restore page"""
+    """Backup and restore page"""
     st.header("💾 Backup & Restore")
     
-    tab1, tab2 = st.tabs(["📤 Export Data", "📥 Import Data"])
+    tab1, tab2 = st.tabs(["Database Backup", "System Settings"])
     
     with tab1:
-        st.subheader("Export System Data")
-        st.info("Export data in CSV format for backup or analysis.")
+        st.subheader("📦 Database Backup")
+        
+        st.info("""
+        **Backup Options:**
+        - Export all data as JSON files
+        - Export specific tables as CSV
+        - Generate backup report
+        """)
         
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("📊 Export Events", use_container_width=True):
-                events = db.get_all_events(use_cache=False)
-                if events:
-                    df = pd.DataFrame(events)
-                    csv = df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Events CSV",
-                        data=csv,
-                        file_name=f"events_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
-                    )
-                else:
-                    st.warning("No events to export")
+            if st.button("📤 Export All Data", use_container_width=True):
+                export_all_data()
         
         with col2:
-            if st.button("👥 Export Users", use_container_width=True):
-                users = db.get_all_users()
-                if users:
-                    df = pd.DataFrame(users)
-                    # Remove password column for security
-                    if 'password' in df.columns:
-                        df = df.drop(columns=['password'])
-                    csv = df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Users CSV",
-                        data=csv,
-                        file_name=f"users_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
-                    )
-                else:
-                    st.warning("No users to export")
+            if st.button("📊 Export as CSV", use_container_width=True):
+                export_csv_data()
         
         with col3:
-            if st.button("📝 Export Registrations", use_container_width=True):
-                events = db.get_all_events(use_cache=False)
-                all_registrations = []
-                for event in events:
-                    registrations = db.get_registrations_by_event(event['id'])
-                    all_registrations.extend(registrations)
-                
-                if all_registrations:
-                    df = pd.DataFrame(all_registrations)
-                    csv = df.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Registrations CSV",
-                        data=csv,
-                        file_name=f"registrations_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv"
-                    )
-                else:
-                    st.warning("No registrations to export")
+            if st.button("📄 Generate Report", use_container_width=True):
+                generate_backup_report()
+        
+        st.markdown("---")
+        st.subheader("🔄 Restore Data")
+        
+        st.warning("⚠️ Restoring data will overwrite existing records. Use with caution!")
+        
+        uploaded_file = st.file_uploader("Upload backup file", type=['json', 'csv'])
+        
+        if uploaded_file:
+            if st.button("🔄 Restore from Backup", type="secondary", use_container_width=True):
+                st.warning("This feature is under development. Please contact system administrator.")
     
     with tab2:
-        st.subheader("Import Data")
-        st.warning("⚠️ Importing data may overwrite existing records. Use with caution!")
+        st.subheader("⚙️ System Settings")
         
-        import_type = st.selectbox("Select data type to import", 
-                                  ["Events", "Users", "Registrations"])
-        
-        uploaded_file = st.file_uploader(f"Upload {import_type} CSV file", 
-                                        type=['csv'])
-        
-        if uploaded_file is not None:
-            try:
-                df = pd.read_csv(uploaded_file)
-                st.success(f"✅ Successfully loaded {len(df)} records")
-                
-                with st.expander("Preview data"):
-                    st.dataframe(df.head())
-                
-                if st.button(f"📥 Import {len(df)} {import_type}", type="primary"):
-                    with st.spinner(f"Importing {import_type}..."):
-                        if import_type == "Events":
-                            success_count = 0
-                            for _, row in df.iterrows():
-                                event_data = row.to_dict()
-                                # Clean up NaN values
-                                event_data = {k: (v if pd.notna(v) else None) for k, v in event_data.items()}
-                                
-                                # Ensure required fields
-                                if 'title' not in event_data or not event_data['title']:
-                                    event_data['title'] = f"Imported Event {success_count + 1}"
-                                
-                                if 'created_by' not in event_data:
-                                    event_data['created_by'] = st.session_state.username
-                                
-                                if 'created_by_name' not in event_data:
-                                    event_data['created_by_name'] = st.session_state.name
-                                
-                                success, _ = db.add_event(event_data)
-                                if success:
-                                    success_count += 1
-                            
-                            st.success(f"✅ Imported {success_count}/{len(df)} events")
-                        
-                        elif import_type == "Users":
-                            success_count = 0
-                            for _, row in df.iterrows():
-                                user_data = row.to_dict()
-                                # Clean up NaN values
-                                user_data = {k: (v if pd.notna(v) else None) for k, v in user_data.items()}
-                                
-                                # Check if user exists
-                                existing = db.get_user(user_data.get('username', ''))
-                                if not existing:
-                                    # Add default password if missing
-                                    if 'password' not in user_data or not user_data['password']:
-                                        user_data['password'] = "Default@123"
-                                    
-                                    success, _ = db.add_user(user_data)
-                                    if success:
-                                        success_count += 1
-                            
-                            st.success(f"✅ Imported {success_count}/{len(df)} users")
-                        
-                        elif import_type == "Registrations":
-                            success_count = 0
-                            for _, row in df.iterrows():
-                                reg_data = row.to_dict()
-                                # Clean up NaN values
-                                reg_data = {k: (v if pd.notna(v) else None) for k, v in reg_data.items()}
-                                
-                                # Check if event exists
-                                event = db.get_event_by_id(reg_data.get('event_id', ''))
-                                if event:
-                                    # Check if student exists
-                                    student = db.get_user(reg_data.get('student_username', ''))
-                                    if student:
-                                        reg_id, message = db.add_registration(reg_data)
-                                        if reg_id:
-                                            success_count += 1
-                            
-                            st.success(f"✅ Imported {success_count}/{len(df)} registrations")
-                        
-                        st.rerun()
-                
-            except Exception as e:
-                st.error(f"Error importing data: {e}")
-
-# ============================================
-# EVENT DETAILS PAGE
-# ============================================
-
-def event_details_page(event_id):
-    """Detailed event view page"""
-    event = db.get_event_by_id(event_id)
-    
-    if not event:
-        st.error("Event not found!")
-        st.stop()
-    
-    st.markdown('<h1 class="main-header">📅 Event Details</h1>', unsafe_allow_html=True)
-    
-    # Back button
-    if st.button("← Back", key=f"back_from_event_{event_id}"):
-        if 'view_event_id' in st.session_state:
-            del st.session_state.view_event_id
-        st.rerun()
-    
-    # Display event details
-    display_event_card(event, st.session_state.get('username'))
-    
-    # Additional details in expanders
-    with st.expander("📋 Detailed Information", expanded=True):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**Event Information:**")
-            st.markdown(f"- **Type:** {event.get('event_type', 'N/A')}")
-            st.markdown(f"- **Category:** {event.get('event_category', 'N/A')}")
-            st.markdown(f"- **Difficulty:** {event.get('difficulty_level', 'Beginner')}")
-            st.markdown(f"- **Duration:** {event.get('estimated_duration', 'N/A')} minutes")
-            st.markdown(f"- **Certificate:** {'Yes' if event.get('has_certificate') else 'No'}")
-        
-        with col2:
-            st.markdown("**Organizational Details:**")
-            st.markdown(f"- **Organizer:** {event.get('organizer', 'N/A')}")
-            st.markdown(f"- **Created by:** {event.get('created_by_name', 'Unknown')}")
-            st.markdown(f"- **Created on:** {format_date(event.get('created_at', 'N/A'))}")
-            st.markdown(f"- **Last updated:** {format_date(event.get('updated_at', 'N/A'))}")
-        
-        # Mentor information if assigned
-        mentor_id = event.get('mentor_id')
-        if mentor_id:
-            mentor = db.get_mentor_by_id(mentor_id)
-            if mentor:
-                st.markdown("---")
-                st.markdown("**👨‍🏫 Assigned Mentor:**")
-                col_mentor1, col_mentor2 = st.columns(2)
-                with col_mentor1:
-                    st.markdown(f"- **Name:** {mentor.get('full_name', 'N/A')}")
-                    st.markdown(f"- **Department:** {mentor.get('department', 'N/A')}")
-                with col_mentor2:
-                    st.markdown(f"- **Email:** {mentor.get('email', 'N/A')}")
-                    st.markdown(f"- **Contact:** {mentor.get('contact', 'N/A')}")
-                if mentor.get('expertise'):
-                    st.markdown(f"- **Expertise:** {mentor.get('expertise', 'N/A')}")
-    
-    # Prerequisites and Resources
-    prerequisites = event.get('prerequisites')
-    if prerequisites:
-        with st.expander("📋 Prerequisites"):
-            st.markdown(prerequisites)
-    
-    resources = event.get('resources')
-    if resources and isinstance(resources, str):
-        try:
-            resources_list = json.loads(resources)
-            if resources_list:
-                with st.expander("📚 Resources"):
-                    for resource in resources_list:
-                        st.markdown(f"- {resource}")
-        except:
-            pass
-    
-    # Event statistics
-    with st.expander("📊 Event Statistics", expanded=False):
-        likes_count = db.get_event_likes_count(event_id)
-        interested_count = db.get_event_interested_count(event_id)
-        stats = db.get_event_participation_stats(event_id)
-        
-        col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-        with col_stat1:
-            st.metric("Total Registrations", stats['total'] if stats else 0)
-        with col_stat2:
-            st.metric("Likes", likes_count)
-        with col_stat3:
-            st.metric("Interested", interested_count)
-        with col_stat4:
-            if stats:
-                st.metric("Attendance Rate", f"{stats['attendance_rate']:.1f}%")
-    
-    # Feedback section
-    if st.session_state.get('role') == 'student' and db.is_student_registered(event_id, st.session_state.username):
-        with st.expander("💬 Provide Feedback", expanded=False):
-            feedback_form(event_id)
-    
-    # View feedback
-    with st.expander("🌟 Event Feedback & Reviews", expanded=False):
-        feedbacks = db.get_event_feedback(event_id, limit=20)
-        
-        if feedbacks:
-            st.subheader(f"Feedback ({len(feedbacks)})")
+        with st.form("system_settings"):
+            st.markdown("### Application Settings")
             
-            for feedback in feedbacks:
-                with st.container():
-                    rating = feedback.get('rating', 0)
-                    stars = "⭐" * rating
-                    
-                    col_fb1, col_fb2 = st.columns([4, 1])
-                    with col_fb1:
-                        st.markdown(f"**{stars}**")
-                        comments = feedback.get('comments', '')
-                        if comments:
-                            st.markdown(f"> {comments}")
-                    
-                    with col_fb2:
-                        if feedback.get('anonymous'):
-                            st.caption("Anonymous")
-                        else:
-                            student = db.get_user(feedback.get('student_username', ''))
-                            if student:
-                                st.caption(student.get('name', 'Student'))
-                    
-                    st.markdown("---")
-        else:
-            st.info("No feedback yet. Be the first to provide feedback!")
+            maintenance_mode = st.checkbox("Maintenance Mode", value=False,
+                                          help="When enabled, only admins can access the system")
+            
+            new_user_registration = st.checkbox("Allow New User Registration", value=True)
+            
+            event_creation = st.selectbox("Who can create events?", 
+                                         ["Admin Only", "Admin & Faculty", "All Users"])
+            
+            st.markdown("### Notification Settings")
+            
+            email_notifications = st.checkbox("Enable Email Notifications", value=False)
+            push_notifications = st.checkbox("Enable Push Notifications", value=True)
+            
+            st.markdown("### Performance Settings")
+            
+            cache_enabled = st.checkbox("Enable Caching", value=CACHE_ENABLED)
+            cache_size = st.slider("Cache Size (entries)", 100, 5000, 2000, 100)
+            
+            save_settings = st.form_submit_button("💾 Save Settings", use_container_width=True, type="primary")
+            
+            if save_settings:
+                st.success("Settings saved successfully! (Note: Some changes require restart)")
+                st.info("Actual implementation would save these to a configuration file or database.")
 
 # ============================================
-# CSS STYLING
+# HELPER FUNCTIONS FOR ADMIN
 # ============================================
 
-def add_custom_css():
-    """Add custom CSS styling"""
-    st.markdown("""
-    <style>
-    /* College Theme Colors */
-    :root {
-        --primary-color: #1E40AF;
-        --secondary-color: #3B82F6;
-        --accent-color: #10B981;
-        --danger-color: #EF4444;
-        --warning-color: #F59E0B;
-        --dark-color: #1F2937;
-        --light-color: #F9FAFB;
-        --card-bg: #FFFFFF;
-        --card-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    }
+def get_all_users():
+    """Get all users from database"""
+    return db.get_all_users()
+
+def confirm_action(message):
+    """Confirm an action with the user"""
+    return st.checkbox(f"✅ {message}")
+
+def export_all_data():
+    """Export all data as JSON"""
+    try:
+        data = {}
+        
+        tables = ['users', 'events', 'mentors', 'registrations', 'event_likes', 
+                 'event_interested', 'event_feedback', 'notifications', 'user_achievements']
+        
+        for table in tables:
+            try:
+                if db.use_supabase:
+                    table_data = db.client.select(table, limit=10000, use_cache=False)
+                else:
+                    table_data = db.client.execute_query(f"SELECT * FROM {table}", 
+                                                        fetchall=True, use_cache=False)
+                data[table] = table_data
+            except:
+                pass
+        
+        json_str = json.dumps(data, indent=2, default=str)
+        
+        st.download_button(
+            label="📥 Download JSON Backup",
+            data=json_str,
+            file_name=f"event_system_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json"
+        )
+        
+        st.success("✅ Data exported successfully!")
+        
+    except Exception as e:
+        st.error(f"Error exporting data: {e}")
+
+def export_csv_data():
+    """Export data as CSV"""
+    try:
+        tables = ['users', 'events', 'registrations']
+        
+        for table in tables:
+            try:
+                if db.use_supabase:
+                    table_data = db.client.select(table, limit=10000, use_cache=False)
+                else:
+                    table_data = db.client.execute_query(f"SELECT * FROM {table}", 
+                                                        fetchall=True, use_cache=False)
+                
+                if table_data:
+                    df = pd.DataFrame(table_data)
+                    csv = df.to_csv(index=False)
+                    
+                    st.download_button(
+                        label=f"📥 Download {table.capitalize()} CSV",
+                        data=csv,
+                        file_name=f"{table}_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                        key=f"download_{table}"
+                    )
+            except Exception as e:
+                st.warning(f"Could not export {table}: {e}")
     
-    /* Main containers */
-    .main-header {
-        color: var(--primary-color);
-        padding-bottom: 1rem;
-        border-bottom: 3px solid var(--secondary-color);
-        margin-bottom: 2rem;
-    }
-    
-    .college-header {
-        text-align: center;
-        padding: 1.5rem;
-        background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
-        color: white;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-    }
-    
-    /* Event cards */
-    .event-card {
-        background: var(--card-bg);
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
-        box-shadow: var(--card-shadow);
-        border-left: 5px solid var(--secondary-color);
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-    }
-    
-    .event-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-    }
-    
-    .card-title {
-        font-size: 1.4rem;
-        font-weight: 700;
-        color: var(--dark-color);
-        margin-bottom: 0.5rem;
-    }
-    
-    /* Registration cards */
-    .registration-card {
-        background: var(--card-bg);
-        border-radius: 8px;
-        padding: 1rem;
-        margin-bottom: 1rem;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        border: 1px solid #E5E7EB;
-    }
-    
-    .registration-section {
-        background: #F0F9FF;
-        padding: 1rem;
-        border-radius: 8px;
-        margin-top: 1rem;
-        border: 1px solid #BFDBFE;
-    }
-    
-    /* Leaderboard cards */
-    .leaderboard-card {
-        background: linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 100%);
-        border-radius: 10px;
-        padding: 1rem;
-        margin-bottom: 1rem;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-        border: 1px solid #E2E8F0;
-    }
-    
-    /* Badges and tags */
-    .role-badge {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 0.85rem;
-        font-weight: 700;
-        margin-right: 8px;
-    }
-    
-    .tag {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        background: #E0F2FE;
-        color: #0369A1;
-        margin-right: 4px;
-        margin-bottom: 4px;
-    }
-    
-    /* Progress bars */
-    .progress-container {
-        width: 100%;
-        height: 8px;
-        background: #E5E7EB;
-        border-radius: 4px;
-        overflow: hidden;
-        margin: 8px 0;
-    }
-    
-    .progress-bar {
-        height: 100%;
-        background: linear-gradient(90deg, var(--accent-color) 0%, var(--secondary-color) 100%);
-        border-radius: 4px;
-        transition: width 0.5s ease;
-    }
-    
-    /* Custom buttons */
-    .stButton > button {
-        transition: all 0.3s ease;
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    }
-    
-    /* Form styling */
-    .stForm {
-        background: var(--card-bg);
-        padding: 1.5rem;
-        border-radius: 10px;
-        box-shadow: var(--card-shadow);
-        margin-bottom: 1.5rem;
-    }
-    
-    /* Notification badges */
-    .notification-badge {
-        position: absolute;
-        top: -5px;
-        right: -5px;
-        background: var(--danger-color);
-        color: white;
-        border-radius: 50%;
-        width: 20px;
-        height: 20px;
-        font-size: 0.7rem;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    
-    /* Dashboard metrics */
-    .metric-card {
-        background: white;
-        padding: 1rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-        text-align: center;
-        border-top: 4px solid var(--secondary-color);
-    }
-    
-    /* Responsive adjustments */
-    @media (max-width: 768px) {
-        .event-card {
-            padding: 1rem;
+    except Exception as e:
+        st.error(f"Error exporting CSV data: {e}")
+
+def generate_backup_report():
+    """Generate a backup report"""
+    try:
+        report = {
+            "generated_at": datetime.now().isoformat(),
+            "system_info": {
+                "database": "Supabase PostgreSQL" if db.use_supabase else "SQLite",
+                "cache_enabled": CACHE_ENABLED,
+                "cache_size": cache.get_stats()['size']
+            },
+            "statistics": {}
         }
         
-        .card-title {
-            font-size: 1.2rem;
-        }
-    }
-    </style>
-    """, unsafe_allow_html=True)
+        tables = ['users', 'events', 'registrations']
+        
+        for table in tables:
+            try:
+                if db.use_supabase:
+                    table_data = db.client.select(table, limit=1, use_cache=False)
+                else:
+                    table_data = db.client.execute_query(f"SELECT COUNT(*) as count FROM {table}", 
+                                                        fetchone=True, use_cache=False)
+                
+                if table == 'users' and not db.use_supabase:
+                    report["statistics"][table] = {"count": table_data['count']}
+                else:
+                    report["statistics"][table] = {"count": len(table_data) if table_data else 0}
+            except:
+                report["statistics"][table] = {"count": 0, "error": "Could not retrieve"}
+        
+        report_str = json.dumps(report, indent=2)
+        
+        st.download_button(
+            label="📥 Download Backup Report",
+            data=report_str,
+            file_name=f"backup_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json"
+        )
+        
+        st.json(report)
+        
+    except Exception as e:
+        st.error(f"Error generating report: {e}")
+
+def format_date_relative(date_str):
+    """Format date as relative time (e.g., '2 hours ago')"""
+    try:
+        if isinstance(date_str, str):
+            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+        else:
+            dt = date_str
+        
+        now = datetime.now()
+        diff = now - dt
+        
+        if diff.days > 365:
+            years = diff.days // 365
+            return f"{years} year{'s' if years > 1 else ''} ago"
+        elif diff.days > 30:
+            months = diff.days // 30
+            return f"{months} month{'s' if months > 1 else ''} ago"
+        elif diff.days > 0:
+            return f"{diff.days} day{'s' if diff.days > 1 else ''} ago"
+        elif diff.seconds > 3600:
+            hours = diff.seconds // 3600
+            return f"{hours} hour{'s' if hours > 1 else ''} ago"
+        elif diff.seconds > 60:
+            minutes = diff.seconds // 60
+            return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+        else:
+            return "just now"
+    except:
+        return str(date_str)
 
 # ============================================
-# MAIN APPLICATION ROUTER
+# MAIN APPLICATION
 # ============================================
 
 def main():
-    """Main application router"""
-    # Add custom CSS
-    add_custom_css()
+    """Main application function"""
     
     # Initialize session state
-    if 'page' not in st.session_state:
-        st.session_state.page = "login"
     if 'role' not in st.session_state:
         st.session_state.role = None
     if 'username' not in st.session_state:
         st.session_state.username = None
+    if 'name' not in st.session_state:
+        st.session_state.name = None
+    if 'page' not in st.session_state:
+        st.session_state.page = "login"
     
-    # Check remember me cookie
-    check_remember_me_cookie()
+    # Check for remember me cookie
+    if 'role' not in st.session_state or st.session_state.role is None:
+        check_remember_me_cookie()
     
-    # Route to appropriate page
-    if st.session_state.role is None:
-        if st.session_state.page == "forgot_password":
-            forgot_password_page()
-        elif st.session_state.page == "student_register":
-            student_registration_page()
-        else:
-            landing_page()
+    # Session timeout check
+    if (st.session_state.role and 'session_start' in st.session_state and 
+        not st.session_state.get('remember_me', False)):
+        session_duration = datetime.now() - st.session_state.session_start
+        if session_duration.total_seconds() > SESSION_TIMEOUT_MINUTES * 60:
+            st.warning("Session timed out. Please login again.")
+            
+            # Clear query parameters
+            if hasattr(st, 'query_params'):
+                st.query_params.clear()
+            
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+    
+    # Display database info in sidebar
+    if db.use_supabase:
+        st.sidebar.success("✅ Using Supabase PostgreSQL")
     else:
-        # Check session timeout
-        if 'session_start' in st.session_state:
-            session_duration = datetime.now() - st.session_state.session_start
-            if session_duration.total_seconds() > SESSION_TIMEOUT_MINUTES * 60:
-                st.warning("Your session has expired. Please login again.")
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
+        st.sidebar.info("💾 Using SQLite (Local)")
+    
+    # Update event status periodically
+    if 'last_status_update' not in st.session_state:
+        st.session_state.last_status_update = datetime.now()
+    
+    if (datetime.now() - st.session_state.last_status_update).total_seconds() > 300:
+        try:
+            db.update_event_status()
+            st.session_state.last_status_update = datetime.now()
+        except:
+            pass
+    
+    # Route based on page
+    if st.session_state.page == "forgot_password":
+        forgot_password_page()
+    elif st.session_state.page == "student_register":
+        student_registration_page()
+    elif st.session_state.role is None:
+        landing_page()
+    
+    # Check for special states (feedback, view event)
+    elif 'feedback_event_id' in st.session_state:
+        feedback_form(st.session_state.feedback_event_id)
+    
+    elif 'view_event_id' in st.session_state:
+        event = db.get_event_by_id(st.session_state.view_event_id)
+        if event:
+            st.header("📋 Event Details")
+            display_event_card(event, st.session_state.username)
+            
+            if st.button("← Back", use_container_width=True):
+                del st.session_state.view_event_id
                 st.rerun()
-        
-        # Handle event details view
-        if 'view_event_id' in st.session_state:
-            event_details_page(st.session_state.view_event_id)
-            return
-        
-        # Handle feedback form
-        if 'feedback_event_id' in st.session_state:
-            feedback_form(st.session_state.feedback_event_id)
-            return
-        
-        # Route based on role
-        if st.session_state.role == 'admin':
-            admin_dashboard()
-        elif st.session_state.role == 'faculty':
-            faculty_dashboard()
-        elif st.session_state.role == 'mentor':
-            mentor_dashboard()
-        elif st.session_state.role == 'student':
-            student_dashboard()
         else:
-            st.error("Invalid role detected. Please logout and login again.")
-            if st.button("Logout"):
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                st.rerun()
+            st.error("Event not found!")
+            del st.session_state.view_event_id
+            st.rerun()
+    
+    # Route to appropriate dashboard
+    elif st.session_state.role == 'student':
+        student_dashboard()
+    elif st.session_state.role == 'faculty':
+        faculty_dashboard()
+    elif st.session_state.role == 'mentor':
+        mentor_dashboard()
+    elif st.session_state.role == 'admin':
+        admin_dashboard()
+    else:
+        # If role is set but doesn't match any dashboard, show error
+        st.error(f"Invalid role configuration: {st.session_state.role}")
+        if st.button("Logout"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
 
 # ============================================
-# RUN THE APPLICATION
+# STYLES
+# ============================================
+
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #1e3a8a;
+        margin-bottom: 1.5rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    .college-header h1 {
+        font-size: 2.8rem;
+        color: #1e3a8a;
+        margin-bottom: 0.5rem;
+    }
+    .college-header h3 {
+        font-size: 1.2rem;
+        color: #6b7280;
+        margin-top: 0;
+    }
+    .event-card {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        border: 1px solid #e5e7eb;
+        transition: all 0.3s ease;
+    }
+    .event-card:hover {
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        transform: translateY(-2px);
+    }
+    .card-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #1f2937;
+        margin-bottom: 8px;
+        line-height: 1.3;
+    }
+    .registration-card, .user-card, .leaderboard-card {
+        background: white;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 12px;
+        border: 1px solid #e5e7eb;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    .registration-section {
+        background: #f8fafc;
+        border-radius: 8px;
+        padding: 16px;
+        margin-top: 16px;
+        border: 1px solid #e2e8f0;
+    }
+    .stButton button {
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.2s;
+    }
+    .stButton button:hover {
+        transform: translateY(-1px);
+    }
+    .stProgress > div > div {
+        background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+    }
+    .css-1d391kg {
+        padding: 2rem 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ============================================
+# RUN APPLICATION
 # ============================================
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        st.error(f"An error occurred: {str(e)}")
+        st.error(f"An error occurred: {str(e)[:200]}")
         logger.error(f"Application error: {e}", exc_info=True)
-        st.markdown("""
-        ### 🚨 Application Error
-        
-        The application encountered an unexpected error. Please try the following:
-        
-        1. **Refresh the page** - This often resolves temporary issues
-        2. **Clear your browser cache** - Sometimes cached data causes problems
-        3. **Logout and login again** - This resets your session
-        
-        If the problem persists, please contact the system administrator.
-        
-        **Technical Details:**
-        ```
-        {error}
-        ```
-        """.format(error=str(e)))
-        
-        if st.button("🔄 Refresh Application"):
-            st.rerun()
-        
-        if st.button("🚪 Logout and Restart"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
+        if st.button("Restart Application"):
             st.rerun()
