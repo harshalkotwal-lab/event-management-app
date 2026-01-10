@@ -1087,6 +1087,8 @@ class DatabaseManager:
             logger.error(f"Error getting events: {e}")
             return []
 
+    
+
     def get_events_by_creator(self, username):
         """Get events created by specific user"""
         try:
@@ -2641,17 +2643,17 @@ class DatabaseManager:
         try:
             likes = self.get_event_likes_count(event_id)
             interested = self.get_event_interested_count(event_id)
-            registrations = self._get_event_registration_count(event_id)
-            
+            registrations = self._get_event_registration_count(event_id)  # Fixed: using the method we just added
+        
             popularity = (likes * 0.3) + (interested * 0.4) + (registrations * 0.3)
-            
+        
             self.client.update('events', {'id': event_id}, {
                 'popularity_score': popularity,
                 'updated_at': datetime.now().isoformat()
             }, use_cache=False)
-            
+        
             cache.delete(f"event_{event_id}")
-            
+        
         except Exception as e:
             logger.error(f"Error updating popularity: {e}")
     
@@ -8366,8 +8368,3 @@ if __name__ == "__main__":
         if st.session_state.get('role') == 'admin':
             with st.expander("Error Details (Admin Only)"):
                 st.code(traceback.format_exc())
-        
-        if st.button("🔄 Restart Application"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
