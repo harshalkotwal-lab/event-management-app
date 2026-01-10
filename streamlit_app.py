@@ -1058,6 +1058,52 @@ class DatabaseManager:
         """Start background maintenance tasks"""
         threading.Thread(target=self._background_maintenance, daemon=True).start()
 
+    def get_all_events(self, cache_ttl=60, use_cache=True):
+        """Get all events"""
+        cache_key = "events_all"
+        if use_cache and CACHE_ENABLED:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+    
+        try:
+            if self.use_supabase:
+                events = self.client.select('events', limit=1000, 
+                                      order_by='event_date.desc', 
+                                      cache_ttl=cache_ttl, use_cache=use_cache)
+            else:
+                events = self.client.execute_query(
+                    "SELECT * FROM events ORDER BY event_date DESC LIMIT 1000",
+                    fetchall=True, use_cache=use_cache
+                )
+        
+            events = events or []
+        
+            if use_cache:
+                cache.set(cache_key, events, ttl=cache_ttl)
+        
+            return events
+        
+        except Exception as e:
+            logger.error(f"Error getting events: {e}")
+            return []
+
+    def get_events_by_creator(self, username):
+        """Get events created by specific user"""
+        try:
+            if self.use_supabase:
+                events = self.client.select('events', {'created_by': username}, limit=1000)
+                if events:
+                    events.sort(key=lambda x: x.get('event_date', ''), reverse=True)
+                return events
+            else:
+                return self.client.execute_query(
+                    "SELECT * FROM events WHERE created_by = ? ORDER BY event_date DESC",
+                    (username,), fetchall=True
+                )
+        except:
+            return []
+
     def get_all_users(self, cache_ttl=60, use_cache=True):
         """Get all users from the database"""
         cache_key = "all_users"
@@ -1118,109 +1164,74 @@ class DatabaseManager:
                 logger.error(f"Background maintenance error: {e}")
                 time.sleep(60)
     
+    # And update the _update_event_status method to use the simpler version without get_all_events:
     def _update_event_status(self):
-        """Update event status based on current time"""
+        """Update event status based on current time - SIMPLIFIED VERSION"""
         try:
             now = datetime.now()
-        
+            now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+            now_date = now.strftime('%Y-%m-%d')
+            
             if self.use_supabase:
-                events = self.get_all_events(cache_ttl=0, use_cache=False)
-            
-                for event in events:
-                    event_date = event.get('event_date')
-                    event_id = event.get('id')
-                    current_status = event.get('status', 'upcoming')
-                    end_date = event.get('end_date')
-                
-                    if isinstance(event_date, str):
-                        try:
-                            # Parse date string to datetime
-                            event_dt = None
-                        
-                            # Try different date formats
-                            for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                try:
+                    # Update events that should be ongoing (happening today or in progress)
+                    self.client.update('events', 
+                        {'event_date': {'lte': now_str}, 'status': 'upcoming'},
+                        {'status': 'ongoing', 'updated_at': now.isoformat()},
+                        use_cache=False
+                    )
+                    
+                    # Update events that should be completed (past events)
+                    self.client.update('events',
+                        {'event_date': {'lt': now_date}, 'status': {'in': ['upcoming', 'ongoing']}},
+                        {'status': 'completed', 'updated_at': now.isoformat()},
+                        use_cache=False
+                    )
+                except Exception as supabase_error:
+                    logger.warning(f"Supabase update error, trying alternative: {supabase_error}")
+                    # Fallback approach
+                    events = self.client.select('events', {'status': {'in': ['upcoming', 'ongoing']}}, use_cache=False)
+                    if events:
+                        for event in events:
+                            event_date = event.get('event_date')
+                            if event_date:
                                 try:
-                                    event_dt = datetime.strptime(event_date, fmt)
-                                    break
+                                    # Simple date comparison
+                                    if isinstance(event_date, str):
+                                        # Remove timezone info if present
+                                        if 'T' in event_date:
+                                            event_date = event_date.split('T')[0]
+                                    
+                                    if event_date < now_date:
+                                        self.client.update('events', {'id': event['id']}, 
+                                                         {'status': 'completed', 'updated_at': now.isoformat()},
+                                                         use_cache=False)
+                                    elif event_date == now_date and event.get('status') == 'upcoming':
+                                        self.client.update('events', {'id': event['id']}, 
+                                                         {'status': 'ongoing', 'updated_at': now.isoformat()},
+                                                         use_cache=False)
                                 except:
                                     continue
-                        
-                            # If no format matched, try ISO format
-                            if event_dt is None:
-                                try:
-                                    if 'Z' in event_date or '+' in event_date:
-                                        # Timezone-aware datetime
-                                        event_dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
-                                        event_dt = event_dt.replace(tzinfo=None)  # Make naive
-                                    else:
-                                        # Naive datetime
-                                        event_dt = datetime.fromisoformat(event_date)
-                                except:
-                                    logger.warning(f"Could not parse event date: {event_date}")
-                                    continue
-                        
-                            if end_date:
-                                end_dt = None
-                                try:
-                                    # Parse end date
-                                    for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
-                                        try:
-                                            end_dt = datetime.strptime(end_date, fmt)
-                                            break
-                                        except:
-                                            continue
-                                
-                                    if end_dt is None:
-                                        if 'Z' in end_date or '+' in end_date:
-                                            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-                                            end_dt = end_dt.replace(tzinfo=None)
-                                        else:
-                                            end_dt = datetime.fromisoformat(end_date)
-                                
-                                    if end_dt < now and current_status != 'completed':
-                                        self.client.update('events', {'id': event_id}, {
-                                            'status': 'completed',
-                                            'updated_at': now.isoformat()
-                                        }, use_cache=False)
-                                except:
-                                    pass  # Skip if end_date parsing fails
-                        
-                            elif event_dt <= now and current_status == 'upcoming':
-                                self.client.update('events', {'id': event_id}, {
-                                    'status': 'ongoing',
-                                    'updated_at': now.isoformat()
-                                }, use_cache=False)
-                        
-                            elif event_dt < now and current_status not in ['completed', 'cancelled']:
-                                self.client.update('events', {'id': event_id}, {
-                                    'status': 'completed',
-                                    'updated_at': now.isoformat()
-                                }, use_cache=False)
-                            
-                        except Exception as e:
-                            logger.warning(f"Error parsing event date {event_date}: {e}")
-                            continue
-                        
             else:
-                # For SQLite - use string comparison for simplicity
-                now_str = now.strftime('%Y-%m-%d %H:%M:%S')
+                # For SQLite
                 self.client.execute_query(
-                    "UPDATE events SET status = 'ongoing', updated_at = ? WHERE event_date <= ? AND status = 'upcoming'",
+                    "UPDATE events SET status = 'ongoing', updated_at = ? WHERE date(event_date) <= date(?) AND status = 'upcoming'",
+                    (now_str, now_str), commit=True
+                )
+                
+                self.client.execute_query(
+                    "UPDATE events SET status = 'completed', updated_at = ? WHERE date(event_date) < date(?) AND status IN ('upcoming', 'ongoing')",
                     (now_str, now_str), commit=True
                 )
             
-                self.client.execute_query(
-                    "UPDATE events SET status = 'completed', updated_at = ? WHERE event_date < ? AND status IN ('upcoming', 'ongoing')",
-                    (now_str, now_str), commit=True
-                )
-        
+            # Clear cache
             cache.delete("events_all")
             cache.delete("events_upcoming")
-        
+            
             return True
-        
+            
         except Exception as e:
-            logger.error(f"Error updating event status: {e}")
+            logger.error(f"Error in _update_event_status: {e}")
             return False
     
     def _clean_old_cache(self):
@@ -1895,51 +1906,8 @@ def add_event(self, event_data):
         """Notify users interested in similar events"""
         pass
     
-    def get_all_events(self, cache_ttl=60, use_cache=True):
-        """Get all events"""
-        cache_key = "events_all"
-        if use_cache and CACHE_ENABLED:
-            cached = cache.get(cache_key)
-            if cached is not None:
-                return cached
+       
     
-        try:
-            if self.use_supabase:
-                events = self.client.select('events', limit=1000, 
-                                      order_by='event_date.desc', 
-                                      cache_ttl=cache_ttl, use_cache=use_cache)
-            else:
-                events = self.client.execute_query(
-                    "SELECT * FROM events ORDER BY event_date DESC LIMIT 1000",
-                    fetchall=True, use_cache=use_cache
-                )
-        
-            events = events or []
-        
-            if use_cache:
-                cache.set(cache_key, events, ttl=cache_ttl)
-        
-            return events
-        
-        except Exception as e:
-            logger.error(f"Error getting events: {e}")
-            return []
-    
-    def get_events_by_creator(self, username):
-        """Get events created by specific user"""
-        try:
-            if self.use_supabase:
-                events = self.client.select('events', {'created_by': username}, limit=1000)
-                if events:
-                    events.sort(key=lambda x: x.get('event_date', ''), reverse=True)
-                return events
-            else:
-                return self.client.execute_query(
-                    "SELECT * FROM events WHERE created_by = ? ORDER BY event_date DESC",
-                    (username,), fetchall=True
-                )
-        except:
-            return []
     
     def get_event_with_mentor(self, event_id):
         """Get event with mentor details"""
