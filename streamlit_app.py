@@ -118,8 +118,14 @@ GAMIFICATION_CONFIG = {
         "daily_login": 10,
         "feedback_submission": 15,
         "invite_friend": 50,
-        "complete_profile": 100
+        "complete_profile": 100,
+        "excellent_work": 75,        # Added
+        "innovation_award": 100,     # Added
+        "team_contribution": 50,     # Added
+        "leadership": 80,            # Added
+        "best_presentation": 60      # Added
     },
+    
     "badges": {
         "registration": "🏅 Participant",
         "shortlisted": "⭐ Shortlisted",
@@ -1527,7 +1533,148 @@ class DatabaseManager:
         cache.delete(f"user_{username}")
         cache.delete(f"user_stats_{username}")
 
-    
+    def get_students_by_event(self, event_id):
+    """Get all students registered for an event"""
+    try:
+        if self.use_supabase:
+            registrations = self.client.select('registrations', {'event_id': event_id})
+        else:
+            registrations = self.client.execute_query(
+                "SELECT r.*, u.department, u.year, u.total_points FROM registrations r LEFT JOIN users u ON r.student_username = u.username WHERE r.event_id = ? ORDER BY r.student_name",
+                (event_id,), fetchall=True
+            )
+        
+        return registrations or []
+    except Exception as e:
+        logger.error(f"Error getting students by event: {e}")
+        return []
+
+    def update_registration_status(self, registration_id, status, mentor_notes=None, points_awarded=0, badges_awarded=""):
+        """Update registration status and award points"""
+        try:
+            # Get registration details first
+            if self.use_supabase:
+                results = self.client.select('registrations', {'id': registration_id}, limit=1)
+                if not results:
+                    return False, "Registration not found"
+                registration = results[0]
+            else:
+                registration = self.client.execute_query(
+                    "SELECT * FROM registrations WHERE id = ?",
+                    (registration_id,), fetchone=True
+                )
+                if not registration:
+                    return False, "Registration not found"
+        
+            update_data = {
+                'status': status,
+                'updated_at': datetime.now().isoformat()
+            }
+        
+            if mentor_notes:
+                update_data['mentor_notes'] = mentor_notes
+        
+            if points_awarded > 0:
+                update_data['points_awarded'] = points_awarded
+            
+                # Award points to student
+                student_username = registration['student_username']
+                event_title = registration.get('event_title', 'Event')
+            
+                success = self.award_points(
+                    student_username, 
+                    points_awarded,
+                    f"event_{status.lower()}",
+                    f"{status} in {event_title[:30]}"
+                )
+            
+                if not success:
+                    return False, "Failed to award points"
+        
+            if badges_awarded:
+                update_data['badges_awarded'] = badges_awarded
+        
+            if status == 'present' and 'checked_in_at' not in registration:
+                update_data['checked_in_at'] = datetime.now().isoformat()
+        
+            success = self.client.update('registrations', {'id': registration_id}, update_data, use_cache=False)
+        
+            if success:
+                # Clear relevant caches
+                self._clear_registration_cache(registration['student_username'])
+                cache.delete(f"registrations_event_{registration['event_id']}")
+            
+                # Send notification to student
+                if points_awarded > 0:
+                    self.create_notification(
+                        user_id=registration['student_username'],
+                        title=f"🏆 Points Awarded!",
+                        message=f"You earned {points_awarded} points for {status.lower()} in '{registration.get('event_title', 'Event')}'",
+                        notification_type="points_awarded",
+                        related_id=registration['event_id']
+                    )
+            
+                return True, "Status updated successfully"
+            else:
+                return False, "Failed to update status"
+            
+        except Exception as e:
+            logger.error(f"Error updating registration status: {e}")
+            return False, str(e)
+
+    def bulk_update_registrations(self, registration_ids, status, points_awarded=0):
+        """Bulk update registrations (for attendance marking)"""
+        try:
+            success_count = 0
+            for reg_id in registration_ids:
+                success, _ = self.update_registration_status(reg_id, status, points_awarded=points_awarded)
+                if success:
+                    success_count += 1
+        
+            return True, f"Updated {success_count}/{len(registration_ids)} registrations"
+        except Exception as e:
+            logger.error(f"Error in bulk update: {e}")
+            return False, str(e)
+
+    def get_event_participation_stats(self, event_id):
+        """Get participation statistics for an event"""
+        try:
+            registrations = self.get_students_by_event(event_id)
+        
+            if not registrations:
+                return {
+                    'total': 0,
+                    'by_status': {},
+                    'total_points_awarded': 0,
+                    'attendance_rate': 0
+                }
+        
+            stats = {
+                'total': len(registrations),
+                'by_status': defaultdict(int),
+                'total_points_awarded': 0,
+                'attendance_rate': 0
+            }
+        
+            present_count = 0
+            for reg in registrations:
+                status = reg.get('status', 'pending')
+                stats['by_status'][status] += 1
+            
+                if status == 'present':
+                    present_count += 1
+            
+                points = reg.get('points_awarded', 0)
+                stats['total_points_awarded'] += points
+        
+            if stats['total'] > 0:
+                stats['attendance_rate'] = (present_count / stats['total']) * 100
+        
+            return stats
+        
+        except Exception as e:
+            logger.error(f"Error getting participation stats: {e}")
+            return None
     
     # ============================================
     # EVENT MANAGEMENT METHODS
@@ -5830,7 +5977,7 @@ def mentor_dashboard():
     
     with st.sidebar:
         st.markdown("### Navigation")
-        nav_options = ["My Events", "Student Engagement", "My Profile"]
+        nav_options = ["My Events", "Student Engagement", "Points Management", "My Profile"]  # Added Points Management
         
         if 'mentor_page' not in st.session_state:
             st.session_state.mentor_page = "My Events"
@@ -5854,9 +6001,137 @@ def mentor_dashboard():
     if selected == "My Events":
         mentor_events_page(mentor)
     elif selected == "Student Engagement":
-        mentor_engagement_page(mentor)
+        mentor_engagement_page(mentor)  # This is the enhanced page
+    elif selected == "Points Management":
+        mentor_points_management_page(mentor)  # You'll need to create this
     elif selected == "My Profile":
         mentor_profile_page(mentor)
+
+def mentor_points_management_page(mentor):
+    """Advanced points management for mentors"""
+    st.markdown('<h1 class="main-header">🏆 Advanced Points Management</h1>', unsafe_allow_html=True)
+    
+    if not mentor:
+        st.error("Mentor profile not found!")
+        return
+    
+    st.info("This page allows you to manage points across all events you're mentoring.")
+    
+    # Get all events mentored by this mentor
+    mentor_id = mentor['id']
+    events = db.get_events_by_mentor(mentor_id)
+    
+    if not events:
+        st.info("No events assigned for points management.")
+        return
+    
+    tab1, tab2, tab3 = st.tabs(["📊 Overview", "📈 Points History", "⚙️ Bulk Operations"])
+    
+    with tab1:
+        st.subheader("Points Overview")
+        
+        total_points_awarded = 0
+        total_students = 0
+        events_points = []
+        
+        for event in events:
+            stats = db.get_event_participation_stats(event['id'])
+            if stats:
+                events_points.append({
+                    'Event': event['title'],
+                    'Students': stats['total'],
+                    'Points Awarded': stats['total_points_awarded'],
+                    'Avg Points/Student': stats['total_points_awarded'] / stats['total'] if stats['total'] > 0 else 0
+                })
+                total_points_awarded += stats['total_points_awarded']
+                total_students += stats['total']
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Events", len(events))
+        with col2:
+            st.metric("Total Students", total_students)
+        with col3:
+            st.metric("Total Points Awarded", total_points_awarded)
+        
+        if events_points:
+            df = pd.DataFrame(events_points)
+            st.dataframe(df, use_container_width=True)
+    
+    with tab2:
+        st.subheader("Recent Points Awards")
+        
+        # Get recent points transactions (you would need to implement this in DatabaseManager)
+        st.info("Points history tracking would be implemented here.")
+        st.markdown("""
+        **Suggested Features:**
+        1. View all points awarded by you
+        2. Filter by date, event, or student
+        3. Export points history
+        4. Audit trail of all point adjustments
+        """)
+    
+    with tab3:
+        st.subheader("Bulk Points Operations")
+        
+        st.warning("⚠️ Bulk operations affect multiple students at once. Use with caution!")
+        
+        selected_event_title = st.selectbox("Select Event for Bulk Operation", 
+                                          [e['title'] for e in events])
+        
+        if selected_event_title:
+            event = next(e for e in events if e['title'] == selected_event_title)
+            registrations = db.get_students_by_event(event['id'])
+            
+            if registrations:
+                st.markdown(f"**Event:** {event['title']}")
+                st.markdown(f"**Registrations:** {len(registrations)} students")
+                
+                # Bulk points award
+                st.markdown("### Award Points to All Participants")
+                bulk_points = st.number_input("Points per student", min_value=0, max_value=500, value=25)
+                bulk_reason = st.text_input("Reason for bulk award", 
+                                          value="Participation award")
+                
+                if st.button("🎯 Award to All Participants", type="primary", use_container_width=True):
+                    with st.spinner("Awarding points..."):
+                        success_count = 0
+                        for reg in registrations:
+                            success, _ = db.update_registration_status(
+                                reg['id'], 'bulk_award',
+                                mentor_notes=f"Bulk award: {bulk_reason}",
+                                points_awarded=bulk_points
+                            )
+                            if success:
+                                success_count += 1
+                        
+                        st.success(f"Awarded {bulk_points} points to {success_count} students!")
+                        time.sleep(1)
+                        st.rerun()
+                
+                # Selective award
+                st.markdown("### Award to Selected Students")
+                
+                student_options = {f"{reg['student_name']} ({reg['student_roll']})": reg['id'] 
+                                 for reg in registrations}
+                selected_students = st.multiselect("Select students", list(student_options.keys()))
+                
+                if selected_students and st.button("🎯 Award to Selected", use_container_width=True):
+                    with st.spinner("Processing..."):
+                        success_count = 0
+                        for student_label in selected_students:
+                            reg_id = student_options[student_label]
+                            success, _ = db.update_registration_status(
+                                reg_id, 'selective_award',
+                                mentor_notes="Selected for special award",
+                                points_awarded=bulk_points
+                            )
+                            if success:
+                                success_count += 1
+                        
+                        st.success(f"Awarded {bulk_points} points to {success_count} selected students!")
+                        time.sleep(1)
+                        st.rerun()
 
 def mentor_events_page(mentor):
     """Mentor's assigned events page"""
@@ -5895,8 +6170,8 @@ def mentor_events_page(mentor):
         display_event_card(event, None)
 
 def mentor_engagement_page(mentor):
-    """Student engagement monitoring page for mentors"""
-    st.markdown('<h1 class="main-header">📊 Student Engagement</h1>', unsafe_allow_html=True)
+    """Enhanced student engagement monitoring page for mentors"""
+    st.markdown('<h1 class="main-header">📊 Student Engagement & Points Management</h1>', unsafe_allow_html=True)
     
     if not mentor:
         st.error("Mentor profile not found!")
@@ -5916,84 +6191,335 @@ def mentor_engagement_page(mentor):
         event_id = event_options[selected_event_title]
         selected_event = next(e for e in events if e['id'] == event_id)
         
+        # Event stats
         likes_count = db.get_event_likes_count(event_id)
         interested_count = db.get_event_interested_count(event_id)
-        registrations = db.get_registrations_by_event(event_id)
+        stats = db.get_event_participation_stats(event_id)
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Likes", likes_count)
+            st.metric("Total Registrations", stats['total'] if stats else 0)
         with col2:
-            st.metric("Interested", interested_count)
+            st.metric("Likes", likes_count)
         with col3:
-            st.metric("Registrations", len(registrations))
+            st.metric("Interested", interested_count)
+        with col4:
+            if stats:
+                st.metric("Points Awarded", stats['total_points_awarded'])
         
         st.markdown("---")
-        st.subheader("📋 Registered Students")
         
-        if registrations:
-            df_data = []
-            for reg in registrations:
-                df_data.append({
-                    'Student Name': reg.get('student_name'),
-                    'Roll No': reg.get('student_roll', 'N/A'),
-                    'Department': reg.get('student_dept', 'N/A'),
-                    'Mobile': reg.get('student_mobile', 'N/A'),
-                    'Status': reg.get('status', 'pending').title(),
-                    'Attendance': reg.get('attendance', 'absent').title(),
-                    'Registered On': format_date(reg.get('registered_at'))
-                })
+        # Tabs for different management functions
+        tab1, tab2, tab3, tab4 = st.tabs(["📋 Registered Students", "📝 Attendance", "🏆 Award Points", "📊 Statistics"])
+        
+        with tab1:
+            st.subheader("📋 Registered Students")
+            registrations = db.get_students_by_event(event_id)
             
-            if df_data:
-                df = pd.DataFrame(df_data)
-                st.dataframe(df, use_container_width=True)
+            if registrations:
+                # Display students in a table
+                df_data = []
+                for reg in registrations:
+                    df_data.append({
+                        'ID': reg.get('id'),
+                        'Student Name': reg.get('student_name'),
+                        'Roll No': reg.get('student_roll', 'N/A'),
+                        'Department': reg.get('student_dept', 'N/A'),
+                        'Status': reg.get('status', 'pending').title(),
+                        'Points Awarded': reg.get('points_awarded', 0),
+                        'Badges': reg.get('badges_awarded', ''),
+                        'Registered On': format_date(reg.get('registered_at'))
+                    })
                 
-                st.subheader("📝 Attendance Management")
-                student_options = {f"{reg['student_name']} ({reg['student_roll']})": reg['student_username'] 
-                                 for reg in registrations}
-                selected_student = st.selectbox("Select Student", list(student_options.keys()))
+                if df_data:
+                    df = pd.DataFrame(df_data)
+                    st.dataframe(df, use_container_width=True)
+                    
+                    # Export options
+                    csv = df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download CSV",
+                        data=csv,
+                        file_name=f"students_{selected_event_title.replace(' ', '_')}.csv",
+                        mime="text/csv"
+                    )
+            else:
+                st.info("No students have registered for this event yet.")
+        
+        with tab2:
+            st.subheader("📝 Attendance Management")
+            
+            registrations = db.get_students_by_event(event_id)
+            if not registrations:
+                st.info("No students to mark attendance.")
+            else:
+                # Quick attendance marking
+                st.markdown("### Quick Attendance")
+                col_quick1, col_quick2 = st.columns(2)
                 
-                if selected_student:
-                    student_username = student_options[selected_student]
-                    
-                    col_att1, col_att2 = st.columns(2)
-                    with col_att1:
-                        if st.button("✅ Mark Present", use_container_width=True, type="primary"):
-                            if db.use_supabase:
-                                success = db.client.update('registrations', 
-                                                         {'event_id': event_id, 'student_username': student_username},
-                                                         {'attendance': 'present', 'checked_in_at': datetime.now().isoformat()})
-                            else:
-                                cursor = db.client.conn.cursor()
-                                cursor.execute("UPDATE registrations SET attendance = 'present', checked_in_at = ? WHERE event_id = ? AND student_username = ?",
-                                             (datetime.now().isoformat(), event_id, student_username))
-                                db.client.conn.commit()
-                                success = cursor.rowcount > 0
+                with col_quick1:
+                    if st.button("✅ Mark All Present", use_container_width=True):
+                        reg_ids = [reg['id'] for reg in registrations]
+                        success, message = db.bulk_update_registrations(reg_ids, 'present', points_awarded=25)
+                        if success:
+                            st.success(message)
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(message)
+                
+                with col_quick2:
+                    if st.button("❌ Mark All Absent", use_container_width=True):
+                        reg_ids = [reg['id'] for reg in registrations]
+                        success, message = db.bulk_update_registrations(reg_ids, 'absent')
+                        if success:
+                            st.success(message)
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error(message)
+                
+                st.markdown("---")
+                st.markdown("### Individual Attendance")
+                
+                for reg in registrations:
+                    with st.container():
+                        col_info, col_actions = st.columns([3, 2])
+                        
+                        with col_info:
+                            status_color = "🟢" if reg.get('status') == 'present' else "🔴" if reg.get('status') == 'absent' else "🟡"
+                            st.markdown(f"**{reg.get('student_name')}** {status_color}")
+                            st.caption(f"Roll: {reg.get('student_roll', 'N/A')} | Dept: {reg.get('student_dept', 'N/A')}")
+                        
+                        with col_actions:
+                            col_btn1, col_btn2 = st.columns(2)
+                            with col_btn1:
+                                if st.button("Present", key=f"present_{reg['id']}", use_container_width=True):
+                                    success, message = db.update_registration_status(
+                                        reg['id'], 'present', 
+                                        mentor_notes=f"Marked present by mentor {mentor['full_name']}",
+                                        points_awarded=25
+                                    )
+                                    if success:
+                                        st.success("Marked present!")
+                                        time.sleep(0.5)
+                                        st.rerun()
+                                    else:
+                                        st.error(message)
                             
-                            if success:
-                                st.success(f"Marked {selected_student} as present!")
-                                time.sleep(1)
-                                st.rerun()
+                            with col_btn2:
+                                if st.button("Absent", key=f"absent_{reg['id']}", use_container_width=True):
+                                    success, message = db.update_registration_status(
+                                        reg['id'], 'absent',
+                                        mentor_notes=f"Marked absent by mentor {mentor['full_name']}"
+                                    )
+                                    if success:
+                                        st.success("Marked absent!")
+                                        time.sleep(0.5)
+                                        st.rerun()
+                                    else:
+                                        st.error(message)
+                        
+                        st.markdown("---")
+        
+        with tab3:
+            st.subheader("🏆 Award Points & Achievements")
+            
+            registrations = db.get_students_by_event(event_id)
+            if not registrations:
+                st.info("No students to award points.")
+            else:
+                st.markdown("### Award Points Based on Performance")
+                
+                # Select student
+                student_options = {f"{reg['student_name']} ({reg['student_roll']})": reg for reg in registrations}
+                selected_student_label = st.selectbox("Select Student", list(student_options.keys()))
+                
+                if selected_student_label:
+                    selected_reg = student_options[selected_student_label]
                     
-                    with col_att2:
-                        if st.button("❌ Mark Absent", use_container_width=True, type="secondary"):
-                            if db.use_supabase:
-                                success = db.client.update('registrations', 
-                                                         {'event_id': event_id, 'student_username': student_username},
-                                                         {'attendance': 'absent'})
-                            else:
-                                cursor = db.client.conn.cursor()
-                                cursor.execute("UPDATE registrations SET attendance = 'absent' WHERE event_id = ? AND student_username = ?",
-                                             (event_id, student_username))
-                                db.client.conn.commit()
-                                success = cursor.rowcount > 0
-                            
+                    col_info, col_points = st.columns([2, 1])
+                    with col_info:
+                        st.markdown(f"**Selected:** {selected_reg['student_name']}")
+                        st.caption(f"Current Status: {selected_reg.get('status', 'pending').title()}")
+                        st.caption(f"Points Already Awarded: {selected_reg.get('points_awarded', 0)}")
+                    
+                    with col_points:
+                        total_points = db.get_student_points(selected_reg['student_username'])
+                        st.metric("Total Points", total_points)
+                    
+                    st.markdown("---")
+                    
+                    # Points award options
+                    st.markdown("#### Performance Categories")
+                    
+                    col_cat1, col_cat2, col_cat3, col_cat4 = st.columns(4)
+                    
+                    with col_cat1:
+                        if st.button("🎯 Participation", use_container_width=True, 
+                                   help="Award points for participating"):
+                            success, message = db.update_registration_status(
+                                selected_reg['id'], 'participated',
+                                mentor_notes="Awarded for participation",
+                                points_awarded=GAMIFICATION_CONFIG['points']['participation']
+                            )
                             if success:
-                                st.success(f"Marked {selected_student} as absent!")
-                                time.sleep(1)
+                                st.success(f"Awarded {GAMIFICATION_CONFIG['points']['participation']} points!")
+                                time.sleep(0.5)
                                 st.rerun()
-        else:
-            st.info("No students have registered for this event yet.")
+                            else:
+                                st.error(message)
+                    
+                    with col_cat2:
+                        if st.button("⭐ Shortlisted", use_container_width=True,
+                                   help="Award points for being shortlisted"):
+                            success, message = db.update_registration_status(
+                                selected_reg['id'], 'shortlisted',
+                                mentor_notes="Awarded for being shortlisted",
+                                points_awarded=GAMIFICATION_CONFIG['points']['shortlisted']
+                            )
+                            if success:
+                                st.success(f"Awarded {GAMIFICATION_CONFIG['points']['shortlisted']} points!")
+                                time.sleep(0.5)
+                                st.rerun()
+                            else:
+                                st.error(message)
+                    
+                    with col_cat3:
+                        if st.button("🥈 Runner Up", use_container_width=True,
+                                   help="Award points for being runner-up"):
+                            success, message = db.update_registration_status(
+                                selected_reg['id'], 'runner_up',
+                                mentor_notes="Awarded for being runner-up",
+                                points_awarded=GAMIFICATION_CONFIG['points']['runner_up']
+                            )
+                            if success:
+                                st.success(f"Awarded {GAMIFICATION_CONFIG['points']['runner_up']} points!")
+                                time.sleep(0.5)
+                                st.rerun()
+                            else:
+                                st.error(message)
+                    
+                    with col_cat4:
+                        if st.button("🏆 Winner", use_container_width=True,
+                                   help="Award points for winning"):
+                            success, message = db.update_registration_status(
+                                selected_reg['id'], 'winner',
+                                mentor_notes="Awarded for winning",
+                                points_awarded=GAMIFICATION_CONFIG['points']['winner']
+                            )
+                            if success:
+                                st.success(f"Awarded {GAMIFICATION_CONFIG['points']['winner']} points!")
+                                time.sleep(0.5)
+                                st.rerun()
+                            else:
+                                st.error(message)
+                    
+                    st.markdown("---")
+                    st.markdown("#### Custom Points Award")
+                    
+                    col_custom1, col_custom2 = st.columns([2, 1])
+                    
+                    with col_custom1:
+                        custom_points = st.number_input("Points to Award", min_value=0, max_value=1000, value=50, step=10)
+                        custom_reason = st.text_input("Reason", placeholder="e.g., Excellent presentation, Best project, etc.")
+                    
+                    with col_custom2:
+                        if st.button("🎯 Award Custom Points", use_container_width=True, type="primary"):
+                            if custom_points > 0:
+                                success, message = db.update_registration_status(
+                                    selected_reg['id'], 'custom_award',
+                                    mentor_notes=f"Custom award: {custom_reason}",
+                                    points_awarded=custom_points
+                                )
+                                if success:
+                                    st.success(f"Awarded {custom_points} points!")
+                                    time.sleep(0.5)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                            else:
+                                st.warning("Please enter points to award")
+                    
+                    st.markdown("---")
+                    st.markdown("#### Badge Awards")
+                    
+                    badge_options = list(GAMIFICATION_CONFIG['badges'].values())
+                    selected_badge = st.selectbox("Select Badge to Award", badge_options)
+                    
+                    if st.button("🛡️ Award Badge", use_container_width=True):
+                        success, message = db.update_registration_status(
+                            selected_reg['id'], 'badge_awarded',
+                            mentor_notes=f"Badge awarded: {selected_badge}",
+                            badges_awarded=selected_badge
+                        )
+                        if success:
+                            st.success(f"Awarded badge: {selected_badge}")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.error(message)
+        
+        with tab4:
+            st.subheader("📊 Event Statistics")
+            
+            if stats:
+                col_stat1, col_stat2 = st.columns(2)
+                
+                with col_stat1:
+                    # Status distribution chart
+                    status_data = dict(stats['by_status'])
+                    if status_data:
+                        fig1 = px.pie(
+                            names=list(status_data.keys()),
+                            values=list(status_data.values()),
+                            title="Registration Status Distribution",
+                            hole=0.3
+                        )
+                        st.plotly_chart(fig1, use_container_width=True)
+                
+                with col_stat2:
+                    # Attendance rate gauge
+                    attendance_rate = stats['attendance_rate']
+                    fig2 = go.Figure(go.Indicator(
+                        mode="gauge+number",
+                        value=attendance_rate,
+                        title={'text': "Attendance Rate"},
+                        domain={'x': [0, 1], 'y': [0, 1]},
+                        gauge={
+                            'axis': {'range': [0, 100]},
+                            'bar': {'color': "#3B82F6"},
+                            'steps': [
+                                {'range': [0, 50], 'color': "#FEF3C7"},
+                                {'range': [50, 80], 'color': "#A7F3D0"},
+                                {'range': [80, 100], 'color': "#10B981"}
+                            ]
+                        }
+                    ))
+                    st.plotly_chart(fig2, use_container_width=True)
+                
+                # Points summary
+                st.markdown(f"**Total Points Awarded in this Event:** {stats['total_points_awarded']}")
+                
+                # Top performers in this event
+                st.markdown("### Top Performers (This Event)")
+                registrations_with_points = [r for r in registrations if r.get('points_awarded', 0) > 0]
+                if registrations_with_points:
+                    top_performers = sorted(registrations_with_points, 
+                                          key=lambda x: x.get('points_awarded', 0), 
+                                          reverse=True)[:5]
+                    
+                    for i, performer in enumerate(top_performers, 1):
+                        with st.container():
+                            col_name, col_points = st.columns([3, 1])
+                            with col_name:
+                                st.markdown(f"**{i}. {performer['student_name']}**")
+                                st.caption(f"Status: {performer.get('status', '').title()}")
+                            with col_points:
+                                st.markdown(f"**{performer.get('points_awarded', 0)} pts**")
+                            st.markdown("---")
+                else:
+                    st.info("No points awarded yet in this event.")
 
 def mentor_profile_page(mentor):
     """Mentor profile page"""
