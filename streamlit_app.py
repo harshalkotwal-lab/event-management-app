@@ -1171,65 +1171,102 @@ class DatabaseManager:
             now = datetime.now()
             now_str = now.strftime('%Y-%m-%d %H:%M:%S')
             now_date = now.strftime('%Y-%m-%d')
-            
+        
             if self.use_supabase:
                 try:
                     # Update events that should be ongoing (happening today or in progress)
+                    # Use proper Supabase filter syntax: status=in.(upcoming,ongoing)
                     self.client.update('events', 
-                        {'event_date': {'lte': now_str}, 'status': 'upcoming'},
+                        {
+                            'event_date': f'lte.{now_str}',
+                            'status': 'eq.upcoming'
+                        },
                         {'status': 'ongoing', 'updated_at': now.isoformat()},
                         use_cache=False
                     )
-                    
+                
                     # Update events that should be completed (past events)
+                    # For multiple status values, we need to update separately or use a different approach
+                    # First update upcoming events that are past
                     self.client.update('events',
-                        {'event_date': {'lt': now_date}, 'status': {'in': ['upcoming', 'ongoing']}},
+                        {
+                            'event_date': f'lt.{now_date}',
+                            'status': 'eq.upcoming'
+                        },
                         {'status': 'completed', 'updated_at': now.isoformat()},
                         use_cache=False
                     )
+                
+                    # Then update ongoing events that are past
+                    self.client.update('events',
+                        {
+                            'event_date': f'lt.{now_date}',
+                            'status': 'eq.ongoing'
+                        },
+                        {'status': 'completed', 'updated_at': now.isoformat()},
+                        use_cache=False
+                    )
+                
                 except Exception as supabase_error:
                     logger.warning(f"Supabase update error, trying alternative: {supabase_error}")
-                    # Fallback approach
-                    events = self.client.select('events', {'status': {'in': ['upcoming', 'ongoing']}}, use_cache=False)
-                    if events:
-                        for event in events:
-                            event_date = event.get('event_date')
-                            if event_date:
-                                try:
-                                    # Simple date comparison
-                                    if isinstance(event_date, str):
-                                        # Remove timezone info if present
-                                        if 'T' in event_date:
-                                            event_date = event_date.split('T')[0]
-                                    
-                                    if event_date < now_date:
-                                        self.client.update('events', {'id': event['id']}, 
-                                                         {'status': 'completed', 'updated_at': now.isoformat()},
-                                                         use_cache=False)
-                                    elif event_date == now_date and event.get('status') == 'upcoming':
-                                        self.client.update('events', {'id': event['id']}, 
-                                                         {'status': 'ongoing', 'updated_at': now.isoformat()},
-                                                         use_cache=False)
-                                except:
-                                    continue
+                    # Fallback approach - fetch and update individually
+                    try:
+                        # Get upcoming events
+                        upcoming_events = self.client.select('events', {'status': 'eq.upcoming'}, use_cache=False)
+                        ongoing_events = self.client.select('events', {'status': 'eq.ongoing'}, use_cache=False)
+                    
+                        all_events = []
+                        if upcoming_events:
+                            all_events.extend(upcoming_events)
+                        if ongoing_events:
+                            all_events.extend(ongoing_events)
+                    
+                        if all_events:
+                            for event in all_events:
+                                event_date = event.get('event_date')
+                                if event_date:
+                                    try:
+                                        # Parse date
+                                        if isinstance(event_date, str):
+                                            # Extract date part
+                                            if 'T' in event_date:
+                                                event_date_str = event_date.split('T')[0]
+                                            else:
+                                                event_date_str = event_date
+                                        
+                                            if event_date_str < now_date:
+                                                # Event is in the past
+                                                self.client.update('events', {'id': f'eq.{event["id"]}'}, 
+                                                             {'status': 'completed', 'updated_at': now.isoformat()},
+                                                             use_cache=False)
+                                            elif event_date_str == now_date and event.get('status') == 'upcoming':
+                                                # Event is today and still marked as upcoming
+                                                self.client.update('events', {'id': f'eq.{event["id"]}'}, 
+                                                             {'status': 'ongoing', 'updated_at': now.isoformat()},
+                                                             use_cache=False)
+                                    except Exception as e:
+                                        logger.warning(f"Error processing event {event.get('id')}: {e}")
+                                        continue
+                    except Exception as fallback_error:
+                        logger.error(f"Fallback also failed: {fallback_error}")
             else:
                 # For SQLite
                 self.client.execute_query(
                     "UPDATE events SET status = 'ongoing', updated_at = ? WHERE date(event_date) <= date(?) AND status = 'upcoming'",
                     (now_str, now_str), commit=True
                 )
-                
+            
                 self.client.execute_query(
                     "UPDATE events SET status = 'completed', updated_at = ? WHERE date(event_date) < date(?) AND status IN ('upcoming', 'ongoing')",
                     (now_str, now_str), commit=True
                 )
-            
+        
             # Clear cache
             cache.delete("events_all")
             cache.delete("events_upcoming")
-            
+        
             return True
-            
+        
         except Exception as e:
             logger.error(f"Error in _update_event_status: {e}")
             return False
