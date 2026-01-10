@@ -1534,20 +1534,20 @@ class DatabaseManager:
         cache.delete(f"user_stats_{username}")
 
     def get_students_by_event(self, event_id):
-    """Get all students registered for an event"""
-    try:
-        if self.use_supabase:
-            registrations = self.client.select('registrations', {'event_id': event_id})
-        else:
-            registrations = self.client.execute_query(
-                "SELECT r.*, u.department, u.year, u.total_points FROM registrations r LEFT JOIN users u ON r.student_username = u.username WHERE r.event_id = ? ORDER BY r.student_name",
-                (event_id,), fetchall=True
-            )
+        """Get all students registered for an event"""
+        try:
+            if self.use_supabase:
+                registrations = self.client.select('registrations', {'event_id': event_id})
+            else:
+                registrations = self.client.execute_query(
+                    "SELECT r.*, u.department, u.year, u.total_points FROM registrations r LEFT JOIN users u ON r.student_username = u.username WHERE r.event_id = ? ORDER BY r.student_name",
+                    (event_id,), fetchall=True
+                )
         
-        return registrations or []
-    except Exception as e:
-        logger.error(f"Error getting students by event: {e}")
-        return []
+            return registrations or []
+        except Exception as e:
+            logger.error(f"Error getting students by event: {e}")
+            return []
 
     def update_registration_status(self, registration_id, status, mentor_notes=None, points_awarded=0, badges_awarded=""):
         """Update registration status and award points"""
