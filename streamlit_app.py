@@ -1680,106 +1680,110 @@ class DatabaseManager:
     # EVENT MANAGEMENT METHODS
     # ============================================
     
-    def add_event(self, event_data):
-        """Add new event with better error handling"""
-        try:
-            # Validate required fields
-            required_fields = ['title', 'description', 'event_type', 'event_date', 'venue', 'organizer']
-            for field in required_fields:
-                if field not in event_data or not event_data[field]:
-                    return False, f"Missing required field: {field}"
-        
-            # Ensure event_date is properly formatted
-            event_date = event_data.get('event_date')
-            if isinstance(event_date, datetime):
-                event_date_str = event_date.isoformat()
-            elif isinstance(event_date, str):
-                event_date_str = event_date
-            else:
-                return False, "Invalid event date format"
-        
-            # Handle end_date
-            end_date = event_data.get('end_date')
-            if end_date:
-                if isinstance(end_date, datetime):
-                    end_date_str = end_date.isoformat()
-                elif isinstance(end_date, str):
-                    end_date_str = end_date
-                else:
-                    end_date_str = None
+    # ============================================
+# EVENT MANAGEMENT METHODS - FIX
+# ============================================
+
+def add_event(self, event_data):
+    """Add new event with better error handling"""
+    try:
+        # Validate required fields
+        required_fields = ['title', 'description', 'event_type', 'event_date', 'venue', 'organizer']
+        for field in required_fields:
+            if field not in event_data or not event_data[field]:
+                return False, f"Missing required field: {field}"
+    
+        # Ensure event_date is properly formatted
+        event_date = event_data.get('event_date')
+        if isinstance(event_date, datetime):
+            event_date_str = event_date.isoformat()
+        elif isinstance(event_date, str):
+            event_date_str = event_date
+        else:
+            return False, "Invalid event date format"
+    
+        # Handle end_date
+        end_date = event_data.get('end_date')
+        if end_date:
+            if isinstance(end_date, datetime):
+                end_date_str = end_date.isoformat()
+            elif isinstance(end_date, str):
+                end_date_str = end_date
             else:
                 end_date_str = None
+        else:
+            end_date_str = None
+    
+        # Prepare event record - REMOVED certificate_template
+        event_record = {
+            'id': event_data.get('id', str(uuid.uuid4())),
+            'title': event_data.get('title').strip(),
+            'description': event_data.get('description', '').strip(),
+            'event_type': event_data.get('event_type'),
+            'event_category': event_data.get('event_category', 'Technical'),
+            'event_date': event_date_str,
+            'end_date': end_date_str,
+            'venue': event_data.get('venue', '').strip(),
+            'organizer': event_data.get('organizer', '').strip(),
+            'co_organizers': json.dumps(event_data.get('co_organizers', [])),
+            'event_link': event_data.get('event_link', ''),
+            'registration_link': event_data.get('registration_link', ''),
+            'max_participants': int(event_data.get('max_participants', 100)),
+            'current_participants': 0,
+            'flyer_path': event_data.get('flyer_path', ''),
+            'tags': json.dumps(event_data.get('tags', [])),
+            'prerequisites': event_data.get('prerequisites', ''),
+            'resources': json.dumps(event_data.get('resources', [])),
+            'created_by': event_data.get('created_by', ''),
+            'created_by_name': event_data.get('created_by_name', 'Unknown'),
+            'ai_generated': bool(event_data.get('ai_generated', False)),
+            'status': 'upcoming',
+            'mentor_id': event_data.get('mentor_id'),
+            'difficulty_level': event_data.get('difficulty_level', 'Beginner'),
+            'estimated_duration': event_data.get('estimated_duration'),
+            'has_certificate': bool(event_data.get('has_certificate', False)),
+            # REMOVED: 'certificate_template': event_data.get('certificate_template', ''),
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat(),
+            'views_count': 0,
+            'popularity_score': 0.0
+        }
+    
+        # Convert boolean to integer for SQLite if needed
+        if not self.use_supabase:
+            event_record['ai_generated'] = 1 if event_record['ai_generated'] else 0
+            event_record['has_certificate'] = 1 if event_record['has_certificate'] else 0
+    
+        logger.info(f"Attempting to create event: {event_record['title']}")
+    
+        success = self.client.insert('events', event_record, use_cache=False)
+    
+        if success:
+            logger.info(f"Event created successfully: {event_record['title']}")
         
-            # Prepare event record
-            event_record = {
-                'id': event_data.get('id', str(uuid.uuid4())),
-                'title': event_data.get('title').strip(),
-                'description': event_data.get('description', '').strip(),
-                'event_type': event_data.get('event_type'),
-                'event_category': event_data.get('event_category', 'Technical'),
-                'event_date': event_date_str,
-                'end_date': end_date_str,
-                'venue': event_data.get('venue', '').strip(),
-                'organizer': event_data.get('organizer', '').strip(),
-                'co_organizers': json.dumps(event_data.get('co_organizers', [])),
-                'event_link': event_data.get('event_link', ''),
-                'registration_link': event_data.get('registration_link', ''),
-                'max_participants': int(event_data.get('max_participants', 100)),
-                'current_participants': 0,
-                'flyer_path': event_data.get('flyer_path', ''),
-                'tags': json.dumps(event_data.get('tags', [])),
-                'prerequisites': event_data.get('prerequisites', ''),
-                'resources': json.dumps(event_data.get('resources', [])),
-                'created_by': event_data.get('created_by', ''),
-                'created_by_name': event_data.get('created_by_name', 'Unknown'),
-                'ai_generated': bool(event_data.get('ai_generated', False)),
-                'status': 'upcoming',
-                'mentor_id': event_data.get('mentor_id'),
-                'difficulty_level': event_data.get('difficulty_level', 'Beginner'),
-                'estimated_duration': event_data.get('estimated_duration'),
-                'has_certificate': bool(event_data.get('has_certificate', False)),
-                'certificate_template': event_data.get('certificate_template', ''),
-                'created_at': datetime.now().isoformat(),
-                'updated_at': datetime.now().isoformat(),
-                'views_count': 0,
-                'popularity_score': 0.0
-            }
+            # Clear cache
+            cache.delete("events_all")
+            cache.delete("events_upcoming")
         
-            # Convert boolean to integer for SQLite if needed
-            if not self.use_supabase:
-                event_record['ai_generated'] = 1 if event_record['ai_generated'] else 0
-                event_record['has_certificate'] = 1 if event_record['has_certificate'] else 0
+            # Award points to creator if it's a user
+            if event_record['created_by'] and event_record['created_by'] not in ['admin@raisoni', 'faculty@raisoni']:
+                self.award_points(event_record['created_by'], 
+                            GAMIFICATION_CONFIG['points']['event_creation'],
+                            "event_creation", 
+                            f"Created event: {event_record['title'][:30]}")
         
-            logger.info(f"Attempting to create event: {event_record['title']}")
+            # Notify interested users (placeholder for future implementation)
+            # self._notify_interested_users(event_record)
         
-            success = self.client.insert('events', event_record, use_cache=False)
-        
-            if success:
-                logger.info(f"Event created successfully: {event_record['title']}")
-            
-                # Clear cache
-                cache.delete("events_all")
-                cache.delete("events_upcoming")
-            
-                # Award points to creator if it's a user
-                if event_record['created_by'] and event_record['created_by'] not in ['admin@raisoni', 'faculty@raisoni']:
-                    self.award_points(event_record['created_by'], 
-                                GAMIFICATION_CONFIG['points']['event_creation'],
-                                "event_creation", 
-                                f"Created event: {event_record['title'][:30]}")
-            
-                # Notify interested users (placeholder for future implementation)
-                # self._notify_interested_users(event_record)
-            
-                return True, event_record['id']
-        
-            logger.error(f"Failed to insert event into database: {event_record['title']}")
-            return False, "Database insertion failed"
-        
-        except Exception as e:
-            logger.error(f"Error adding event: {str(e)}")
-            logger.error(f"Event data: {event_data}")
-            return False, str(e)
+            return True, event_record['id']
+    
+        logger.error(f"Failed to insert event into database: {event_record['title']}")
+        return False, "Database insertion failed"
+    
+    except Exception as e:
+        logger.error(f"Error adding event: {str(e)}")
+        logger.error(f"Event data: {event_data}")
+        return False, str(e)
     
     def _notify_interested_users(self, event):
         """Notify users interested in similar events"""
@@ -5607,26 +5611,27 @@ def create_event_page():
                         tags = [tag.strip() for tag in tags_input.split(',')] if tags_input else []
             
                         event_data = {
-                            'title': title.strip(),
-                            'description': description.strip(),
-                            'event_type': event_type,
-                            'event_category': event_category,
+                            'title': ai_title,
+                            'description': ai_description,
+                            'event_type': ai_event_type,
+                            'event_category': ai_event_category,
                             'event_date': event_datetime.isoformat(),
-                            'venue': venue.strip(),
-                            'organizer': organizer.strip(),
-                            'event_link': event_link if event_link else None,
-                            'registration_link': registration_link if registration_link else None,
-                            'max_participants': int(max_participants),
-                            'difficulty_level': difficulty_level,
-                            'estimated_duration': int(estimated_duration) if estimated_duration else None,
-                            'has_certificate': has_certificate,
-                            'prerequisites': prerequisites.strip() if prerequisites else None,
+                            'venue': ai_venue,
+                            'organizer': ai_organizer,
+                            'event_link': ai_event_link,
+                            'registration_link': ai_reg_link,
+                            'max_participants': ai_max_participants,
+                            'difficulty_level': ai_difficulty,
+                            'estimated_duration': ai_duration,
+                            'has_certificate': ai_certificate,
+                            'prerequisites': ai_prerequisites,
                             'tags': tags,
                             'flyer_path': flyer_path,
                             'created_by': st.session_state.username,
                             'created_by_name': st.session_state.name,
-                            'ai_generated': False,
-                            'mentor_id': mentor_id
+                            'ai_generated': True,
+                            'ai_metadata': event_data.get('ai_metadata', {}),
+                            'mentor_id': ai_mentor_id
                         }
             
                         with st.spinner("Creating event..."):
