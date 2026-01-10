@@ -1526,6 +1526,8 @@ class DatabaseManager:
         """Clear cache for user"""
         cache.delete(f"user_{username}")
         cache.delete(f"user_stats_{username}")
+
+    
     
     # ============================================
     # EVENT MANAGEMENT METHODS
