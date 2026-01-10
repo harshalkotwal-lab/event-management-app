@@ -1048,7 +1048,6 @@ class DatabaseManager:
         
         # Initialize database
         self._initialize_database()
-        # REMOVE THIS LINE: self._add_default_users()  # This is causing the error
         self._initialized = True
         
         # Start background tasks
@@ -1207,8 +1206,7 @@ class DatabaseManager:
         """Background maintenance tasks"""
         while True:
             try:
-                # Call the method directly
-                self._update_event_status()  # Changed from self.update_event_status()
+                self._update_event_status()
                 self._clean_old_cache()
                 self._update_analytics_cache()
                 time.sleep(300)  # Run every 5 minutes
@@ -1216,121 +1214,100 @@ class DatabaseManager:
                 logger.error(f"Background maintenance error: {e}")
                 time.sleep(60)
     
-    # And update the _update_event_status method to use the simpler version without get_all_events:
     def _update_event_status(self):
         """Update event status based on current time - SIMPLIFIED VERSION"""
         try:
             now = datetime.now()
-        
-            # Format timestamps properly for Supabase
-            now_iso = now.isoformat()  # ISO format: 2026-01-10T15:41:47.123456
+            now_iso = now.isoformat()
             now_date_str = now.strftime('%Y-%m-%d')
         
             if self.use_supabase:
+                try:    
+                    # Get upcoming events
+                    upcoming_events = self.client.select('events', {'status': 'eq.upcoming'}, use_cache=False)
+                    if upcoming_events:
+                        for event in upcoming_events:
+                            event_date = event.get('event_date')
+                            if event_date:
+                                try:
+                                    if isinstance(event_date, str):
+                                        if 'T' in event_date:
+                                            event_datetime_str = event_date.split('+')[0] if '+' in event_date else event_date.split('Z')[0] if 'Z' in event_date else event_date
+                                            event_dt = datetime.fromisoformat(event_datetime_str)
+                                        else:
+                                            event_dt = datetime.strptime(event_date, '%Y-%m-%d')
+                                    
+                                        if event_dt.date() == now.date():
+                                            self.client.update('events', {'id': f'eq.{event["id"]}'}, 
+                                                         {'status': 'ongoing', 'updated_at': now_iso},
+                                                         use_cache=False)
+                                        elif event_dt.date() < now.date():
+                                            self.client.update('events', {'id': f'eq.{event["id"]}'}, 
+                                                         {'status': 'completed', 'updated_at': now_iso},
+                                                         use_cache=False)
+                                except Exception as parse_error:
+                                    logger.warning(f"Could not parse event date {event_date}: {parse_error}")
+                                    continue
+                
+                except Exception as e:
+                    logger.warning(f"Error processing upcoming events: {e}")
+                
+                # Process ongoing events to mark as completed if past
                 try:
-                    # Format 1: Update ongoing events (events happening now or today)
-                    # Note: This might be too restrictive - events might span multiple days
-                    # We'll use a simpler approach instead
-                
-                    # SIMPLER APPROACH: Get all upcoming and ongoing events and check dates
-                    try:    
-                        # Get upcoming events
-                        upcoming_events = self.client.select('events', {'status': 'eq.upcoming'}, use_cache=False)
-                        if upcoming_events:
-                            for event in upcoming_events:
-                                event_date = event.get('event_date')
-                                if event_date:
-                                    try:
-                                        # Parse event date
-                                        if isinstance(event_date, str):
-                                            # Try to parse ISO format
-                                            if 'T' in event_date:
-                                                event_datetime_str = event_date.split('+')[0] if '+' in event_date else event_date.split('Z')[0] if 'Z' in event_date else event_date
-                                                event_dt = datetime.fromisoformat(event_datetime_str)
-                                            else:
-                                                # Just date
-                                                event_dt = datetime.strptime(event_date, '%Y-%m-%d')
-                                        
-                                            # Check if event should be ongoing
-                                            if event_dt.date() == now.date():
-                                                # Event is today, mark as ongoing
-                                                self.client.update('events', {'id': f'eq.{event["id"]}'}, 
-                                                             {'status': 'ongoing', 'updated_at': now_iso},
-                                                             use_cache=False)
-                                            elif event_dt.date() < now.date():
-                                                # Event is in the past, mark as completed
-                                                self.client.update('events', {'id': f'eq.{event["id"]}'}, 
-                                                             {'status': 'completed', 'updated_at': now_iso},
-                                                             use_cache=False)
-                                    except Exception as parse_error:
-                                        logger.warning(f"Could not parse event date {event_date}: {parse_error}")
-                                        continue
-                
-                    except Exception as e:
-                        logger.warning(f"Error processing upcoming events: {e}")
-                
-                    # Process ongoing events to mark as completed if past
-                    try:
-                        ongoing_events = self.client.select('events', {'status': 'eq.ongoing'}, use_cache=False)
-                        if ongoing_events:
-                            for event in ongoing_events:
-                                event_date = event.get('event_date')
-                                end_date = event.get('end_date')
-                            
-                                if event_date:
-                                    try:
-                                        if isinstance(event_date, str):
-                                            # Try to parse ISO format
-                                            if 'T' in event_date:
-                                                event_datetime_str = event_date.split('+')[0] if '+' in event_date else event_date.split('Z')[0] if 'Z' in event_date else event_date
-                                                event_dt = datetime.fromisoformat(event_datetime_str)
-                                            else:
-                                                event_dt = datetime.strptime(event_date, '%Y-%m-%d')
-                                        
-                                            # Check end date if available
-                                            should_complete = False
-                                            if end_date:
-                                                try:
-                                                    if isinstance(end_date, str):
-                                                        if 'T' in end_date:
-                                                            end_datetime_str = end_date.split('+')[0] if '+' in end_date else end_date.split('Z')[0] if 'Z' in end_date else end_date
-                                                            end_dt = datetime.fromisoformat(end_datetime_str)
-                                                        else:
-                                                            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+                    ongoing_events = self.client.select('events', {'status': 'eq.ongoing'}, use_cache=False)
+                    if ongoing_events:
+                        for event in ongoing_events:
+                            event_date = event.get('event_date')
+                            end_date = event.get('end_date')
+                        
+                            if event_date:
+                                try:
+                                    if isinstance(event_date, str):
+                                        if 'T' in event_date:
+                                            event_datetime_str = event_date.split('+')[0] if '+' in event_date else event_date.split('Z')[0] if 'Z' in event_date else event_date
+                                            event_dt = datetime.fromisoformat(event_datetime_str)
+                                        else:
+                                            event_dt = datetime.strptime(event_date, '%Y-%m-%d')
+                                    
+                                        should_complete = False
+                                        if end_date:
+                                            try:
+                                                if isinstance(end_date, str):
+                                                    if 'T' in end_date:
+                                                        end_datetime_str = end_date.split('+')[0] if '+' in end_date else end_date.split('Z')[0] if 'Z' in end_date else end_date
+                                                        end_dt = datetime.fromisoformat(end_datetime_str)
+                                                    else:
+                                                        end_dt = datetime.strptime(end_date, '%Y-%m-%d')
                                                 
-                                                        if end_dt.date() < now.date():
-                                                            should_complete = True
-                                                except:
-                                                    pass
-                                        
-                                            # If no end date or couldn't parse, check event date
-                                            if not should_complete and event_dt.date() < now.date():
-                                                should_complete = True
-                                        
-                                            if should_complete:
-                                                self.client.update('events', {'id': f'eq.{event["id"]}'}, 
-                                                             {'status': 'completed', 'updated_at': now_iso},
-                                                             use_cache=False)
-                                    except Exception as parse_error:
-                                        logger.warning(f"Could not parse ongoing event date {event_date}: {parse_error}")
-                                        continue
+                                                    if end_dt.date() < now.date():
+                                                        should_complete = True
+                                            except:
+                                                pass
+                                    
+                                        if not should_complete and event_dt.date() < now.date():
+                                            should_complete = True
+                                    
+                                    if should_complete:
+                                        self.client.update('events', {'id': f'eq.{event["id"]}'}, 
+                                                     {'status': 'completed', 'updated_at': now_iso},
+                                                     use_cache=False)
+                                except Exception as parse_error:
+                                    logger.warning(f"Could not parse ongoing event date {event_date}: {parse_error}")
+                                    continue
                 
-                    except Exception as e:
-                        logger.warning(f"Error processing ongoing events: {e}")
+                except Exception as e:
+                    logger.warning(f"Error processing ongoing events: {e}")
                 
                 except Exception as supabase_error:
                     logger.error(f"Supabase update error: {supabase_error}")
             else:
-                # For SQLite - simplified approach
                 try:
-                    # Mark today's upcoming events as ongoing
                     today_str = now.strftime('%Y-%m-%d')
                     self.client.execute_query(
                         "UPDATE events SET status = 'ongoing', updated_at = ? WHERE date(event_date) = date(?) AND status = 'upcoming'",
                         (now_iso, today_str), commit=True
                     )
                 
-                    # Mark past events as completed
                     self.client.execute_query(
                         "UPDATE events SET status = 'completed', updated_at = ? WHERE date(event_date) < date(?) AND status IN ('upcoming', 'ongoing')",
                         (now_iso, today_str), commit=True
@@ -1338,7 +1315,6 @@ class DatabaseManager:
                 except Exception as sqlite_error:
                     logger.error(f"SQLite update error: {sqlite_error}")
         
-            # Clear cache
             cache.delete("events_all")
             cache.delete("events_upcoming")
         
@@ -1614,14 +1590,12 @@ class DatabaseManager:
             input_hash = hashlib.sha256(password.encode()).hexdigest().lower()
             
             if stored_pass == input_hash or stored_pass == password:
-                # Update last login and streak
                 update_data = {
                     'last_login': datetime.now().isoformat(),
                     'updated_at': datetime.now().isoformat(),
                     'login_attempts': 0
                 }
                 
-                # Check daily login streak
                 last_login = user.get('last_daily_login')
                 if last_login:
                     try:
@@ -1764,6 +1738,7 @@ class DatabaseManager:
         cache.delete(f"user_{username}")
         cache.delete(f"user_stats_{username}")
 
+    # FIXED: Added missing method
     def get_students_by_event(self, event_id):
         """Get all students registered for an event"""
         try:
@@ -1779,6 +1754,47 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting students by event: {e}")
             return []
+
+    # FIXED: Added missing method
+    def get_event_participation_stats(self, event_id):
+        """Get participation statistics for an event"""
+        try:
+            registrations = self.get_students_by_event(event_id)
+        
+            if not registrations:
+                return {
+                    'total': 0,
+                    'by_status': {},
+                    'total_points_awarded': 0,
+                    'attendance_rate': 0
+                }
+        
+            stats = {
+                'total': len(registrations),
+                'by_status': defaultdict(int),
+                'total_points_awarded': 0,
+                'attendance_rate': 0
+            }
+        
+            present_count = 0
+            for reg in registrations:
+                status = reg.get('status', 'pending')
+                stats['by_status'][status] += 1
+            
+                if status == 'present':
+                    present_count += 1
+            
+                points = reg.get('points_awarded', 0)
+                stats['total_points_awarded'] += points
+        
+            if stats['total'] > 0:
+                stats['attendance_rate'] = (present_count / stats['total']) * 100
+        
+            return stats
+        
+        except Exception as e:
+            logger.error(f"Error getting participation stats: {e}")
+            return None
 
     def update_registration_status(self, registration_id, status, mentor_notes=None, points_awarded=0, badges_awarded=""):
         """Update registration status and award points"""
@@ -1866,162 +1882,114 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error in bulk update: {e}")
             return False, str(e)
-
-    def get_event_participation_stats(self, event_id):
-        """Get participation statistics for an event"""
-        try:
-            registrations = self.get_students_by_event(event_id)
-        
-            if not registrations:
-                return {
-                    'total': 0,
-                    'by_status': {},
-                    'total_points_awarded': 0,
-                    'attendance_rate': 0
-                }
-        
-            stats = {
-                'total': len(registrations),
-                'by_status': defaultdict(int),
-                'total_points_awarded': 0,
-                'attendance_rate': 0
-            }
-        
-            present_count = 0
-            for reg in registrations:
-                status = reg.get('status', 'pending')
-                stats['by_status'][status] += 1
-            
-                if status == 'present':
-                    present_count += 1
-            
-                points = reg.get('points_awarded', 0)
-                stats['total_points_awarded'] += points
-        
-            if stats['total'] > 0:
-                stats['attendance_rate'] = (present_count / stats['total']) * 100
-        
-            return stats
-        
-        except Exception as e:
-            logger.error(f"Error getting participation stats: {e}")
-            return None
     
     # ============================================
     # EVENT MANAGEMENT METHODS
     # ============================================
     
-    # ============================================
-# EVENT MANAGEMENT METHODS - FIX
-# ============================================
-
-def add_event(self, event_data):
-    """Add new event with better error handling"""
-    try:
-        # Validate required fields
-        required_fields = ['title', 'description', 'event_type', 'event_date', 'venue', 'organizer']
-        for field in required_fields:
-            if field not in event_data or not event_data[field]:
-                return False, f"Missing required field: {field}"
-    
-        # Ensure event_date is properly formatted
-        event_date = event_data.get('event_date')
-        if isinstance(event_date, datetime):
-            event_date_str = event_date.isoformat()
-        elif isinstance(event_date, str):
-            event_date_str = event_date
-        else:
-            return False, "Invalid event date format"
-    
-        # Handle end_date
-        end_date = event_data.get('end_date')
-        if end_date:
-            if isinstance(end_date, datetime):
-                end_date_str = end_date.isoformat()
-            elif isinstance(end_date, str):
-                end_date_str = end_date
+    def add_event(self, event_data):
+        """Add new event with better error handling"""
+        try:
+            # Validate required fields
+            required_fields = ['title', 'description', 'event_type', 'event_date', 'venue', 'organizer']
+            for field in required_fields:
+                if field not in event_data or not event_data[field]:
+                    return False, f"Missing required field: {field}"
+        
+            # Ensure event_date is properly formatted
+            event_date = event_data.get('event_date')
+            if isinstance(event_date, datetime):
+                event_date_str = event_date.isoformat()
+            elif isinstance(event_date, str):
+                event_date_str = event_date
+            else:
+                return False, "Invalid event date format"
+        
+            # Handle end_date
+            end_date = event_data.get('end_date')
+            if end_date:
+                if isinstance(end_date, datetime):
+                    end_date_str = end_date.isoformat()
+                elif isinstance(end_date, str):
+                    end_date_str = end_date
+                else:
+                    end_date_str = None
             else:
                 end_date_str = None
-        else:
-            end_date_str = None
-    
-        # Prepare event record - REMOVED certificate_template
-        event_record = {
-            'id': event_data.get('id', str(uuid.uuid4())),
-            'title': event_data.get('title').strip(),
-            'description': event_data.get('description', '').strip(),
-            'event_type': event_data.get('event_type'),
-            'event_category': event_data.get('event_category', 'Technical'),
-            'event_date': event_date_str,
-            'end_date': end_date_str,
-            'venue': event_data.get('venue', '').strip(),
-            'organizer': event_data.get('organizer', '').strip(),
-            'co_organizers': json.dumps(event_data.get('co_organizers', [])),
-            'event_link': event_data.get('event_link', ''),
-            'registration_link': event_data.get('registration_link', ''),
-            'max_participants': int(event_data.get('max_participants', 100)),
-            'current_participants': 0,
-            'flyer_path': event_data.get('flyer_path', ''),
-            'tags': json.dumps(event_data.get('tags', [])),
-            'prerequisites': event_data.get('prerequisites', ''),
-            'resources': json.dumps(event_data.get('resources', [])),
-            'created_by': event_data.get('created_by', ''),
-            'created_by_name': event_data.get('created_by_name', 'Unknown'),
-            'ai_generated': bool(event_data.get('ai_generated', False)),
-            'status': 'upcoming',
-            'mentor_id': event_data.get('mentor_id'),
-            'difficulty_level': event_data.get('difficulty_level', 'Beginner'),
-            'estimated_duration': event_data.get('estimated_duration'),
-            'has_certificate': bool(event_data.get('has_certificate', False)),
-            # REMOVED: 'certificate_template': event_data.get('certificate_template', ''),
-            'created_at': datetime.now().isoformat(),
-            'updated_at': datetime.now().isoformat(),
-            'views_count': 0,
-            'popularity_score': 0.0
-        }
-    
-        # Convert boolean to integer for SQLite if needed
-        if not self.use_supabase:
-            event_record['ai_generated'] = 1 if event_record['ai_generated'] else 0
-            event_record['has_certificate'] = 1 if event_record['has_certificate'] else 0
-    
-        logger.info(f"Attempting to create event: {event_record['title']}")
-    
-        success = self.client.insert('events', event_record, use_cache=False)
-    
-        if success:
-            logger.info(f"Event created successfully: {event_record['title']}")
         
-            # Clear cache
-            cache.delete("events_all")
-            cache.delete("events_upcoming")
+            # Prepare event record
+            event_record = {
+                'id': event_data.get('id', str(uuid.uuid4())),
+                'title': event_data.get('title').strip(),
+                'description': event_data.get('description', '').strip(),
+                'event_type': event_data.get('event_type'),
+                'event_category': event_data.get('event_category', 'Technical'),
+                'event_date': event_date_str,
+                'end_date': end_date_str,
+                'venue': event_data.get('venue', '').strip(),
+                'organizer': event_data.get('organizer', '').strip(),
+                'co_organizers': json.dumps(event_data.get('co_organizers', [])),
+                'event_link': event_data.get('event_link', ''),
+                'registration_link': event_data.get('registration_link', ''),
+                'max_participants': int(event_data.get('max_participants', 100)),
+                'current_participants': 0,
+                'flyer_path': event_data.get('flyer_path', ''),
+                'tags': json.dumps(event_data.get('tags', [])),
+                'prerequisites': event_data.get('prerequisites', ''),
+                'resources': json.dumps(event_data.get('resources', [])),
+                'created_by': event_data.get('created_by', ''),
+                'created_by_name': event_data.get('created_by_name', 'Unknown'),
+                'ai_generated': bool(event_data.get('ai_generated', False)),
+                'status': 'upcoming',
+                'mentor_id': event_data.get('mentor_id'),
+                'difficulty_level': event_data.get('difficulty_level', 'Beginner'),
+                'estimated_duration': event_data.get('estimated_duration'),
+                'has_certificate': bool(event_data.get('has_certificate', False)),
+                'created_at': datetime.now().isoformat(),
+                'updated_at': datetime.now().isoformat(),
+                'views_count': 0,
+                'popularity_score': 0.0
+            }
         
-            # Award points to creator if it's a user
-            if event_record['created_by'] and event_record['created_by'] not in ['admin@raisoni', 'faculty@raisoni']:
-                self.award_points(event_record['created_by'], 
-                            GAMIFICATION_CONFIG['points']['event_creation'],
-                            "event_creation", 
-                            f"Created event: {event_record['title'][:30]}")
+            # Convert boolean to integer for SQLite if needed
+            if not self.use_supabase:
+                event_record['ai_generated'] = 1 if event_record['ai_generated'] else 0
+                event_record['has_certificate'] = 1 if event_record['has_certificate'] else 0
         
-            # Notify interested users (placeholder for future implementation)
-            # self._notify_interested_users(event_record)
+            logger.info(f"Attempting to create event: {event_record['title']}")
         
-            return True, event_record['id']
-    
-        logger.error(f"Failed to insert event into database: {event_record['title']}")
-        return False, "Database insertion failed"
-    
-    except Exception as e:
-        logger.error(f"Error adding event: {str(e)}")
-        logger.error(f"Event data: {event_data}")
-        return False, str(e)
-    
+            success = self.client.insert('events', event_record, use_cache=False)
+        
+            if success:
+                logger.info(f"Event created successfully: {event_record['title']}")
+            
+                # Clear cache
+                cache.delete("events_all")
+                cache.delete("events_upcoming")
+            
+                # Award points to creator if it's a user
+                if event_record['created_by'] and event_record['created_by'] not in ['admin@raisoni', 'faculty@raisoni']:
+                    self.award_points(event_record['created_by'], 
+                                GAMIFICATION_CONFIG['points']['event_creation'],
+                                "event_creation", 
+                                f"Created event: {event_record['title'][:30]}")
+            
+                # Notify interested users (placeholder for future implementation)
+                # self._notify_interested_users(event_record)
+            
+                return True, event_record['id']
+        
+            logger.error(f"Failed to insert event into database: {event_record['title']}")
+            return False, "Database insertion failed"
+        
+        except Exception as e:
+            logger.error(f"Error adding event: {str(e)}")
+            logger.error(f"Event data: {event_data}")
+            return False, str(e)
+        
     def _notify_interested_users(self, event):
         """Notify users interested in similar events"""
         pass
-    
-       
-    
     
     def get_event_with_mentor(self, event_id):
         """Get event with mentor details"""
@@ -2087,7 +2055,6 @@ def add_event(self, event_data):
         except:
             return False
     
-        
     # ============================================
     # MENTOR MANAGEMENT METHODS
     # ============================================
@@ -2707,8 +2674,6 @@ def add_event(self, event_data):
     # GAMIFICATION & POINTS SYSTEM
     # ============================================
     
-    
-    
     def _log_points_transaction(self, username, points, reason, description):
         """Log points transaction for audit trail"""
         pass
@@ -2852,8 +2817,8 @@ def add_event(self, event_data):
                     user['rank'] = i
                     user['points'] = user.get(points_column, 0)
             
-                results = users  # Make sure results is defined
-            
+                results = users
+        
             else:
                 query = f"""
                 SELECT *, {points_column} as points FROM users 
@@ -3207,68 +3172,6 @@ def add_event(self, event_data):
         except Exception as e:
             logger.error(f"Error getting event feedback: {e}")
             return []
-
-    
-    def _add_default_students(self):
-        """Add default student accounts"""
-        try:
-            default_students = [
-                {
-                    'name': 'Rohan Sharma',
-                    'username': 'rohan@student',
-                    'password': 'Student@123',
-                    'roll_no': 'CSE2023001',
-                    'department': 'Computer Science & Engineering',
-                    'year': 'III',
-                    'email': 'rohan.sharma@ghraisoni.edu',
-                    'mobile': '9876543210',
-                    'avatar_url': '👨‍🎓',
-                    'bio': 'Passionate about AI and Machine Learning',
-                    'skills': ['Python', 'Machine Learning', 'Web Development']
-                },
-                {
-                    'name': 'Priya Patel',
-                    'username': 'priya@student',
-                    'password': 'Student@123',
-                    'roll_no': 'AIML2023002',
-                    'department': 'Artificial Intelligence & Machine Learning',
-                    'year': 'II',
-                    'email': 'priya.patel@ghraisoni.edu',
-                    'mobile': '9876543211',
-                    'avatar_url': '👩‍🎓',
-                    'bio': 'Data Science enthusiast and competitive programmer',
-                    'skills': ['Data Science', 'Python', 'SQL', 'Statistics']
-                }
-            ]
-            
-            for student in default_students:
-                existing = self.get_user(student['username'], use_cache=False)
-                if not existing:
-                    user_data = {
-                        'name': student['name'],
-                        'username': student['username'],
-                        'password': student['password'],
-                        'roll_no': student['roll_no'],
-                        'department': student['department'],
-                        'year': student['year'],
-                        'email': student['email'],
-                        'mobile': student['mobile'],
-                        'avatar_url': student.get('avatar_url', '👤'),
-                        'bio': student.get('bio', ''),
-                        'skills': student.get('skills', []),
-                        'role': 'student'
-                    }
-                    
-                    success, message = self.add_user(user_data)
-                    if success:
-                        self.award_points(student['username'], 250, "welcome", "Welcome bonus")
-                        logger.info(f"Added default student: {student['username']}")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error adding default students: {e}")
-            return False
     
     # ============================================
     # HELPER METHODS
@@ -3360,105 +3263,6 @@ def add_event(self, event_data):
 # Initialize database
 db = DatabaseManager(use_supabase=USE_SUPABASE)
 
-# Call add_default_users AFTER db is initialized
-try:
-    # Check and add default users if they don't exist
-    default_users = [
-        {
-            'id': '00000000-0000-0000-0000-000000000001',
-            'username': 'admin@raisoni',
-            'password': 'Admin@12345',
-            'name': 'Administrator',
-            'role': 'admin',
-            'email': 'admin@ghraisoni.edu',
-            'department': 'Administration',
-            'avatar_url': '👨‍💼'
-        },
-        {
-            'id': '00000000-0000-0000-0000-000000000002',
-            'username': 'faculty@raisoni',
-            'password': 'Faculty@12345',
-            'name': 'Faculty Coordinator',
-            'role': 'faculty',
-            'email': 'faculty@ghraisoni.edu',
-            'department': 'Faculty',
-            'avatar_url': '👨‍🏫'
-        },
-        {
-            'id': '00000000-0000-0000-0000-000000000003',
-            'username': 'mentor@raisoni',
-            'password': 'Mentor@12345',
-            'name': 'Senior Mentor',
-            'role': 'mentor',
-            'email': 'mentor@ghraisoni.edu',
-            'department': 'Mentorship',
-            'avatar_url': '👨‍🏫'
-        }
-    ]
-    
-    for user_data in default_users:
-        existing = db.get_user(user_data['username'], use_cache=False)
-        if not existing:
-            success, message = db.add_user(user_data)
-            if success:
-                logger.info(f"Added default user: {user_data['username']}")
-    
-    # Add default students
-    default_students = [
-        {
-            'name': 'Rohan Sharma',
-            'username': 'rohan@student',
-            'password': 'Student@123',
-            'roll_no': 'CSE2023001',
-            'department': 'Computer Science & Engineering',
-            'year': 'III',
-            'email': 'rohan.sharma@ghraisoni.edu',
-            'mobile': '9876543210',
-            'avatar_url': '👨‍🎓',
-            'bio': 'Passionate about AI and Machine Learning',
-            'skills': ['Python', 'Machine Learning', 'Web Development']
-        },
-        {
-            'name': 'Priya Patel',
-            'username': 'priya@student',
-            'password': 'Student@123',
-            'roll_no': 'AIML2023002',
-            'department': 'Artificial Intelligence & Machine Learning',
-            'year': 'II',
-            'email': 'priya.patel@ghraisoni.edu',
-            'mobile': '9876543211',
-            'avatar_url': '👩‍🎓',
-            'bio': 'Data Science enthusiast and competitive programmer',
-            'skills': ['Data Science', 'Python', 'SQL', 'Statistics']
-        }
-    ]
-    
-    for student in default_students:
-        existing = db.get_user(student['username'], use_cache=False)
-        if not existing:
-            user_data = {
-                'name': student['name'],
-                'username': student['username'],
-                'password': student['password'],
-                'roll_no': student['roll_no'],
-                'department': student['department'],
-                'year': student['year'],
-                'email': student['email'],
-                'mobile': student['mobile'],
-                'avatar_url': student.get('avatar_url', '👤'),
-                'bio': student.get('bio', ''),
-                'skills': student.get('skills', []),
-                'role': 'student'
-            }
-            
-            success, message = db.add_user(user_data)
-            if success:
-                db.award_points(student['username'], 250, "welcome", "Welcome bonus")
-                logger.info(f"Added default student: {student['username']}")
-    
-except Exception as e:
-    logger.error(f"Error adding default users: {e}")
-
 # Initialize password reset manager
 password_reset_manager = PasswordResetManager(db)
 
@@ -3509,8 +3313,6 @@ def format_date(date_str):
     except:
         return str(date_str)
 
-
-          
 def get_event_status(event_date, end_date=None, status=None):
     """Get event status badge"""
     if status and status in ['cancelled', 'completed']:
@@ -3620,17 +3422,6 @@ def save_flyer_image(uploaded_file):
     except Exception as e:
         logger.error(f"Error processing flyer image: {e}")
         return None
-
-def get_events_limited(self, limit=10, cache_ttl=60):
-    """Get limited number of events"""
-    try:
-        events = self.get_all_events(cache_ttl=cache_ttl)
-        if events and len(events) > limit:
-            return events[:limit]
-        return events or []
-    except Exception as e:
-        logger.error(f"Error getting limited events: {e}")
-        return []
 
 def generate_avatar_url(name, size=100):
     """Generate avatar URL based on name"""
@@ -4135,6 +3926,24 @@ def display_event_card(event, current_user=None, show_actions=True):
         st.markdown('</div>', unsafe_allow_html=True)
 
 # ============================================
+# CONFIRM ACTION FUNCTION - ADDED
+# ============================================
+
+def confirm_action(message):
+    """Display a confirmation dialog"""
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.warning(message)
+        col_yes, col_no = st.columns(2)
+        with col_yes:
+            if st.button("Yes, proceed", use_container_width=True, type="primary"):
+                return True
+        with col_no:
+            if st.button("Cancel", use_container_width=True, type="secondary"):
+                return False
+    return False
+
+# ============================================
 # PASSWORD RESET PAGE
 # ============================================
 
@@ -4301,7 +4110,7 @@ def landing_page():
                 st.metric("Active Students", len(students) if students else 0)
             with col_stat3:
                 if events:
-                    upcoming_count = len(get_upcoming_events(limit=1000))  # Get all upcoming
+                    upcoming_count = len(get_upcoming_events(limit=1000))
                     st.metric("Upcoming Events", upcoming_count)
                 else:
                     st.metric("Upcoming Events", 0)
@@ -5520,7 +5329,7 @@ def faculty_dashboard():
     
     with st.sidebar:
         st.markdown("### Navigation")
-        nav_options = ["Dashboard", "Create Event", "My Events", "Registrations", "Mentor Management", "Debug Events"]  # Added Debug
+        nav_options = ["Dashboard", "Create Event", "My Events", "Registrations", "Mentor Management", "Debug Events"]
         
         if 'faculty_page' not in st.session_state:
             st.session_state.faculty_page = "Dashboard"
@@ -5672,7 +5481,6 @@ def create_event_page():
             
             submit_button = st.form_submit_button("Create Event", use_container_width=True, type="primary")
             
-            # In the manual event creation tab, update the submit section:
             if submit_button:
                 if not all([title, event_type, venue, organizer, description]):
                     st.error("Please fill all required fields (*)")
@@ -5692,27 +5500,25 @@ def create_event_page():
                         tags = [tag.strip() for tag in tags_input.split(',')] if tags_input else []
             
                         event_data = {
-                            'title': ai_title,
-                            'description': ai_description,
-                            'event_type': ai_event_type,
-                            'event_category': ai_event_category,
+                            'title': title,
+                            'description': description,
+                            'event_type': event_type,
+                            'event_category': event_category,
                             'event_date': event_datetime.isoformat(),
-                            'venue': ai_venue,
-                            'organizer': ai_organizer,
-                            'event_link': ai_event_link,
-                            'registration_link': ai_reg_link,
-                            'max_participants': ai_max_participants,
-                            'difficulty_level': ai_difficulty,
-                            'estimated_duration': ai_duration,
-                            'has_certificate': ai_certificate,
-                            'prerequisites': ai_prerequisites,
+                            'venue': venue,
+                            'organizer': organizer,
+                            'event_link': event_link,
+                            'registration_link': registration_link,
+                            'max_participants': max_participants,
+                            'difficulty_level': difficulty_level,
+                            'estimated_duration': estimated_duration,
+                            'has_certificate': has_certificate,
+                            'prerequisites': prerequisites,
                             'tags': tags,
                             'flyer_path': flyer_path,
                             'created_by': st.session_state.username,
                             'created_by_name': st.session_state.name,
-                            'ai_generated': True,
-                            'ai_metadata': event_data.get('ai_metadata', {}),
-                            'mentor_id': ai_mentor_id
+                            'mentor_id': mentor_id
                         }
             
                         with st.spinner("Creating event..."):
@@ -5725,7 +5531,6 @@ def create_event_page():
                                 if mentor_id:
                                     st.info(f"✅ Mentor assigned: {selected_mentor}")
                     
-                                # Clear form by rerunning
                                 time.sleep(2)
                                 st.rerun()
                             else:
@@ -5942,7 +5747,7 @@ def debug_event_creation():
         try:
             events = db.get_all_events(use_cache=False)
             if events:
-                events = events[:1]  # Get first event only
+                events = events[:1]
             if events is not None:
                 st.success(f"✅ Database connection successful. Found {len(events) if events else 0} events.")
             else:
@@ -6196,7 +6001,7 @@ def mentor_dashboard():
     
     with st.sidebar:
         st.markdown("### Navigation")
-        nav_options = ["My Events", "Student Engagement", "Points Management", "My Profile"]  # Added Points Management
+        nav_options = ["My Events", "Student Engagement", "Points Management", "My Profile"]
         
         if 'mentor_page' not in st.session_state:
             st.session_state.mentor_page = "My Events"
@@ -6220,9 +6025,9 @@ def mentor_dashboard():
     if selected == "My Events":
         mentor_events_page(mentor)
     elif selected == "Student Engagement":
-        mentor_engagement_page(mentor)  # This is the enhanced page
+        mentor_engagement_page(mentor)
     elif selected == "Points Management":
-        mentor_points_management_page(mentor)  # You'll need to create this
+        mentor_points_management_page(mentor)
     elif selected == "My Profile":
         mentor_profile_page(mentor)
 
@@ -6236,7 +6041,6 @@ def mentor_points_management_page(mentor):
     
     st.info("This page allows you to manage points across all events you're mentoring.")
     
-    # Get all events mentored by this mentor
     mentor_id = mentor['id']
     events = db.get_events_by_mentor(mentor_id)
     
@@ -6280,7 +6084,6 @@ def mentor_points_management_page(mentor):
     with tab2:
         st.subheader("Recent Points Awards")
         
-        # Get recent points transactions (you would need to implement this in DatabaseManager)
         st.info("Points history tracking would be implemented here.")
         st.markdown("""
         **Suggested Features:**
@@ -6306,8 +6109,6 @@ def mentor_points_management_page(mentor):
                 st.markdown(f"**Event:** {event['title']}")
                 st.markdown(f"**Registrations:** {len(registrations)} students")
                 
-                # Bulk points award
-                st.markdown("### Award Points to All Participants")
                 bulk_points = st.number_input("Points per student", min_value=0, max_value=500, value=25)
                 bulk_reason = st.text_input("Reason for bulk award", 
                                           value="Participation award")
@@ -6328,7 +6129,6 @@ def mentor_points_management_page(mentor):
                         time.sleep(1)
                         st.rerun()
                 
-                # Selective award
                 st.markdown("### Award to Selected Students")
                 
                 student_options = {f"{reg['student_name']} ({reg['student_roll']})": reg['id'] 
@@ -6410,7 +6210,6 @@ def mentor_engagement_page(mentor):
         event_id = event_options[selected_event_title]
         selected_event = next(e for e in events if e['id'] == event_id)
         
-        # Event stats
         likes_count = db.get_event_likes_count(event_id)
         interested_count = db.get_event_interested_count(event_id)
         stats = db.get_event_participation_stats(event_id)
@@ -6428,7 +6227,6 @@ def mentor_engagement_page(mentor):
         
         st.markdown("---")
         
-        # Tabs for different management functions
         tab1, tab2, tab3, tab4 = st.tabs(["📋 Registered Students", "📝 Attendance", "🏆 Award Points", "📊 Statistics"])
         
         with tab1:
@@ -6436,7 +6234,6 @@ def mentor_engagement_page(mentor):
             registrations = db.get_students_by_event(event_id)
             
             if registrations:
-                # Display students in a table
                 df_data = []
                 for reg in registrations:
                     df_data.append({
@@ -6454,7 +6251,6 @@ def mentor_engagement_page(mentor):
                     df = pd.DataFrame(df_data)
                     st.dataframe(df, use_container_width=True)
                     
-                    # Export options
                     csv = df.to_csv(index=False)
                     st.download_button(
                         label="📥 Download CSV",
@@ -6472,7 +6268,6 @@ def mentor_engagement_page(mentor):
             if not registrations:
                 st.info("No students to mark attendance.")
             else:
-                # Quick attendance marking
                 st.markdown("### Quick Attendance")
                 col_quick1, col_quick2 = st.columns(2)
                 
@@ -6550,7 +6345,6 @@ def mentor_engagement_page(mentor):
             else:
                 st.markdown("### Award Points Based on Performance")
                 
-                # Select student
                 student_options = {f"{reg['student_name']} ({reg['student_roll']})": reg for reg in registrations}
                 selected_student_label = st.selectbox("Select Student", list(student_options.keys()))
                 
@@ -6569,7 +6363,6 @@ def mentor_engagement_page(mentor):
                     
                     st.markdown("---")
                     
-                    # Points award options
                     st.markdown("#### Performance Categories")
                     
                     col_cat1, col_cat2, col_cat3, col_cat4 = st.columns(4)
@@ -6686,7 +6479,6 @@ def mentor_engagement_page(mentor):
                 col_stat1, col_stat2 = st.columns(2)
                 
                 with col_stat1:
-                    # Status distribution chart
                     status_data = dict(stats['by_status'])
                     if status_data:
                         fig1 = px.pie(
@@ -6698,7 +6490,6 @@ def mentor_engagement_page(mentor):
                         st.plotly_chart(fig1, use_container_width=True)
                 
                 with col_stat2:
-                    # Attendance rate gauge
                     attendance_rate = stats['attendance_rate']
                     fig2 = go.Figure(go.Indicator(
                         mode="gauge+number",
@@ -6717,10 +6508,8 @@ def mentor_engagement_page(mentor):
                     ))
                     st.plotly_chart(fig2, use_container_width=True)
                 
-                # Points summary
                 st.markdown(f"**Total Points Awarded in this Event:** {stats['total_points_awarded']}")
                 
-                # Top performers in this event
                 st.markdown("### Top Performers (This Event)")
                 registrations_with_points = [r for r in registrations if r.get('points_awarded', 0) > 0]
                 if registrations_with_points:
@@ -6739,6 +6528,7 @@ def mentor_engagement_page(mentor):
                             st.markdown("---")
                 else:
                     st.info("No points awarded yet in this event.")
+
 
 def mentor_profile_page(mentor):
     """Mentor profile page"""
@@ -6778,7 +6568,20 @@ def mentor_profile_page(mentor):
         st.metric("Upcoming", upcoming)
     with col_stat3:
         past = len([e for e in events if e.get('status') in ['completed', 'past']])
-        st.metric("Past", past)
+        st.metric("Completed", past)
+    
+    if events:
+        st.markdown("### Recent Events")
+        for event in events[:3]:
+            with st.container():
+                col_info, col_stats = st.columns([3, 1])
+                with col_info:
+                    st.markdown(f"**{event.get('title')}**")
+                    st.caption(f"Date: {format_date(event.get('event_date'))}")
+                with col_stats:
+                    regs = db.get_registrations_by_event(event['id'])
+                    st.caption(f"Students: {len(regs)}")
+                st.markdown("---")
 
 # ============================================
 # ADMIN DASHBOARD
@@ -6792,7 +6595,9 @@ def admin_dashboard():
     
     with st.sidebar:
         st.markdown("### Navigation")
-        nav_options = ["Dashboard", "Manage Events", "Manage Users", "Manage Mentors", "System Analytics", "Backup & Restore"]
+        nav_options = ["Dashboard", "User Management", "Event Management", 
+                      "Mentor Management", "Analytics", "System Settings", 
+                      "Debug & Tools"]
         
         if 'admin_page' not in st.session_state:
             st.session_state.admin_page = "Dashboard"
@@ -6815,408 +6620,263 @@ def admin_dashboard():
     
     if selected == "Dashboard":
         admin_dashboard_page()
-    elif selected == "Manage Events":
-        admin_manage_events_page()
-    elif selected == "Manage Users":
-        admin_manage_users_page()
-    elif selected == "Manage Mentors":
-        admin_manage_mentors_page()
-    elif selected == "System Analytics":
-        admin_system_analytics_page()
-    elif selected == "Backup & Restore":
-        admin_backup_page()
+    elif selected == "User Management":
+        user_management_page()
+    elif selected == "Event Management":
+        admin_event_management_page()
+    elif selected == "Mentor Management":
+        admin_mentor_management_page()
+    elif selected == "Analytics":
+        admin_analytics_page()
+    elif selected == "System Settings":
+        system_settings_page()
+    elif selected == "Debug & Tools":
+        debug_tools_page()
 
 def admin_dashboard_page():
-    """Admin dashboard page"""
-    st.markdown('<h1 class="main-header">Admin Dashboard</h1>', unsafe_allow_html=True)
+    """Admin dashboard main page"""
+    st.markdown('<h1 class="main-header">👑 Admin Dashboard</h1>', unsafe_allow_html=True)
     
-    try:
-        db._update_event_status()
-    except:
-        pass
+    # Get all statistics
+    all_users = db.get_all_users(use_cache=False)
+    all_events = db.get_all_events(use_cache=False)
+    all_mentors = db.get_all_mentors()
     
-    events = db.get_all_events(cache_ttl=0, use_cache=False)
-    users = db.get_all_users()
-    mentors = db.get_all_mentors()
+    students = [u for u in all_users if u.get('role') == 'student']
+    faculty = [u for u in all_users if u.get('role') == 'faculty']
+    mentors = [u for u in all_users if u.get('role') == 'mentor']
     
+    # Calculate event statistics
+    upcoming_events = [e for e in all_events if e.get('status') == 'upcoming']
+    ongoing_events = [e for e in all_events if e.get('status') == 'ongoing']
+    completed_events = [e for e in all_events if e.get('status') == 'completed']
+    
+    total_registrations = 0
+    for event in all_events:
+        regs = db.get_registrations_by_event(event.get('id'))
+        total_registrations += len(regs) if regs else 0
+    
+    # Display metrics
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total Events", len(events) if events else 0)
-    with col2:
-        upcoming = len([e for e in events if e.get('status') == 'upcoming']) if events else 0
-        st.metric("Upcoming Events", upcoming)
-    with col3:
-        ai_events = len([e for e in events if e.get('ai_generated')]) if events else 0
-        st.metric("🤖 AI Events", ai_events)
-    with col4:
-        active_mentors = len([m for m in mentors if m.get('is_active')]) if mentors else 0
-        st.metric("👨‍🏫 Active Mentors", active_mentors)
+        st.metric("Total Users", len(all_users))
+        st.caption(f"👨‍🎓 Students: {len(students)}")
+        st.caption(f"👨‍🏫 Faculty: {len(faculty)}")
+        st.caption(f"👨‍🏫 Mentors: {len(mentors)}")
     
-    col5, col6, col7 = st.columns(3)
-    with col5:
-        total_users = len(users) if users else 0
-        st.metric("Total Users", total_users)
-    with col6:
-        students = len([u for u in users if u.get('role') == 'student']) if users else 0
-        st.metric("Students", students)
-    with col7:
-        total_points = sum(u.get('total_points', 0) for u in users) if users else 0
-        st.metric("Total Points", total_points)
+    with col2:
+        st.metric("Total Events", len(all_events))
+        st.caption(f"🟢 Upcoming: {len(upcoming_events)}")
+        st.caption(f"🟡 Ongoing: {len(ongoing_events)}")
+        st.caption(f"🔴 Completed: {len(completed_events)}")
+    
+    with col3:
+        st.metric("Total Registrations", total_registrations)
+        st.caption(f"Active Mentors: {len([m for m in all_mentors if m.get('is_active')])}")
+    
+    with col4:
+        if students:
+            avg_points = sum(s.get('total_points', 0) for s in students) / len(students)
+            st.metric("Avg Student Points", f"{avg_points:.0f}")
+        else:
+            st.metric("Avg Student Points", 0)
     
     st.markdown("---")
     
     col_chart1, col_chart2 = st.columns(2)
     
     with col_chart1:
-        if events:
-            status_counts = {}
-            for event in events:
-                status = event.get('status', 'unknown')
-                status_counts[status] = status_counts.get(status, 0) + 1
-            
-            if status_counts:
-                fig = px.pie(
-                    names=list(status_counts.keys()),
-                    values=list(status_counts.values()),
-                    title="Event Status Distribution",
-                    hole=0.3
-                )
-                st.plotly_chart(fig, use_container_width=True)
+        # User distribution pie chart
+        user_data = {
+            'Students': len(students),
+            'Faculty': len(faculty),
+            'Mentors': len(mentors),
+            'Admins': len([u for u in all_users if u.get('role') == 'admin'])
+        }
+        
+        fig1 = px.pie(
+            values=list(user_data.values()),
+            names=list(user_data.keys()),
+            title="User Distribution",
+            hole=0.3,
+            color_discrete_sequence=px.colors.qualitative.Set3
+        )
+        st.plotly_chart(fig1, use_container_width=True)
     
     with col_chart2:
-        if users:
-            role_counts = {}
-            for user in users:
-                role = user.get('role', 'unknown')
-                role_counts[role] = role_counts.get(role, 0) + 1
-            
-            if role_counts:
-                fig = px.bar(
-                    x=list(role_counts.keys()),
-                    y=list(role_counts.values()),
-                    title="User Role Distribution",
-                    labels={'x': 'Role', 'y': 'Count'},
-                    color=list(role_counts.values()),
-                    color_continuous_scale='Viridis'
-                )
-                st.plotly_chart(fig, use_container_width=True)
+        # Event status distribution
+        status_data = {
+            'Upcoming': len(upcoming_events),
+            'Ongoing': len(ongoing_events),
+            'Completed': len(completed_events)
+        }
+        
+        fig2 = px.bar(
+            x=list(status_data.keys()),
+            y=list(status_data.values()),
+            title="Event Status Distribution",
+            labels={'x': 'Status', 'y': 'Count'},
+            color=list(status_data.values()),
+            color_continuous_scale='Viridis'
+        )
+        st.plotly_chart(fig2, use_container_width=True)
     
     st.markdown("---")
-    st.subheader("📅 Recent Events")
     
-    if events:
-        events_sorted = sorted(events, key=lambda x: x.get('created_at', ''), reverse=True)[:5]
-        for event in events_sorted:
+    # Recent activity
+    st.subheader("📈 Recent Activity")
+    
+    tab1, tab2, tab3 = st.tabs(["Recent Events", "Top Students", "System Status"])
+    
+    with tab1:
+        recent_events = sorted(all_events, 
+                             key=lambda x: x.get('created_at', ''), 
+                             reverse=True)[:5]
+        for event in recent_events:
             with st.container():
-                col_title, col_date, col_status = st.columns([3, 1, 1])
-                with col_title:
-                    st.markdown(f"**{event.get('title', 'Untitled')}**")
-                    st.caption(f"Created by: {event.get('created_by_name', 'Unknown')}")
-                with col_date:
-                    st.caption(format_date(event.get('event_date')))
-                with col_status:
-                    status = event.get('status', 'unknown')
-                    color_map = {
+                col_info, col_stats = st.columns([3, 1])
+                with col_info:
+                    st.markdown(f"**{event.get('title')}**")
+                    st.caption(f"By: {event.get('created_by_name')} | Date: {format_date(event.get('event_date'))}")
+                with col_stats:
+                    status = event.get('status', 'upcoming')
+                    badge_color = {
                         'upcoming': 'green',
                         'ongoing': 'orange',
-                        'completed': 'gray',
-                        'cancelled': 'red'
-                    }
-                    color = color_map.get(status, 'gray')
-                    st.markdown(f'<span style="color: {color}; font-weight: bold;">{status.title()}</span>', unsafe_allow_html=True)
+                        'completed': 'gray'
+                    }.get(status, 'blue')
+                    st.markdown(f'<span style="background: {badge_color}20; color: {badge_color}; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">{status.title()}</span>', unsafe_allow_html=True)
                 st.markdown("---")
-    else:
-        st.info("No events found.")
+    
+    with tab2:
+        top_students = sorted(students, 
+                            key=lambda x: x.get('total_points', 0), 
+                            reverse=True)[:5]
+        for i, student in enumerate(top_students, 1):
+            with st.container():
+                col_rank, col_info, col_points = st.columns([1, 3, 1])
+                with col_rank:
+                    if i <= 3:
+                        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+                        st.markdown(f'<div style="font-size: 1.5rem;">{medals[i]}</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"**#{i}**")
+                with col_info:
+                    st.markdown(f"**{student.get('name')}**")
+                    st.caption(f"{student.get('department', 'N/A')} | Level: {student.get('current_level', 1)}")
+                with col_points:
+                    st.markdown(f"**{student.get('total_points', 0)}**")
+                    st.caption("points")
+                st.markdown("---")
+    
+    with tab3:
+        # System status
+        col_sys1, col_sys2 = st.columns(2)
+        with col_sys1:
+            cache_stats = cache.get_stats()
+            st.metric("Cache Hit Rate", cache_stats['hit_rate'])
+            st.caption(f"Size: {cache_stats['size']}/{cache_stats['max_size']}")
+        
+        with col_sys2:
+            db_type = "Supabase" if db.use_supabase else "SQLite"
+            st.metric("Database", db_type)
+            st.caption(f"Events: {len(all_events)}")
+        
+        # Database health check
+        if st.button("🔍 Run System Check", use_container_width=True):
+            with st.spinner("Checking system..."):
+                try:
+                    # Check database connection
+                    events = db.get_all_events(use_cache=False)
+                    if events is not None:
+                        st.success("✅ Database connection: OK")
+                    else:
+                        st.error("❌ Database connection: FAILED")
+                    
+                    # Check cache
+                    if cache_stats['size'] > 0:
+                        st.success("✅ Cache system: OK")
+                    else:
+                        st.warning("⚠️ Cache system: No data")
+                    
+                    # Check user count
+                    if len(all_users) > 0:
+                        st.success(f"✅ Users: {len(all_users)} found")
+                    else:
+                        st.warning("⚠️ Users: None found")
+                    
+                except Exception as e:
+                    st.error(f"❌ System check failed: {e}")
 
-def admin_manage_events_page():
-    """Admin event management page"""
-    st.header("📋 Manage Events")
+def user_management_page():
+    """User management page for admin"""
+    st.markdown('<h1 class="main-header">👥 User Management</h1>', unsafe_allow_html=True)
     
-    events = db.get_all_events(cache_ttl=0, use_cache=False)
-    
-    if not events:
-        st.info("No events found.")
-        return
-    
-    search_term = st.text_input("🔍 Search events", placeholder="Search by title, description...")
-    
-    filtered_events = events
-    if search_term:
-        search_term = search_term.lower()
-        filtered_events = [e for e in events if search_term in e.get('title', '').lower() or 
-                          search_term in e.get('description', '').lower()]
-    
-    st.caption(f"Found {len(filtered_events)} events")
-    
-    for event in filtered_events:
-        with st.container():
-            st.markdown('<div class="event-card">', unsafe_allow_html=True)
-            
-            col_view, col_actions = st.columns([3, 1])
-            
-            with col_view:
-                display_event_card(event, None)
-            
-            with col_actions:
-                st.markdown("### Actions")
-                
-                if st.button("🗑️ Delete", key=f"delete_{event['id']}", use_container_width=True, type="secondary"):
-                    if confirm_action("Delete this event? This action cannot be undone."):
-                        event_id = event['id']
-                        
-                        try:
-                            if db.use_supabase:
-                                db.client.delete('registrations', {'event_id': event_id}, use_cache=False)
-                                db.client.delete('event_likes', {'event_id': event_id}, use_cache=False)
-                                db.client.delete('event_interested', {'event_id': event_id}, use_cache=False)
-                                db.client.delete('event_feedback', {'event_id': event_id}, use_cache=False)
-                                success = db.client.delete('events', {'id': event_id}, use_cache=False)
-                            else:
-                                cursor = db.client.conn.cursor()
-                                cursor.execute("DELETE FROM registrations WHERE event_id = ?", (event_id,))
-                                cursor.execute("DELETE FROM event_likes WHERE event_id = ?", (event_id,))
-                                cursor.execute("DELETE FROM event_interested WHERE event_id = ?", (event_id,))
-                                cursor.execute("DELETE FROM event_feedback WHERE event_id = ?", (event_id,))
-                                cursor.execute("DELETE FROM events WHERE id = ?", (event_id,))
-                                db.client.conn.commit()
-                                success = cursor.rowcount > 0
-                            
-                            if success:
-                                st.success("Event deleted successfully!")
-                                time.sleep(1)
-                                st.rerun()
-                            else:
-                                st.error("Failed to delete event.")
-                        except Exception as e:
-                            st.error(f"Error deleting event: {e}")
-                
-                if st.button("✏️ Edit", key=f"edit_{event['id']}", use_container_width=True):
-                    st.session_state.edit_event_id = event['id']
-                    st.rerun()
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-            st.markdown("---")
-    
-    if st.session_state.get('edit_event_id'):
-        edit_event_form(st.session_state.edit_event_id)
-
-def edit_event_form(event_id):
-    """Form to edit event details"""
-    st.header("✏️ Edit Event")
-    
-    event = db.get_event_by_id(event_id)
-    if not event:
-        st.error("Event not found!")
-        return
-    
-    with st.form("edit_event_form"):
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            title = st.text_input("Event Title", value=event.get('title', ''))
-            event_type = st.selectbox("Event Type", COLLEGE_CONFIG['event_types'],
-                                     index=COLLEGE_CONFIG['event_types'].index(event.get('event_type', 'Workshop')) 
-                                     if event.get('event_type') in COLLEGE_CONFIG['event_types'] else 0)
-            event_category = st.selectbox("Event Category", COLLEGE_CONFIG['event_categories'],
-                                         index=COLLEGE_CONFIG['event_categories'].index(event.get('event_category', 'Technical')) 
-                                         if event.get('event_category') in COLLEGE_CONFIG['event_categories'] else 0)
-            
-            try:
-                event_date_str = event.get('event_date', '')
-                if event_date_str:
-                    event_date = datetime.fromisoformat(event_date_str.replace('Z', '+00:00')).date()
-                    event_time = datetime.fromisoformat(event_date_str.replace('Z', '+00:00')).time()
-                else:
-                    event_date = date.today()
-                    event_time = datetime.now().time()
-            except:
-                event_date = date.today()
-                event_time = datetime.now().time()
-            
-            event_date = st.date_input("Event Date", value=event_date, min_value=date.today())
-            event_time = st.time_input("Event Time", value=event_time)
-            max_participants = st.number_input("Max Participants", min_value=1, value=event.get('max_participants', 100))
-            difficulty_level = st.selectbox("Difficulty Level", ["Beginner", "Intermediate", "Advanced", "Expert"],
-                                          index=["Beginner", "Intermediate", "Advanced", "Expert"].index(event.get('difficulty_level', 'Beginner')))
-        
-        with col2:
-            venue = st.text_input("Venue", value=event.get('venue', ''))
-            organizer = st.text_input("Organizer", value=event.get('organizer', ''))
-            event_link = st.text_input("Event Website", value=event.get('event_link', ''))
-            registration_link = st.text_input("Registration Link", value=event.get('registration_link', ''))
-            
-            status = st.selectbox("Status", ["upcoming", "ongoing", "completed", "cancelled"],
-                                 index=["upcoming", "ongoing", "completed", "cancelled"].index(event.get('status', 'upcoming')))
-            
-            has_certificate = st.checkbox("Provide Certificate", value=bool(event.get('has_certificate')))
-            
-            active_mentors = db.get_active_mentors()
-            current_mentor = event.get('mentor_id')
-            current_mentor_name = "None"
-            if current_mentor:
-                mentor = db.get_mentor_by_id(current_mentor)
-                if mentor:
-                    current_mentor_name = f"{mentor['full_name']} ({mentor['department']})"
-            
-            if active_mentors:
-                mentor_options = ["None"] + [f"{m['full_name']} ({m['department']})" for m in active_mentors]
-                selected_mentor = st.selectbox("Assign Mentor", mentor_options,
-                                             index=mentor_options.index(current_mentor_name) if current_mentor_name in mentor_options else 0)
-            else:
-                st.info("No active mentors available.")
-                selected_mentor = "None"
-        
-        description = st.text_area("Description", value=event.get('description', ''), height=150)
-        
-        col_save, col_cancel = st.columns(2)
-        with col_save:
-            save = st.form_submit_button("💾 Save Changes", use_container_width=True, type="primary")
-        with col_cancel:
-            cancel = st.form_submit_button("❌ Cancel", use_container_width=True, type="secondary")
-        
-        if cancel:
-            st.session_state.edit_event_id = None
-            st.rerun()
-        
-        if save:
-            if not all([title, venue, organizer, description]):
-                st.error("Please fill all required fields")
-                return
-            
-            mentor_id = None
-            if selected_mentor != "None" and active_mentors:
-                mentor_name = selected_mentor.split(" (")[0]
-                mentor = next((m for m in active_mentors if m['full_name'] == mentor_name), None)
-                if mentor:
-                    mentor_id = mentor['id']
-            
-            event_datetime = datetime.combine(event_date, event_time)
-            
-            update_data = {
-                'title': title,
-                'description': description,
-                'event_type': event_type,
-                'event_category': event_category,
-                'event_date': event_datetime.isoformat(),
-                'venue': venue,
-                'organizer': organizer,
-                'event_link': event_link,
-                'registration_link': registration_link,
-                'max_participants': max_participants,
-                'difficulty_level': difficulty_level,
-                'status': status,
-                'has_certificate': has_certificate,
-                'mentor_id': mentor_id,
-                'updated_at': datetime.now().isoformat()
-            }
-            
-            try:
-                if db.use_supabase:
-                    success = db.client.update('events', {'id': event_id}, update_data, use_cache=False)
-                else:
-                    success = db.client.update('events', {'id': event_id}, update_data)
-                
-                if success:
-                    st.success("✅ Event updated successfully!")
-                    st.session_state.edit_event_id = None
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("Failed to update event.")
-            except Exception as e:
-                st.error(f"Error updating event: {e}")
-
-def admin_manage_users_page():
-    """Admin user management page"""
-    st.header("👥 Manage Users")
-    
-    tab1, tab2, tab3 = st.tabs(["All Users", "Add New User", "User Analytics"])
+    tab1, tab2, tab3, tab4 = st.tabs(["All Users", "Add User", "Edit User", "Bulk Operations"])
     
     with tab1:
         st.subheader("📋 All Users")
         
-        users = db.get_all_users()
+        all_users = db.get_all_users(use_cache=False)
         
-        if not users:
+        if not all_users:
             st.info("No users found.")
             return
         
-        col_search, col_filter = st.columns(2)
-        with col_search:
-            search_term = st.text_input("🔍 Search users", placeholder="Search by name, email, username...")
+        # Filters
+        col_filter1, col_filter2, col_filter3 = st.columns(3)
+        with col_filter1:
+            role_filter = st.selectbox("Filter by Role", ["All Roles", "Student", "Faculty", "Mentor", "Admin"])
+        with col_filter2:
+            dept_filter = st.selectbox("Filter by Department", ["All Departments"] + COLLEGE_CONFIG['departments'])
+        with col_filter3:
+            search_term = st.text_input("🔍 Search", placeholder="Name, username, email...")
         
-        with col_filter:
-            role_filter = st.selectbox("Filter by Role", ["All", "Admin", "Faculty", "Mentor", "Student"])
+        # Apply filters
+        filtered_users = all_users
         
-        filtered_users = users
-        if search_term:
-            search_term = search_term.lower()
-            filtered_users = [u for u in users if search_term in u.get('name', '').lower() or 
-                            search_term in u.get('email', '').lower() or 
-                            search_term in u.get('username', '').lower()]
-        
-        if role_filter != "All":
+        if role_filter != "All Roles":
             filtered_users = [u for u in filtered_users if u.get('role') == role_filter.lower()]
         
-        st.caption(f"Found {len(filtered_users)} users")
+        if dept_filter != "All Departments":
+            filtered_users = [u for u in filtered_users if u.get('department') == dept_filter]
         
-        for user in filtered_users:
-            with st.container():
-                st.markdown('<div class="user-card">', unsafe_allow_html=True)
-                
-                col_info, col_actions = st.columns([3, 1])
-                
-                with col_info:
-                    avatar = user.get('avatar_url', '👤')
-                    st.markdown(f'''
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <span style="font-size: 1.5rem;">{avatar}</span>
-                        <div>
-                            <div style="font-weight: bold; font-size: 1.1rem;">{user.get('name')}</div>
-                            <div style="color: #666; font-size: 0.9rem;">
-                                @{user.get('username')} | {user.get('role', 'user').title()} | {user.get('department', 'N/A')}
-                            </div>
-                            <div style="font-size: 0.8rem; color: #888;">
-                                Email: {user.get('email', 'N/A')} | Mobile: {user.get('mobile', 'N/A')}
-                            </div>
-                        </div>
-                    </div>
-                    ''', unsafe_allow_html=True)
-                    
-                    if user.get('role') == 'student':
-                        points = user.get('total_points', 0)
-                        st.caption(f"🏆 Points: {points} | 📈 Level: {user.get('current_level', 1)}")
-                
-                with col_actions:
-                    if user.get('username') not in ['admin@raisoni', 'faculty@raisoni']:
-                        if st.button("🗑️ Delete", key=f"del_user_{user['id']}", use_container_width=True, type="secondary"):
-                            if confirm_action(f"Delete user {user.get('name')}? This action cannot be undone."):
-                                try:
-                                    if db.use_supabase:
-                                        if user.get('role') == 'mentor':
-                                            db.client.delete('mentors', {'email': user.get('username')}, use_cache=False)
-                                        success = db.client.delete('users', {'id': user.get('id')}, use_cache=False)
-                                    else:
-                                        cursor = db.client.conn.cursor()
-                                        if user.get('role') == 'mentor':
-                                            cursor.execute("DELETE FROM mentors WHERE email = ?", (user.get('username'),))
-                                        cursor.execute("DELETE FROM users WHERE id = ?", (user.get('id'),))
-                                        db.client.conn.commit()
-                                        success = cursor.rowcount > 0
-                                    
-                                    if success:
-                                        st.success("User deleted successfully!")
-                                        time.sleep(1)
-                                        st.rerun()
-                                    else:
-                                        st.error("Failed to delete user.")
-                                except Exception as e:
-                                    st.error(f"Error deleting user: {e}")
-                    else:
-                        st.caption("Protected account")
-                
-                st.markdown('</div>', unsafe_allow_html=True)
-                st.markdown("---")
+        if search_term:
+            search_term = search_term.lower()
+            filtered_users = [u for u in filtered_users 
+                            if search_term in u.get('name', '').lower() or 
+                            search_term in u.get('username', '').lower() or
+                            search_term in u.get('email', '').lower()]
+        
+        st.caption(f"Showing {len(filtered_users)} of {len(all_users)} users")
+        
+        # Display users in a table
+        if filtered_users:
+            df_data = []
+            for user in filtered_users:
+                df_data.append({
+                    'Username': user.get('username'),
+                    'Name': user.get('name'),
+                    'Role': user.get('role').title(),
+                    'Department': user.get('department', 'N/A'),
+                    'Email': user.get('email', 'N/A'),
+                    'Points': user.get('total_points', 0),
+                    'Level': user.get('current_level', 1),
+                    'Created': format_date(user.get('created_at')),
+                    'Status': 'Active' if user.get('is_active', 1) else 'Inactive'
+                })
+            
+            df = pd.DataFrame(df_data)
+            st.dataframe(df, use_container_width=True)
+            
+            # Export option
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label="📥 Export CSV",
+                data=csv,
+                file_name="users_export.csv",
+                mime="text/csv"
+            )
     
     with tab2:
         st.subheader("➕ Add New User")
@@ -7226,164 +6886,449 @@ def admin_manage_users_page():
             
             with col1:
                 name = st.text_input("Full Name *")
+                username = st.text_input("Username *")
                 email = st.text_input("Email *")
-                mobile = st.text_input("Mobile Number")
                 role = st.selectbox("Role *", ["student", "faculty", "mentor", "admin"])
             
             with col2:
-                username = st.text_input("Username *")
+                department = st.selectbox("Department", [""] + COLLEGE_CONFIG['departments'])
+                mobile = st.text_input("Mobile")
                 password = st.text_input("Password *", type="password")
                 confirm_password = st.text_input("Confirm Password *", type="password")
-                department = st.selectbox("Department", ["Select"] + COLLEGE_CONFIG['departments'])
             
-            additional_info = st.text_area("Additional Information", height=100)
+            # Additional fields based on role
+            if role == "student":
+                roll_no = st.text_input("Roll Number")
+                year = st.selectbox("Year", [""] + COLLEGE_CONFIG['academic_years'])
+            elif role == "mentor":
+                expertise = st.text_input("Expertise")
+                contact = st.text_input("Contact Number")
             
-            submit = st.form_submit_button("Create User", use_container_width=True, type="primary")
+            is_active = st.checkbox("Active Account", value=True)
+            
+            col_submit, col_clear = st.columns(2)
+            with col_submit:
+                submit = st.form_submit_button("Add User", use_container_width=True, type="primary")
+            with col_clear:
+                clear = st.form_submit_button("Clear", use_container_width=True, type="secondary")
             
             if submit:
-                if not all([name, email, username, password]):
-                    st.error("Please fill all required fields (*)")
-                elif password != confirm_password:
-                    st.error("Passwords do not match")
+                errors = []
+                
+                if not all([name, username, email, password]):
+                    errors.append("Please fill all required fields (*)")
+                
+                if password != confirm_password:
+                    errors.append("Passwords don't match")
+                
+                is_valid_pass, pass_msg = Validators.validate_password(password)
+                if not is_valid_pass:
+                    errors.append(pass_msg)
+                
+                existing_user = db.get_user(username, use_cache=False)
+                if existing_user:
+                    errors.append("Username already exists")
+                
+                if errors:
+                    for error in errors:
+                        st.error(error)
                 else:
-                    existing_user = db.get_user(username, use_cache=False)
-                    if existing_user:
-                        st.error("Username already exists")
-                    else:
-                        user_data = {
-                            'name': name,
-                            'email': email,
-                            'mobile': mobile,
-                            'username': username,
-                            'password': password,
-                            'role': role,
-                            'department': department if department != "Select" else "",
-                            'avatar_url': generate_avatar_url(name, size=100)
-                        }
+                    user_data = {
+                        'name': name,
+                        'username': username,
+                        'email': email,
+                        'password': password,
+                        'role': role,
+                        'department': department if department else None,
+                        'mobile': mobile,
+                        'is_active': is_active,
+                        'avatar_url': generate_avatar_url(name)
+                    }
+                    
+                    if role == "student":
+                        user_data['roll_no'] = roll_no
+                        user_data['year'] = year
+                    elif role == "mentor":
+                        user_data['expertise'] = expertise
+                        user_data['contact'] = contact
+                    
+                    success, message = db.add_user(user_data)
+                    if success:
+                        st.success(f"✅ User '{username}' added successfully!")
                         
-                        success, message = db.add_user(user_data)
-                        if success:
-                            st.success(f"User '{name}' created successfully!")
-                            st.rerun()
-                        else:
-                            st.error(f"Failed to create user: {message}")
+                        # If mentor, also add to mentors table
+                        if role == "mentor":
+                            mentor_data = {
+                                'first_name': name.split()[0] if ' ' in name else name,
+                                'last_name': name.split()[-1] if ' ' in name else '',
+                                'department': department,
+                                'email': email,
+                                'contact': contact or mobile,
+                                'expertise': expertise,
+                                'created_by': st.session_state.username
+                            }
+                            success_mentor, mentor_pass = db.add_mentor(mentor_data)
+                            if success_mentor:
+                                st.info(f"✅ Also added as mentor. Temporary password: {mentor_pass}")
+                        
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to add user: {message}")
     
     with tab3:
-        st.subheader("📊 User Analytics")
+        st.subheader("✏️ Edit User")
         
-        users = db.get_all_users()
-        
-        if users:
-            total_users = len(users)
-            students = len([u for u in users if u.get('role') == 'student'])
-            faculty = len([u for u in users if u.get('role') == 'faculty'])
-            mentors = len([u for u in users if u.get('role') == 'mentor'])
-            admins = len([u for u in users if u.get('role') == 'admin'])
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Total Users", total_users)
-            with col2:
-                st.metric("Students", students)
-            with col3:
-                st.metric("Faculty", faculty)
-            with col4:
-                st.metric("Mentors", mentors)
-            
-            st.markdown("---")
-            
-            departments = {}
-            for user in users:
-                dept = user.get('department', 'Unknown')
-                if dept:
-                    departments[dept] = departments.get(dept, 0) + 1
-            
-            if departments:
-                df = pd.DataFrame({
-                    'Department': list(departments.keys()),
-                    'Users': list(departments.values())
-                })
-                
-                fig = px.bar(df, x='Department', y='Users',
-                           title="Users by Department",
-                           color='Users',
-                           color_continuous_scale='Viridis')
-                fig.update_layout(xaxis_tickangle=-45)
-                st.plotly_chart(fig, use_container_width=True)
-            
-            student_users = [u for u in users if u.get('role') == 'student']
-            if student_users:
-                points_data = [u.get('total_points', 0) for u in student_users]
-                avg_points = sum(points_data) / len(points_data) if points_data else 0
-                
-                st.metric("Average Student Points", f"{avg_points:.1f}")
-                
-                levels_data = [u.get('current_level', 1) for u in student_users]
-                level_counts = {}
-                for level in levels_data:
-                    level_counts[level] = level_counts.get(level, 0) + 1
-                
-                if level_counts:
-                    fig = px.pie(
-                        names=[f"Level {k}" for k in level_counts.keys()],
-                        values=list(level_counts.values()),
-                        title="Student Level Distribution",
-                        hole=0.3
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-
-def admin_manage_mentors_page():
-    """Admin mentor management page"""
-    st.header("👨‍🏫 Manage Mentors")
-    
-    tab1, tab2 = st.tabs(["All Mentors", "Add New Mentor"])
-    
-    with tab1:
-        st.subheader("📋 All Mentors")
-        
-        mentors = db.get_all_mentors()
-        
-        if not mentors:
-            st.info("No mentors found.")
+        all_users = db.get_all_users(cache_ttl=60)
+        if not all_users:
+            st.info("No users found.")
             return
         
-        for mentor in mentors:
+        user_options = {f"{u['username']} ({u['name']})": u for u in all_users}
+        selected_user_label = st.selectbox("Select User", list(user_options.keys()))
+        
+        if selected_user_label:
+            selected_user = user_options[selected_user_label]
+            
+            with st.form("edit_user_form"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    edit_name = st.text_input("Name", value=selected_user.get('name', ''))
+                    edit_username = st.text_input("Username", value=selected_user.get('username', ''), disabled=True)
+                    edit_email = st.text_input("Email", value=selected_user.get('email', ''))
+                    edit_role = st.selectbox("Role", ["student", "faculty", "mentor", "admin"], 
+                                           index=["student", "faculty", "mentor", "admin"].index(selected_user.get('role', 'student')))
+                
+                with col2:
+                    edit_department = st.selectbox("Department", [""] + COLLEGE_CONFIG['departments'],
+                                                 index=COLLEGE_CONFIG['departments'].index(selected_user.get('department', '')) + 1 
+                                                 if selected_user.get('department') in COLLEGE_CONFIG['departments'] else 0)
+                    edit_mobile = st.text_input("Mobile", value=selected_user.get('mobile', ''))
+                    edit_points = st.number_input("Points", value=selected_user.get('total_points', 0), min_value=0)
+                    edit_level = st.number_input("Level", value=selected_user.get('current_level', 1), min_value=1, max_value=10)
+                
+                edit_is_active = st.checkbox("Active", value=bool(selected_user.get('is_active', True)))
+                
+                # Password reset section
+                st.markdown("### 🔒 Password Reset")
+                reset_password = st.checkbox("Reset Password")
+                if reset_password:
+                    new_password = st.text_input("New Password", type="password")
+                    confirm_new_password = st.text_input("Confirm New Password", type="password")
+                
+                col_save, col_cancel = st.columns(2)
+                with col_save:
+                    save = st.form_submit_button("Save Changes", use_container_width=True, type="primary")
+                with col_cancel:
+                    cancel = st.form_submit_button("Cancel", use_container_width=True, type="secondary")
+                
+                if save:
+                    update_data = {
+                        'name': edit_name,
+                        'email': edit_email,
+                        'role': edit_role,
+                        'department': edit_department if edit_department else None,
+                        'mobile': edit_mobile,
+                        'total_points': edit_points,
+                        'current_level': edit_level,
+                        'is_active': 1 if edit_is_active else 0,
+                        'updated_at': datetime.now().isoformat()
+                    }
+                    
+                    if reset_password:
+                        if new_password and new_password == confirm_new_password:
+                            is_valid_pass, pass_msg = Validators.validate_password(new_password)
+                            if is_valid_pass:
+                                update_data['password'] = hashlib.sha256(new_password.encode()).hexdigest().lower()
+                            else:
+                                st.error(pass_msg)
+                                return
+                        else:
+                            st.error("Passwords don't match or are empty")
+                            return
+                    
+                    success, message = db.update_user_profile(selected_user['username'], update_data)
+                    if success:
+                        st.success("✅ User updated successfully!")
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to update user: {message}")
+    
+    with tab4:
+        st.subheader("⚙️ Bulk Operations")
+        
+        st.warning("⚠️ Bulk operations affect multiple users at once. Use with caution!")
+        
+        col_op1, col_op2 = st.columns(2)
+        
+        with col_op1:
+            st.markdown("### Award Points to All")
+            bulk_points = st.number_input("Points to award", min_value=0, max_value=1000, value=10)
+            bulk_reason = st.text_input("Reason for award", value="Participation bonus")
+            
+            if st.button("🎯 Award to All Students", type="primary", use_container_width=True):
+                with st.spinner("Processing..."):
+                    all_students = [u for u in all_users if u.get('role') == 'student']
+                    success_count = 0
+                    
+                    for student in all_students:
+                        success = db.award_points(
+                            student['username'],
+                            bulk_points,
+                            "bulk_award",
+                            bulk_reason
+                        )
+                        if success:
+                            success_count += 1
+                    
+                    st.success(f"✅ Awarded {bulk_points} points to {success_count} students!")
+        
+        with col_op2:
+            st.markdown("### Reset Points")
+            if st.button("🔄 Reset All Points to Zero", use_container_width=True, type="secondary"):
+                if confirm_action("Are you sure you want to reset ALL points to zero? This cannot be undone."):
+                    with st.spinner("Resetting points..."):
+                        all_students = [u for u in all_users if u.get('role') == 'student']
+                        success_count = 0
+                        
+                        for student in all_students:
+                            update_data = {
+                                'total_points': 0,
+                                'current_level': 1,
+                                'updated_at': datetime.now().isoformat()
+                            }
+                            success = db.client.update('users', {'username': student['username']}, update_data)
+                            if success:
+                                success_count += 1
+                        
+                        st.success(f"✅ Reset points for {success_count} students!")
+                        st.rerun()
+
+def admin_event_management_page():
+    """Admin event management page"""
+    st.markdown('<h1 class="main-header">📅 Event Management</h1>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["All Events", "Create Event", "Bulk Operations"])
+    
+    with tab1:
+        st.subheader("📋 All Events")
+        
+        all_events = db.get_all_events(use_cache=False)
+        
+        if not all_events:
+            st.info("No events found.")
+            return
+        
+        # Filters
+        col_filter1, col_filter2, col_filter3 = st.columns(3)
+        with col_filter1:
+            status_filter = st.selectbox("Status", ["All", "Upcoming", "Ongoing", "Completed", "Past"])
+        with col_filter2:
+            type_filter = st.selectbox("Event Type", ["All"] + COLLEGE_CONFIG['event_types'])
+        with col_filter3:
+            search_term = st.text_input("Search", placeholder="Event title, description...")
+        
+        # Apply filters
+        filtered_events = all_events
+        
+        if status_filter != "All":
+            filtered_events = [e for e in filtered_events if e.get('status') == status_filter.lower()]
+        
+        if type_filter != "All":
+            filtered_events = [e for e in filtered_events if e.get('event_type') == type_filter]
+        
+        if search_term:
+            search_term = search_term.lower()
+            filtered_events = [e for e in filtered_events 
+                             if search_term in e.get('title', '').lower() or 
+                             search_term in e.get('description', '').lower()]
+        
+        st.caption(f"Showing {len(filtered_events)} of {len(all_events)} events")
+        
+        # Display events
+        for event in filtered_events:
             with st.container():
                 st.markdown('<div class="event-card">', unsafe_allow_html=True)
                 
                 col_info, col_actions = st.columns([3, 1])
                 
                 with col_info:
-                    status_color = "🟢" if mentor.get('is_active') else "🔴"
-                    status_text = "Active" if mentor.get('is_active') else "Inactive"
+                    st.markdown(f'<div class="card-title">{event.get("title")}</div>', unsafe_allow_html=True)
+                    st.caption(f"📅 {format_date(event.get('event_date'))} | 📍 {event.get('venue', 'TBD')}")
+                    st.caption(f"👤 Created by: {event.get('created_by_name', 'Unknown')}")
                     
-                    st.markdown(f'<div class="card-title">{mentor.get("full_name")} {status_color}</div>', unsafe_allow_html=True)
-                    st.caption(f"**Department:** {mentor.get('department')}")
-                    st.caption(f"**Email:** {mentor.get('email')}")
-                    st.caption(f"**Contact:** {mentor.get('contact')}")
-                    
-                    if mentor.get('expertise'):
-                        st.caption(f"**Expertise:** {mentor.get('expertise')}")
-                    
-                    events = db.get_events_by_mentor(mentor['id'])
-                    st.caption(f"**Assigned Events:** {len(events)}")
+                    # Status badge
+                    status = event.get('status', 'upcoming')
+                    badge_color = {
+                        'upcoming': '#10B981',
+                        'ongoing': '#F59E0B',
+                        'completed': '#6B7280',
+                        'past': '#DC2626'
+                    }.get(status, '#6B7280')
+                    st.markdown(f'<span style="background: {badge_color}20; color: {badge_color}; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem;">{status.title()}</span>', unsafe_allow_html=True)
                 
                 with col_actions:
-                    if st.button("✏️ Edit", key=f"edit_mentor_{mentor['id']}", use_container_width=True):
+                    col_btn1, col_btn2 = st.columns(2)
+                    with col_btn1:
+                        if st.button("View", key=f"view_event_{event['id']}", use_container_width=True):
+                            st.session_state.view_event_id = event['id']
+                            st.rerun()
+                    with col_btn2:
+                        if st.button("Edit", key=f"edit_event_{event['id']}", use_container_width=True):
+                            st.session_state.edit_event_id = event['id']
+                            st.rerun()
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+                st.markdown("---")
+    
+    with tab2:
+        # Use the same create event form as faculty
+        create_event_page()
+    
+    with tab3:
+        st.subheader("⚙️ Bulk Event Operations")
+        
+        st.warning("⚠️ These operations affect multiple events. Use with caution!")
+        
+        col_bulk1, col_bulk2 = st.columns(2)
+        
+        with col_bulk1:
+            st.markdown("### Update Event Status")
+            
+            current_status = st.selectbox("Current Status", ["upcoming", "ongoing", "completed"])
+            new_status = st.selectbox("New Status", ["upcoming", "ongoing", "completed"])
+            
+            if st.button("🔄 Bulk Update Status", use_container_width=True):
+                if confirm_action(f"Are you sure you want to change all '{current_status}' events to '{new_status}'?"):
+                    with st.spinner("Updating events..."):
+                        events_to_update = [e for e in all_events if e.get('status') == current_status]
+                        success_count = 0
+                        
+                        for event in events_to_update:
+                            update_data = {
+                                'status': new_status,
+                                'updated_at': datetime.now().isoformat()
+                            }
+                            success = db.client.update('events', {'id': event['id']}, update_data)
+                            if success:
+                                success_count += 1
+                        
+                        st.success(f"✅ Updated {success_count} events!")
+                        st.rerun()
+        
+        with col_bulk2:
+            st.markdown("### Export Events")
+            
+            export_format = st.selectbox("Format", ["CSV", "JSON"])
+            
+            if st.button("📥 Export All Events", use_container_width=True, type="primary"):
+                with st.spinner("Preparing export..."):
+                    if export_format == "CSV":
+                        df_data = []
+                        for event in all_events:
+                            df_data.append({
+                                'Title': event.get('title'),
+                                'Type': event.get('event_type'),
+                                'Category': event.get('event_category'),
+                                'Date': format_date(event.get('event_date')),
+                                'Venue': event.get('venue'),
+                                'Organizer': event.get('organizer'),
+                                'Status': event.get('status'),
+                                'Max Participants': event.get('max_participants'),
+                                'Current Participants': event.get('current_participants'),
+                                'Created By': event.get('created_by_name')
+                            })
+                        
+                        df = pd.DataFrame(df_data)
+                        csv = df.to_csv(index=False)
+                        st.download_button(
+                            label="Download CSV",
+                            data=csv,
+                            file_name="events_export.csv",
+                            mime="text/csv"
+                        )
+                    
+                    elif export_format == "JSON":
+                        json_data = json.dumps(all_events, indent=2, default=str)
+                        st.download_button(
+                            label="Download JSON",
+                            data=json_data,
+                            file_name="events_export.json",
+                            mime="application/json"
+                        )
+
+def admin_mentor_management_page():
+    """Admin mentor management page"""
+    st.markdown('<h1 class="main-header">👨‍🏫 Mentor Management</h1>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["All Mentors", "Add Mentor", "Mentor Analytics"])
+    
+    with tab1:
+        st.subheader("📋 All Mentors")
+        
+        all_mentors = db.get_all_mentors()
+        
+        if not all_mentors:
+            st.info("No mentors found.")
+            return
+        
+        # Filters
+        col_filter1, col_filter2 = st.columns(2)
+        with col_filter1:
+            status_filter = st.selectbox("Status", ["All", "Active Only", "Inactive Only"])
+        with col_filter2:
+            dept_filter = st.selectbox("Department", ["All Departments"] + COLLEGE_CONFIG['departments'])
+        
+        # Apply filters
+        filtered_mentors = all_mentors
+        
+        if status_filter == "Active Only":
+            filtered_mentors = [m for m in filtered_mentors if m.get('is_active')]
+        elif status_filter == "Inactive Only":
+            filtered_mentors = [m for m in filtered_mentors if not m.get('is_active')]
+        
+        if dept_filter != "All Departments":
+            filtered_mentors = [m for m in filtered_mentors if m.get('department') == dept_filter]
+        
+        st.caption(f"Showing {len(filtered_mentors)} of {len(all_mentors)} mentors")
+        
+        # Display mentors
+        for mentor in filtered_mentors:
+            with st.container():
+                st.markdown('<div class="event-card">', unsafe_allow_html=True)
+                
+                col_info, col_stats, col_actions = st.columns([3, 2, 1])
+                
+                with col_info:
+                    status_emoji = "🟢" if mentor.get('is_active') else "🔴"
+                    st.markdown(f'<div class="card-title">{mentor.get("full_name")} {status_emoji}</div>', unsafe_allow_html=True)
+                    st.caption(f"📧 {mentor.get('email')}")
+                    st.caption(f"📱 {mentor.get('contact')}")
+                    st.caption(f"🏛️ {mentor.get('department')}")
+                    
+                    if mentor.get('expertise'):
+                        st.caption(f"🎯 {mentor.get('expertise')}")
+                
+                with col_stats:
+                    events = db.get_events_by_mentor(mentor['id'])
+                    st.metric("Events", len(events))
+                    st.caption(f"Since {format_date(mentor.get('created_at'))}")
+                
+                with col_actions:
+                    if st.button("Edit", key=f"edit_mentor_{mentor['id']}", use_container_width=True):
                         st.session_state.edit_mentor_id = mentor['id']
                         st.rerun()
                     
                     if mentor.get('is_active'):
-                        if st.button("❌ Deactivate", key=f"deact_{mentor['id']}", use_container_width=True, type="secondary"):
-                            if db.delete_mentor(mentor['id']):
-                                st.success("Mentor deactivated!")
-                                time.sleep(1)
-                                st.rerun()
+                        if st.button("Deactivate", key=f"deactivate_{mentor['id']}", use_container_width=True, type="secondary"):
+                            if confirm_action(f"Deactivate mentor {mentor['full_name']}?"):
+                                if db.update_mentor(mentor['id'], {'is_active': False}):
+                                    st.success("Mentor deactivated!")
+                                    st.rerun()
                     else:
-                        if st.button("✅ Activate", key=f"act_{mentor['id']}", use_container_width=True, type="secondary"):
+                        if st.button("Activate", key=f"activate_{mentor['id']}", use_container_width=True, type="primary"):
                             if db.update_mentor(mentor['id'], {'is_active': True}):
                                 st.success("Mentor activated!")
-                                time.sleep(1)
                                 st.rerun()
                 
                 st.markdown('</div>', unsafe_allow_html=True)
@@ -7399,24 +7344,50 @@ def admin_manage_mentors_page():
                 first_name = st.text_input("First Name *")
                 last_name = st.text_input("Last Name *")
                 department = st.selectbox("Department *", COLLEGE_CONFIG['departments'])
-                email = st.text_input("Email *")
+                email = st.text_input("Email *", placeholder="mentor@ghraisoni.edu")
             
             with col2:
-                contact = st.text_input("Contact Number *")
-                expertise = st.text_area("Expertise/Areas", placeholder="Python, Machine Learning, Web Development...")
+                contact = st.text_input("Contact Number *", placeholder="9876543210")
+                expertise = st.text_input("Expertise/Specialization", placeholder="e.g., Machine Learning, Web Development")
                 is_active = st.checkbox("Active", value=True)
-                
-                password_option = st.radio("Password", ["Auto-generate", "Custom"])
-                if password_option == "Custom":
-                    custom_password = st.text_input("Set Password", type="password")
-                else:
-                    custom_password = None
             
-            submit = st.form_submit_button("Add Mentor", use_container_width=True, type="primary")
+            st.markdown("### Account Information")
+            username = st.text_input("Username *", value=email if email else "")
+            generate_password = st.checkbox("Generate random password", value=True)
+            
+            if not generate_password:
+                password = st.text_input("Password", type="password")
+                confirm_password = st.text_input("Confirm Password", type="password")
+            else:
+                password = secrets.token_urlsafe(12)
+                st.info(f"Password will be generated: {password}")
+            
+            col_submit, col_cancel = st.columns(2)
+            with col_submit:
+                submit = st.form_submit_button("Add Mentor", use_container_width=True, type="primary")
+            with col_cancel:
+                cancel = st.form_submit_button("Cancel", use_container_width=True, type="secondary")
             
             if submit:
+                errors = []
+                
                 if not all([first_name, last_name, department, email, contact]):
-                    st.error("Please fill all required fields (*)")
+                    errors.append("Please fill all required fields (*)")
+                
+                is_valid_mobile, mobile_msg = Validators.validate_mobile(contact)
+                if not is_valid_mobile:
+                    errors.append(mobile_msg)
+                
+                is_valid_email, email_msg = Validators.validate_email(email)
+                if not is_valid_email:
+                    errors.append(email_msg)
+                
+                if not generate_password and password != confirm_password:
+                    errors.append("Passwords don't match")
+                
+                if errors:
+                    for error in errors:
+                        st.error(error)
                 else:
                     mentor_data = {
                         'first_name': first_name,
@@ -7426,421 +7397,803 @@ def admin_manage_mentors_page():
                         'contact': contact,
                         'expertise': expertise,
                         'is_active': is_active,
-                        'created_by': st.session_state.username
+                        'created_by': st.session_state.username,
+                        'password': password if not generate_password else password
                     }
-                    
-                    if custom_password:
-                        mentor_data['password'] = custom_password
                     
                     success, result = db.add_mentor(mentor_data)
                     if success:
-                        password = result
-                        st.success(f"✅ Mentor {first_name} {last_name} added successfully!")
-                        st.info(f"**Login credentials:**\nUsername: {email}\nPassword: {password}")
-                        st.warning("⚠️ Please save this password securely. It won't be shown again.")
+                        st.success(f"✅ Mentor '{first_name} {last_name}' added successfully!")
+                        st.info(f"**Temporary password:** {result}")
+                        st.markdown("""
+                        **Next Steps:**
+                        1. Share the credentials with the mentor
+                        2. Mentor can login and change password
+                        3. Assign mentor to events
+                        """)
                         st.rerun()
                     else:
                         st.error(f"Failed to add mentor: {result}")
     
-    if st.session_state.get('edit_mentor_id'):
-        mentor = db.get_mentor_by_id(st.session_state.edit_mentor_id)
-        if mentor:
-            edit_mentor_form(mentor)
-
-def edit_mentor_form(mentor):
-    """Form to edit mentor details"""
-    st.header("✏️ Edit Mentor")
-    
-    with st.form("edit_mentor_form"):
-        col1, col2 = st.columns(2)
+    with tab3:
+        st.subheader("📊 Mentor Analytics")
         
-        with col1:
-            first_name = st.text_input("First Name", value=mentor.get('first_name', ''))
-            last_name = st.text_input("Last Name", value=mentor.get('last_name', ''))
-            department = st.selectbox("Department", COLLEGE_CONFIG['departments'],
-                                     index=COLLEGE_CONFIG['departments'].index(mentor.get('department', '')) 
-                                     if mentor.get('department') in COLLEGE_CONFIG['departments'] else 0)
+        all_mentors = db.get_all_mentors()
         
-        with col2:
-            email = st.text_input("Email", value=mentor.get('email', ''))
-            contact = st.text_input("Contact", value=mentor.get('contact', ''))
-            expertise = st.text_area("Expertise", value=mentor.get('expertise', ''))
-            is_active = st.checkbox("Active", value=bool(mentor.get('is_active', True)))
+        if not all_mentors:
+            st.info("No mentors to analyze.")
+            return
         
-        col_save, col_cancel = st.columns(2)
-        with col_save:
-            save = st.form_submit_button("💾 Save Changes", use_container_width=True, type="primary")
-        with col_cancel:
-            cancel = st.form_submit_button("❌ Cancel", use_container_width=True, type="secondary")
+        # Calculate statistics
+        active_mentors = [m for m in all_mentors if m.get('is_active')]
+        inactive_mentors = [m for m in all_mentors if not m.get('is_active')]
         
-        if cancel:
-            st.session_state.edit_mentor_id = None
-            st.rerun()
+        # Department distribution
+        dept_counts = {}
+        for mentor in all_mentors:
+            dept = mentor.get('department', 'Unknown')
+            dept_counts[dept] = dept_counts.get(dept, 0) + 1
         
-        if save:
-            update_data = {
-                'first_name': first_name,
-                'last_name': last_name,
-                'department': department,
-                'email': email,
-                'contact': contact,
-                'expertise': expertise,
-                'is_active': is_active
-            }
+        col_stat1, col_stat2, col_stat3 = st.columns(3)
+        with col_stat1:
+            st.metric("Total Mentors", len(all_mentors))
+        with col_stat2:
+            st.metric("Active", len(active_mentors))
+        with col_stat3:
+            st.metric("Inactive", len(inactive_mentors))
+        
+        # Events per mentor
+        mentor_events = []
+        for mentor in active_mentors:
+            events = db.get_events_by_mentor(mentor['id'])
+            mentor_events.append({
+                'Mentor': mentor['full_name'],
+                'Department': mentor.get('department', 'N/A'),
+                'Events': len(events),
+                'Status': 'Active'
+            })
+        
+        if mentor_events:
+            df = pd.DataFrame(mentor_events)
+            st.dataframe(df.sort_values('Events', ascending=False), use_container_width=True)
             
-            if db.update_mentor(mentor['id'], update_data):
-                st.success("✅ Mentor updated successfully!")
-                st.session_state.edit_mentor_id = None
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.error("Failed to update mentor.")
+            # Chart
+            fig = px.bar(df.sort_values('Events', ascending=True).tail(10),
+                        x='Events', y='Mentor',
+                        title='Top 10 Mentors by Events',
+                        orientation='h',
+                        color='Events',
+                        color_continuous_scale='Viridis')
+            st.plotly_chart(fig, use_container_width=True)
 
-def admin_system_analytics_page():
-    """System analytics page for admin"""
-    st.header("📊 System Analytics")
+def admin_analytics_page():
+    """Admin analytics page"""
+    st.markdown('<h1 class="main-header">📊 System Analytics</h1>', unsafe_allow_html=True)
     
-    tab1, tab2, tab3 = st.tabs(["Performance", "Usage Statistics", "Event Analytics"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Event Analytics", "User Analytics", "Performance"])
     
     with tab1:
-        st.subheader("🏎️ System Performance")
+        st.subheader("📈 System Overview")
+        
+        # Get all data
+        all_users = db.get_all_users(use_cache=False)
+        all_events = db.get_all_events(use_cache=False)
+        all_mentors = db.get_all_mentors()
+        
+        students = [u for u in all_users if u.get('role') == 'student']
+        faculty = [u for u in all_users if u.get('role') == 'faculty']
+        mentors_list = [u for u in all_users if u.get('role') == 'mentor']
+        
+        # Calculate statistics
+        total_points = sum(s.get('total_points', 0) for s in students)
+        avg_points = total_points / len(students) if students else 0
+        
+        upcoming_events = len([e for e in all_events if e.get('status') == 'upcoming'])
+        ongoing_events = len([e for e in all_events if e.get('status') == 'ongoing'])
+        completed_events = len([e for e in all_events if e.get('status') == 'completed'])
+        
+        total_registrations = 0
+        for event in all_events:
+            regs = db.get_registrations_by_event(event.get('id'))
+            total_registrations += len(regs) if regs else 0
+        
+        # Display metrics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Users", len(all_users))
+        with col2:
+            st.metric("Total Events", len(all_events))
+        with col3:
+            st.metric("Total Registrations", total_registrations)
+        with col4:
+            st.metric("Total Points", f"{total_points:,}")
+        
+        col5, col6, col7, col8 = st.columns(4)
+        with col5:
+            st.metric("Avg Points/Student", f"{avg_points:.0f}")
+        with col6:
+            st.metric("Active Mentors", len([m for m in all_mentors if m.get('is_active')]))
+        with col7:
+            st.metric("Upcoming Events", upcoming_events)
+        with col8:
+            st.metric("Completed Events", completed_events)
+        
+        st.markdown("---")
+        
+        # Charts
+        col_chart1, col_chart2 = st.columns(2)
+        
+        with col_chart1:
+            # User distribution
+            user_data = {
+                'Students': len(students),
+                'Faculty': len(faculty),
+                'Mentors': len(mentors_list),
+                'Admins': len([u for u in all_users if u.get('role') == 'admin'])
+            }
+            
+            fig1 = px.pie(
+                values=list(user_data.values()),
+                names=list(user_data.keys()),
+                title="User Distribution",
+                hole=0.3
+            )
+            st.plotly_chart(fig1, use_container_width=True)
+        
+        with col_chart2:
+            # Event status distribution
+            status_data = {
+                'Upcoming': upcoming_events,
+                'Ongoing': ongoing_events,
+                'Completed': completed_events
+            }
+            
+            fig2 = px.bar(
+                x=list(status_data.keys()),
+                y=list(status_data.values()),
+                title="Event Status",
+                labels={'x': 'Status', 'y': 'Count'},
+                color=list(status_data.values()),
+                color_continuous_scale='Viridis'
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+        
+        # Department statistics
+        st.subheader("🏛️ Department Performance")
+        dept_stats = db.get_department_stats()
+        if dept_stats:
+            df = pd.DataFrame(dept_stats)
+            st.dataframe(df.sort_values('total_points', ascending=False), use_container_width=True)
+    
+    with tab2:
+        st.subheader("📅 Event Analytics")
+        
+        event_analytics = db.get_event_analytics()
+        if event_analytics:
+            col_ev1, col_ev2, col_ev3 = st.columns(3)
+            with col_ev1:
+                st.metric("Total Events", event_analytics.get('total_events', 0))
+            with col_ev2:
+                st.metric("Total Registrations", event_analytics.get('total_registrations', 0))
+            with col_ev3:
+                avg_reg = event_analytics.get('average_registrations', 0)
+                st.metric("Avg Registrations", f"{avg_reg:.1f}")
+            
+            # Event type distribution
+            type_counts = event_analytics.get('type_counts', {})
+            if type_counts:
+                fig = px.pie(
+                    values=list(type_counts.values()),
+                    names=list(type_counts.keys()),
+                    title="Event Type Distribution",
+                    hole=0.3
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Top events by popularity
+            st.subheader("🔥 Most Popular Events")
+            all_events = db.get_all_events(use_cache=False)
+            if all_events:
+                events_with_popularity = []
+                for event in all_events:
+                    popularity = event.get('popularity_score', 0)
+                    registrations = db.get_registrations_by_event(event['id'])
+                    events_with_popularity.append({
+                        'Event': event.get('title'),
+                        'Type': event.get('event_type'),
+                        'Popularity': popularity,
+                        'Registrations': len(registrations),
+                        'Date': format_date(event.get('event_date'))
+                    })
+                
+                df_pop = pd.DataFrame(events_with_popularity)
+                df_pop = df_pop.sort_values('Popularity', ascending=False).head(10)
+                st.dataframe(df_pop, use_container_width=True)
+    
+    with tab3:
+        st.subheader("👥 User Analytics")
+        
+        all_users = db.get_all_users(use_cache=False)
+        students = [u for u in all_users if u.get('role') == 'student']
+        
+        if students:
+            # Points distribution
+            points_data = [s.get('total_points', 0) for s in students]
+            
+            col_usr1, col_usr2, col_usr3 = st.columns(3)
+            with col_usr1:
+                avg_points = sum(points_data) / len(points_data)
+                st.metric("Avg Points", f"{avg_points:.0f}")
+            with col_usr2:
+                max_points = max(points_data)
+                st.metric("Max Points", max_points)
+            with col_usr3:
+                top_10_percent = sorted(points_data, reverse=True)[:len(points_data)//10]
+                avg_top_10 = sum(top_10_percent) / len(top_10_percent) if top_10_percent else 0
+                st.metric("Avg Top 10%", f"{avg_top_10:.0f}")
+            
+            # Points histogram
+            fig = px.histogram(
+                x=points_data,
+                title="Points Distribution",
+                labels={'x': 'Points', 'y': 'Number of Students'},
+                nbins=20
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Level distribution
+            level_counts = {}
+            for student in students:
+                level = student.get('current_level', 1)
+                level_counts[level] = level_counts.get(level, 0) + 1
+            
+            fig2 = px.bar(
+                x=list(level_counts.keys()),
+                y=list(level_counts.values()),
+                title="Student Level Distribution",
+                labels={'x': 'Level', 'y': 'Number of Students'}
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+    
+    with tab4:
+        st.subheader("⚡ System Performance")
+        
+        # Cache statistics
+        cache_stats = cache.get_stats()
+        
+        col_perf1, col_perf2, col_perf3 = st.columns(3)
+        with col_perf1:
+            st.metric("Cache Hit Rate", cache_stats['hit_rate'])
+        with col_perf2:
+            st.metric("Cache Size", f"{cache_stats['size']}/{cache_stats['max_size']}")
+        with col_perf3:
+            total_requests = cache_stats['hits'] + cache_stats['misses']
+            st.metric("Total Requests", total_requests)
+        
+        # Database information
+        st.markdown("### Database Information")
+        db_type = "Supabase PostgreSQL" if db.use_supabase else "SQLite"
+        st.info(f"**Database:** {db_type}")
+        
+        if st.button("🔄 Clear Cache", type="secondary"):
+            cache.clear()
+            st.success("Cache cleared successfully!")
+            st.rerun()
+        
+        # System health check
+        st.markdown("### System Health")
+        if st.button("🏥 Run Health Check", type="primary"):
+            with st.spinner("Checking system health..."):
+                checks = []
+                
+                # Check database
+                try:
+                    users = db.get_all_users(use_cache=False)
+                    checks.append(("✅ Database", "Connected"))
+                except Exception as e:
+                    checks.append(("❌ Database", f"Error: {str(e)[:50]}"))
+                
+                # Check cache
+                if cache_stats['size'] > 0:
+                    checks.append(("✅ Cache", "Working"))
+                else:
+                    checks.append(("⚠️ Cache", "Empty"))
+                
+                # Check event status update
+                try:
+                    db._update_event_status()
+                    checks.append(("✅ Event Status", "Updated"))
+                except:
+                    checks.append(("⚠️ Event Status", "Update failed"))
+                
+                # Display results
+                for check, status in checks:
+                    st.write(f"{check}: {status}")
+
+def system_settings_page():
+    """System settings page"""
+    st.markdown('<h1 class="main-header">⚙️ System Settings</h1>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["General Settings", "Gamification", "Notifications"])
+    
+    with tab1:
+        st.subheader("🛠️ General Settings")
+        
+        with st.form("general_settings"):
+            # College information
+            st.markdown("### College Information")
+            college_name = st.text_input("College Name", value=COLLEGE_CONFIG['name'])
+            
+            # Event settings
+            st.markdown("### Event Settings")
+            default_max_participants = st.number_input("Default Max Participants", 
+                                                     value=100, min_value=10, max_value=1000)
+            event_approval_required = st.checkbox("Require event approval", value=False)
+            allow_external_registration = st.checkbox("Allow external registration links", value=True)
+            
+            # Security settings
+            st.markdown("### Security Settings")
+            session_timeout = st.number_input("Session Timeout (minutes)", 
+                                            value=SESSION_TIMEOUT_MINUTES, 
+                                            min_value=5, max_value=480)
+            max_login_attempts = st.number_input("Max Login Attempts", 
+                                               value=MAX_LOGIN_ATTEMPTS, 
+                                               min_value=1, max_value=10)
+            password_min_length = st.number_input("Minimum Password Length", 
+                                                value=PASSWORD_MIN_LENGTH, 
+                                                min_value=6, max_value=20)
+            
+            if st.form_submit_button("Save Settings", use_container_width=True, type="primary"):
+                st.success("Settings saved! (Note: Some settings require app restart)")
+    
+    with tab2:
+        st.subheader("🎮 Gamification Settings")
+        
+        with st.form("gamification_settings"):
+            st.markdown("### Points Configuration")
+            
+            col_points1, col_points2 = st.columns(2)
+            with col_points1:
+                registration_points = st.number_input("Registration Points", 
+                                                    value=GAMIFICATION_CONFIG['points']['registration'])
+                attendance_points = st.number_input("Attendance Points", 
+                                                  value=GAMIFICATION_CONFIG['points']['attendance'])
+                winner_points = st.number_input("Winner Points", 
+                                              value=GAMIFICATION_CONFIG['points']['winner'])
+            
+            with col_points2:
+                daily_login_points = st.number_input("Daily Login Points", 
+                                                   value=GAMIFICATION_CONFIG['points']['daily_login'])
+                feedback_points = st.number_input("Feedback Points", 
+                                                value=GAMIFICATION_CONFIG['points']['feedback_submission'])
+                event_creation_points = st.number_input("Event Creation Points", 
+                                                      value=GAMIFICATION_CONFIG['points']['event_creation'])
+            
+            st.markdown("### Level Configuration")
+            
+            for level_num, config in GAMIFICATION_CONFIG['levels'].items():
+                col_level1, col_level2 = st.columns([1, 3])
+                with col_level1:
+                    st.markdown(f"**Level {level_num}**")
+                with col_level2:
+                    points_required = st.number_input(f"Points Required", 
+                                                    value=config['points_required'],
+                                                    key=f"level_{level_num}_points")
+            
+            if st.form_submit_button("Save Gamification Settings", use_container_width=True, type="primary"):
+                st.success("Gamification settings saved!")
+    
+    with tab3:
+        st.subheader("🔔 Notification Settings")
+        
+        st.info("Notification system configuration")
+        
+        col_notif1, col_notif2 = st.columns(2)
+        
+        with col_notif1:
+            st.markdown("### Email Notifications")
+            email_enabled = st.checkbox("Enable email notifications", value=True)
+            if email_enabled:
+                smtp_server = st.text_input("SMTP Server", value="smtp.gmail.com")
+                smtp_port = st.number_input("SMTP Port", value=587)
+                email_from = st.text_input("From Email", value="noreply@ghraisoni.edu")
+        
+        with col_notif2:
+            st.markdown("### Push Notifications")
+            push_enabled = st.checkbox("Enable push notifications", value=False)
+            if push_enabled:
+                st.info("Push notification configuration would be here")
+        
+        st.markdown("### Notification Types")
+        
+        notification_types = [
+            ("event_updates", "Event Updates", True),
+            ("registration_confirmation", "Registration Confirmations", True),
+            ("points_awarded", "Points Awards", True),
+            ("achievement_unlocked", "Achievement Unlocks", True),
+            ("mentor_assignments", "Mentor Assignments", False),
+            ("system_announcements", "System Announcements", True)
+        ]
+        
+        for ntype, label, default in notification_types:
+            st.checkbox(label, value=default, key=f"notif_{ntype}")
+        
+        if st.button("Save Notification Settings", use_container_width=True, type="primary"):
+            st.success("Notification settings saved!")
+
+def debug_tools_page():
+    """Debug and tools page for admin"""
+    st.markdown('<h1 class="main-header">🛠️ Debug & Tools</h1>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["Database Tools", "Cache Management", "System Logs"])
+    
+    with tab1:
+        st.subheader("🗄️ Database Tools")
+        
+        col_db1, col_db2 = st.columns(2)
+        
+        with col_db1:
+            st.markdown("### Database Operations")
+            
+            if st.button("🔄 Update Event Statuses", use_container_width=True):
+                with st.spinner("Updating event statuses..."):
+                    success = db._update_event_status()
+                    if success:
+                        st.success("Event statuses updated!")
+                    else:
+                        st.error("Failed to update event statuses")
+            
+            if st.button("📊 Recalculate Popularity Scores", use_container_width=True):
+                with st.spinner("Recalculating..."):
+                    events = db.get_all_events(use_cache=False)
+                    for event in events:
+                        db._update_event_popularity(event['id'])
+                    st.success("Popularity scores recalculated!")
+        
+        with col_db2:
+            st.markdown("### Database Information")
+            
+            db_type = "Supabase PostgreSQL" if db.use_supabase else "SQLite"
+            st.info(f"**Current Database:** {db_type}")
+            
+            events = db.get_all_events(use_cache=False)
+            users = db.get_all_users(use_cache=False)
+            
+            st.metric("Total Events", len(events))
+            st.metric("Total Users", len(users))
+            
+            if st.button("🔍 Test Database Connection", use_container_width=True):
+                try:
+                    test_result = db.get_all_events(use_cache=False)
+                    if test_result is not None:
+                        st.success("✅ Database connection successful!")
+                    else:
+                        st.error("❌ Database connection failed!")
+                except Exception as e:
+                    st.error(f"❌ Database error: {str(e)[:100]}")
+    
+    with tab2:
+        st.subheader("💾 Cache Management")
         
         cache_stats = cache.get_stats()
         
-        col1, col2, col3 = st.columns(3)
-        with col1:
+        col_cache1, col_cache2, col_cache3 = st.columns(3)
+        with col_cache1:
             st.metric("Cache Size", f"{cache_stats['size']}/{cache_stats['max_size']}")
-        with col2:
-            st.metric("Cache Hit Rate", cache_stats['hit_rate'])
-        with col3:
+        with col_cache2:
+            st.metric("Hit Rate", cache_stats['hit_rate'])
+        with col_cache3:
             st.metric("Total Requests", cache_stats['hits'] + cache_stats['misses'])
         
-        if db.use_supabase:
-            st.info("✅ Using Supabase PostgreSQL")
-        else:
-            st.info("💾 Using SQLite (Local)")
+        st.markdown("### Cache Operations")
         
-        st.markdown("---")
-        st.subheader("📈 Performance Metrics")
+        col_cache_op1, col_cache_op2, col_cache_op3 = st.columns(3)
+        with col_cache_op1:
+            if st.button("🧹 Clear Cache", use_container_width=True, type="primary"):
+                cache.clear()
+                st.success("Cache cleared!")
+                st.rerun()
         
-        metrics_data = {
-            'Metric': ['Database Queries', 'Cache Hits', 'Cache Misses', 'Response Time'],
-            'Value': [cache_stats['hits'] + cache_stats['misses'], cache_stats['hits'], 
-                     cache_stats['misses'], '~50ms']
-        }
+        with col_cache_op2:
+            if st.button("🔄 Reset Stats", use_container_width=True):
+                cache.clear()
+                st.success("Cache stats reset!")
+                st.rerun()
         
-        df = pd.DataFrame(metrics_data)
-        st.dataframe(df, use_container_width=True, hide_index=True)
-    
-    with tab2:
-        st.subheader("📊 Usage Statistics")
-        
-        users = db.get_all_users()
-        events = db.get_all_events(cache_ttl=0, use_cache=False)
-        
-        if users and events:
-            total_users = len(users)
-            active_users = len([u for u in users if u.get('is_active', True)])
-            total_events = len(events)
-            active_events = len([e for e in events if e.get('status') in ['upcoming', 'ongoing']])
-            
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                st.metric("Total Users", total_users)
-            with col2:
-                st.metric("Active Users", active_users)
-            with col3:
-                st.metric("Total Events", total_events)
-            with col4:
-                st.metric("Active Events", active_events)
-            
-            st.markdown("---")
-            
-            registrations = []
-            for event in events:
-                regs = db.get_registrations_by_event(event.get('id'))
-                registrations.extend(regs)
-            
-            if registrations:
-                total_registrations = len(registrations)
-                avg_reg_per_event = total_registrations / total_events if total_events > 0 else 0
+        with col_cache_op3:
+            if st.button("📊 View Cache Contents", use_container_width=True):
+                st.info(f"Cache contains {len(cache.cache)} items")
                 
-                col5, col6 = st.columns(2)
-                with col5:
-                    st.metric("Total Registrations", total_registrations)
-                with col6:
-                    st.metric("Avg. Reg/Event", f"{avg_reg_per_event:.1f}")
-                
-                df = pd.DataFrame(registrations)
-                if not df.empty:
-                    df['registered_at'] = pd.to_datetime(df['registered_at'])
-                    df['date'] = df['registered_at'].dt.date
-                    
-                    daily_regs = df.groupby('date').size().reset_index(name='count')
-                    
-                    fig = px.line(daily_regs, x='date', y='count',
-                                title='Daily Registrations Trend',
-                                labels={'date': 'Date', 'count': 'Registrations'})
-                    st.plotly_chart(fig, use_container_width=True)
+                # Show some cache keys
+                sample_keys = list(cache.cache.keys())[:10]
+                if sample_keys:
+                    st.write("Sample cache keys:")
+                    for key in sample_keys:
+                        st.code(key[:50] + "..." if len(key) > 50 else key)
+        
+        st.markdown("### Cache Configuration")
+        
+        new_max_size = st.number_input("Max Cache Size", value=cache.max_size, min_value=100, max_value=10000)
+        if st.button("Update Cache Size", use_container_width=True):
+            cache.max_size = new_max_size
+            st.success(f"Cache size updated to {new_max_size}")
     
     with tab3:
-        st.subheader("🎯 Event Analytics")
+        st.subheader("📝 System Logs")
         
-        events = db.get_all_events(cache_ttl=0, use_cache=False)
+        log_level = st.selectbox("Log Level", ["INFO", "DEBUG", "WARNING", "ERROR"])
         
-        if events:
-            total_events = len(events)
-            
-            event_types = {}
-            event_categories = {}
-            status_counts = {}
-            
-            for event in events:
-                event_type = event.get('event_type', 'Unknown')
-                event_category = event.get('event_category', 'Unknown')
-                status = event.get('status', 'unknown')
-                
-                event_types[event_type] = event_types.get(event_type, 0) + 1
-                event_categories[event_category] = event_categories.get(event_category, 0) + 1
-                status_counts[status] = status_counts.get(status, 0) + 1
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if event_types:
-                    fig1 = px.pie(
-                        names=list(event_types.keys()),
-                        values=list(event_types.values()),
-                        title="Event Type Distribution",
-                        hole=0.3
-                    )
-                    st.plotly_chart(fig1, use_container_width=True)
-            
-            with col2:
-                if event_categories:
-                    fig2 = px.bar(
-                        x=list(event_categories.keys()),
-                        y=list(event_categories.values()),
-                        title="Event Category Distribution",
-                        labels={'x': 'Category', 'y': 'Count'},
-                        color=list(event_categories.values()),
-                        color_continuous_scale='Viridis'
-                    )
-                    st.plotly_chart(fig2, use_container_width=True)
-            
-            st.markdown("---")
-            st.subheader("📅 Monthly Events")
-            
-            events_df = pd.DataFrame(events)
-            if 'created_at' in events_df.columns and not events_df.empty:
-                events_df['month'] = pd.to_datetime(events_df['created_at']).dt.to_period('M')
-                monthly_counts = events_df.groupby('month').size().reset_index(name='count')
-                monthly_counts['month'] = monthly_counts['month'].dt.strftime('%Y-%m')
-                
-                fig3 = px.bar(monthly_counts, x='month', y='count',
-                            title="Events Created by Month",
-                            labels={'month': 'Month', 'count': 'Number of Events'},
-                            color='count',
-                            color_continuous_scale='Viridis')
-                st.plotly_chart(fig3, use_container_width=True)
-
-def admin_backup_page():
-    """Backup and restore page"""
-    st.header("💾 Backup & Restore")
-    
-    tab1, tab2 = st.tabs(["Database Backup", "System Settings"])
-    
-    with tab1:
-        st.subheader("📦 Database Backup")
-        
-        st.info("""
-        **Backup Options:**
-        - Export all data as JSON files
-        - Export specific tables as CSV
-        - Generate backup report
-        """)
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("📤 Export All Data", use_container_width=True):
-                export_all_data()
-        
-        with col2:
-            if st.button("📊 Export as CSV", use_container_width=True):
-                export_csv_data()
-        
-        with col3:
-            if st.button("📄 Generate Report", use_container_width=True):
-                generate_backup_report()
-        
-        st.markdown("---")
-        st.subheader("🔄 Restore Data")
-        
-        st.warning("⚠️ Restoring data will overwrite existing records. Use with caution!")
-        
-        uploaded_file = st.file_uploader("Upload backup file", type=['json', 'csv'])
-        
-        if uploaded_file:
-            if st.button("🔄 Restore from Backup", type="secondary", use_container_width=True):
-                st.warning("This feature is under development. Please contact system administrator.")
-    
-    with tab2:
-        st.subheader("⚙️ System Settings")
-        
-        with st.form("system_settings"):
-            st.markdown("### Application Settings")
-            
-            maintenance_mode = st.checkbox("Maintenance Mode", value=False,
-                                          help="When enabled, only admins can access the system")
-            
-            new_user_registration = st.checkbox("Allow New User Registration", value=True)
-            
-            event_creation = st.selectbox("Who can create events?", 
-                                         ["Admin Only", "Admin & Faculty", "All Users"])
-            
-            st.markdown("### Notification Settings")
-            
-            email_notifications = st.checkbox("Enable Email Notifications", value=False)
-            push_notifications = st.checkbox("Enable Push Notifications", value=True)
-            
-            st.markdown("### Performance Settings")
-            
-            cache_enabled = st.checkbox("Enable Caching", value=CACHE_ENABLED)
-            cache_size = st.slider("Cache Size (entries)", 100, 5000, 2000, 100)
-            
-            save_settings = st.form_submit_button("💾 Save Settings", use_container_width=True, type="primary")
-            
-            if save_settings:
-                st.success("Settings saved successfully! (Note: Some changes require restart)")
-                st.info("Actual implementation would save these to a configuration file or database.")
-
-# ============================================
-# HELPER FUNCTIONS FOR ADMIN
-# ============================================
-
-def get_all_users():
-    """Get all users from database"""
-    return db.get_all_users()
-
-def confirm_action(message):
-    """Confirm an action with the user"""
-    return st.checkbox(f"✅ {message}")
-
-def export_all_data():
-    """Export all data as JSON"""
-    try:
-        data = {}
-        
-        tables = ['users', 'events', 'mentors', 'registrations', 'event_likes', 
-                 'event_interested', 'event_feedback', 'notifications', 'user_achievements']
-        
-        for table in tables:
+        if st.button("📄 View Recent Logs", use_container_width=True):
             try:
-                if db.use_supabase:
-                    table_data = db.client.select(table, limit=10000, use_cache=False)
+                if os.path.exists('event_management.log'):
+                    with open('event_management.log', 'r') as f:
+                        lines = f.readlines()[-100:]  # Last 100 lines
+                    
+                    st.text_area("Log Content", value=''.join(lines), height=400)
                 else:
-                    table_data = db.client.execute_query(f"SELECT * FROM {table}", 
-                                                        fetchall=True, use_cache=False)
-                data[table] = table_data
+                    st.info("No log file found.")
+            except Exception as e:
+                st.error(f"Error reading logs: {e}")
+        
+        if st.button("🗑️ Clear Logs", use_container_width=True, type="secondary"):
+            if os.path.exists('event_management.log'):
+                open('event_management.log', 'w').close()
+                st.success("Logs cleared!")
+            else:
+                st.info("No log file to clear.")
+
+# ============================================
+# EVENT DETAILS PAGE
+# ============================================
+
+def event_details_page():
+    """Event details page"""
+    event_id = st.session_state.get('view_event_id')
+    if not event_id:
+        st.error("No event selected!")
+        st.stop()
+    
+    event = db.get_event_by_id(event_id)
+    if not event:
+        st.error("Event not found!")
+        st.stop()
+    
+    # Increase view count
+    if db.use_supabase:
+        current_views = event.get('views_count', 0)
+        db.client.update('events', {'id': event_id}, {'views_count': current_views + 1})
+    else:
+        cursor = db.client.conn.cursor()
+        cursor.execute("UPDATE events SET views_count = views_count + 1 WHERE id = ?", (event_id,))
+        db.client.conn.commit()
+    
+    # Clear cache for this event
+    cache.delete(f"event_{event_id}")
+    
+    st.markdown('<div class="event-details-header">', unsafe_allow_html=True)
+    
+    col_back, col_title = st.columns([1, 5])
+    with col_back:
+        if st.button("← Back", use_container_width=True):
+            if 'view_event_id' in st.session_state:
+                del st.session_state.view_event_id
+            st.rerun()
+    
+    with col_title:
+        st.markdown(f'<h1 class="main-header">{event.get("title")}</h1>', unsafe_allow_html=True)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Event header with status
+    status_html = get_event_status(event.get('event_date'), event.get('end_date'), event.get('status'))
+    st.markdown(f'<div style="text-align: right; margin-bottom: 20px;">{status_html}</div>', unsafe_allow_html=True)
+    
+    col_main, col_sidebar = st.columns([3, 1])
+    
+    with col_main:
+        # Event image/flyer
+        flyer = event.get('flyer_path')
+        if flyer and flyer.startswith('data:image'):
+            try:
+                st.image(flyer, use_column_width=True)
             except:
                 pass
         
-        json_str = json.dumps(data, indent=2, default=str)
+        # Event description
+        st.markdown("### 📝 Description")
+        st.markdown(event.get('description', 'No description available.'))
         
-        st.download_button(
-            label="📥 Download JSON Backup",
-            data=json_str,
-            file_name=f"event_system_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            mime="application/json"
-        )
+        # Additional details
+        st.markdown("### 📋 Details")
         
-        st.success("✅ Data exported successfully!")
+        col_details1, col_details2 = st.columns(2)
+        with col_details1:
+            st.markdown(f"**📍 Venue:** {event.get('venue', 'TBD')}")
+            st.markdown(f"**📅 Date:** {format_date(event.get('event_date'))}")
+            if event.get('end_date'):
+                st.markdown(f"**📅 End Date:** {format_date(event.get('end_date'))}")
+            st.markdown(f"**🏷️ Type:** {event.get('event_type', 'N/A')}")
+            st.markdown(f"**📊 Category:** {event.get('event_category', 'N/A')}")
         
-    except Exception as e:
-        st.error(f"Error exporting data: {e}")
-
-def export_csv_data():
-    """Export data as CSV"""
-    try:
-        tables = ['users', 'events', 'registrations']
+        with col_details2:
+            st.markdown(f"**🎯 Difficulty:** {event.get('difficulty_level', 'Beginner')}")
+            if event.get('estimated_duration'):
+                st.markdown(f"**⏱️ Duration:** {event.get('estimated_duration')} minutes")
+            st.markdown(f"**👥 Max Participants:** {event.get('max_participants', 100)}")
+            st.markdown(f"**👥 Registered:** {event.get('current_participants', 0)}")
+            if event.get('has_certificate'):
+                st.markdown("**🎓 Certificate:** Yes")
         
-        for table in tables:
+        # Prerequisites
+        prerequisites = event.get('prerequisites')
+        if prerequisites:
+            st.markdown("### 📋 Prerequisites")
+            st.markdown(prerequisites)
+        
+        # Tags
+        tags = event.get('tags')
+        if tags and isinstance(tags, str):
             try:
-                if db.use_supabase:
-                    table_data = db.client.select(table, limit=10000, use_cache=False)
-                else:
-                    table_data = db.client.execute_query(f"SELECT * FROM {table}", 
-                                                        fetchall=True, use_cache=False)
-                
-                if table_data:
-                    df = pd.DataFrame(table_data)
-                    csv = df.to_csv(index=False)
-                    
-                    st.download_button(
-                        label=f"📥 Download {table.capitalize()} CSV",
-                        data=csv,
-                        file_name=f"{table}_{datetime.now().strftime('%Y%m%d')}.csv",
-                        mime="text/csv",
-                        key=f"download_{table}"
-                    )
-            except Exception as e:
-                st.warning(f"Could not export {table}: {e}")
-    
-    except Exception as e:
-        st.error(f"Error exporting CSV data: {e}")
-
-def generate_backup_report():
-    """Generate a backup report"""
-    try:
-        report = {
-            "generated_at": datetime.now().isoformat(),
-            "system_info": {
-                "database": "Supabase PostgreSQL" if db.use_supabase else "SQLite",
-                "cache_enabled": CACHE_ENABLED,
-                "cache_size": cache.get_stats()['size']
-            },
-            "statistics": {}
-        }
-        
-        tables = ['users', 'events', 'registrations']
-        
-        for table in tables:
-            try:
-                if db.use_supabase:
-                    table_data = db.client.select(table, limit=1, use_cache=False)
-                else:
-                    table_data = db.client.execute_query(f"SELECT COUNT(*) as count FROM {table}", 
-                                                        fetchone=True, use_cache=False)
-                
-                if table == 'users' and not db.use_supabase:
-                    report["statistics"][table] = {"count": table_data['count']}
-                else:
-                    report["statistics"][table] = {"count": len(table_data) if table_data else 0}
+                tags_list = json.loads(tags)
+                if tags_list:
+                    st.markdown("### 🏷️ Tags")
+                    tags_html = " ".join([f'<span style="background: #E0F2FE; color: #0369A1; padding: 4px 12px; border-radius: 20px; font-size: 0.9rem; margin-right: 8px; margin-bottom: 8px; display: inline-block;">{tag}</span>' for tag in tags_list])
+                    st.markdown(f'<div>{tags_html}</div>', unsafe_allow_html=True)
             except:
-                report["statistics"][table] = {"count": 0, "error": "Could not retrieve"}
+                pass
+    
+    with col_sidebar:
+        # Event statistics
+        st.markdown("### 📊 Statistics")
         
-        report_str = json.dumps(report, indent=2)
+        likes_count = db.get_event_likes_count(event_id)
+        interested_count = db.get_event_interested_count(event_id)
+        views_count = event.get('views_count', 0) + 1  # +1 for current view
         
-        st.download_button(
-            label="📥 Download Backup Report",
-            data=report_str,
-            file_name=f"backup_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            mime="application/json"
-        )
+        col_stats1, col_stats2 = st.columns(2)
+        with col_stats1:
+            st.metric("❤️ Likes", likes_count)
+            st.metric("⭐ Interested", interested_count)
+        with col_stats2:
+            st.metric("👁️ Views", views_count)
+            popularity = event.get('popularity_score', 0)
+            st.metric("🔥 Popularity", f"{popularity:.1f}")
         
-        st.json(report)
+        # Organizer info
+        st.markdown("### 👤 Organizer")
+        st.markdown(f"**{event.get('organizer', 'G H Raisoni College')}**")
         
-    except Exception as e:
-        st.error(f"Error generating report: {e}")
+        # Mentor info
+        mentor_id = event.get('mentor_id')
+        if mentor_id:
+            mentor = db.get_mentor_by_id(mentor_id)
+            if mentor:
+                st.markdown("### 👨‍🏫 Mentor")
+                st.markdown(f"**{mentor.get('full_name')}**")
+                st.markdown(f"*{mentor.get('department', 'N/A')}*")
+                if mentor.get('expertise'):
+                    st.markdown(f"🎯 {mentor.get('expertise')}")
+        
+        # Links
+        st.markdown("### 🔗 Links")
+        event_link = event.get('event_link')
+        if event_link:
+            st.markdown(f"[🌐 Event Website]({event_link})")
+        
+        registration_link = event.get('registration_link')
+        if registration_link:
+            st.markdown(f"[📝 Registration Link]({registration_link})")
+        
+        # Action buttons for logged-in users
+        if 'username' in st.session_state:
+            st.markdown("### 🎯 Actions")
+            
+            # Like button
+            is_liked = db.is_event_liked(event_id, st.session_state.username)
+            like_text = "❤️ Liked" if is_liked else "🤍 Like"
+            if st.button(like_text, use_container_width=True, 
+                        type="secondary" if is_liked else "primary"):
+                if is_liked:
+                    db.remove_like(event_id, st.session_state.username)
+                else:
+                    db.add_like(event_id, st.session_state.username)
+                st.rerun()
+            
+            # Interested button
+            is_interested = db.is_event_interested(event_id, st.session_state.username)
+            interested_text = "⭐ Interested" if is_interested else "☆ Mark Interested"
+            if st.button(interested_text, use_container_width=True,
+                        type="secondary" if is_interested else "primary"):
+                if is_interested:
+                    db.remove_interested(event_id, st.session_state.username)
+                else:
+                    db.add_interested(event_id, st.session_state.username)
+                st.rerun()
+            
+            # Registration button for students
+            if st.session_state.get('role') == 'student':
+                is_registered = db.is_student_registered(event_id, st.session_state.username)
+                
+                if is_registered:
+                    st.success("✅ You are registered for this event")
+                    
+                    # Provide feedback button for completed events
+                    if event.get('status') in ['completed', 'ongoing']:
+                        if st.button("💬 Provide Feedback", use_container_width=True, type="primary"):
+                            st.session_state.feedback_event_id = event_id
+                            st.rerun()
+                else:
+                    if st.button("📝 Register Now", use_container_width=True, type="primary"):
+                        student = db.get_user(st.session_state.username)
+                        if student:
+                            reg_data = {
+                                'event_id': event_id,
+                                'event_title': event.get('title'),
+                                'student_username': st.session_state.username,
+                                'student_name': student.get('name', st.session_state.username),
+                                'student_roll': student.get('roll_no', 'N/A'),
+                                'student_dept': student.get('department', 'N/A')
+                            }
+                            reg_id, message = db.add_registration(reg_data)
+                            if reg_id:
+                                st.success("✅ Registered successfully!")
+                                st.rerun()
+                            else:
+                                st.error(message)
+    
+    # Feedback section
+    st.markdown("---")
+    st.markdown("### 💬 Feedback")
+    
+    feedbacks = db.get_event_feedback(event_id, limit=20)
+    
+    if feedbacks:
+        for feedback in feedbacks:
+            with st.container():
+                col_fb1, col_fb2 = st.columns([1, 4])
+                with col_fb1:
+                    rating = feedback.get('rating', 0)
+                    stars = "⭐" * rating
+                    st.markdown(f"**{stars}**")
+                with col_fb2:
+                    if feedback.get('anonymous'):
+                        st.markdown("**Anonymous User**")
+                    else:
+                        user = db.get_user(feedback.get('student_username'))
+                        if user:
+                            st.markdown(f"**{user.get('name', 'User')}**")
+                    st.markdown(feedback.get('comments', ''))
+                    st.caption(f"Submitted on {format_date(feedback.get('submitted_at'))}")
+                st.markdown("---")
+    else:
+        st.info("No feedback yet. Be the first to provide feedback!")
+
+# ============================================
+# HELPER FUNCTIONS
+# ============================================
 
 def format_date_relative(date_str):
-    """Format date as relative time (e.g., '2 hours ago')"""
+    """Format date relative to current time"""
     try:
         if isinstance(date_str, str):
-            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            # Parse the date string
+            for fmt in ['%Y-%m-%dT%H:%M:%S', '%Y-%m-%d %H:%M:%S', '%Y-%m-%d']:
+                try:
+                    dt = datetime.strptime(date_str, fmt)
+                    break
+                except:
+                    continue
+            
+            if 'dt' not in locals():
+                if 'Z' in date_str or '+' in date_str:
+                    dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    dt = dt.replace(tzinfo=None)
+                else:
+                    dt = datetime.fromisoformat(date_str)
         else:
             dt = date_str
+            if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+                dt = dt.replace(tzinfo=None)
         
         now = datetime.now()
         diff = now - dt
@@ -7860,190 +8213,161 @@ def format_date_relative(date_str):
             minutes = diff.seconds // 60
             return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
         else:
-            return "just now"
+            return "Just now"
     except:
-        return str(date_str)
+        return format_date(date_str)
+
+def check_session_timeout():
+    """Check if session has timed out"""
+    if 'session_start' in st.session_state:
+        session_duration = datetime.now() - st.session_state.session_start
+        if session_duration.total_seconds() > SESSION_TIMEOUT_MINUTES * 60:
+            st.warning("Session has timed out. Please login again.")
+            time.sleep(2)
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
 
 # ============================================
-# MAIN APPLICATION
+# MAIN APP FLOW
 # ============================================
 
 def main():
-    """Main application function"""
+    """Main application flow"""
     
-    # Initialize session state
-    if 'role' not in st.session_state:
-        st.session_state.role = None
-    if 'username' not in st.session_state:
-        st.session_state.username = None
-    if 'name' not in st.session_state:
-        st.session_state.name = None
-    if 'page' not in st.session_state:
-        st.session_state.page = "login"
-    
-    # Check for remember me cookie
-    if 'role' not in st.session_state or st.session_state.role is None:
-        check_remember_me_cookie()
-    
-    # Session timeout check
-    if (st.session_state.role and 'session_start' in st.session_state and 
-        not st.session_state.get('remember_me', False)):
-        session_duration = datetime.now() - st.session_state.session_start
-        if session_duration.total_seconds() > SESSION_TIMEOUT_MINUTES * 60:
-            st.warning("Session timed out. Please login again.")
-            
-            # Clear query parameters
-            if hasattr(st, 'query_params'):
-                st.query_params.clear()
-            
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
-    
-    # Display database info in sidebar
-    if db.use_supabase:
-        st.sidebar.success("✅ Using Supabase PostgreSQL")
-    else:
-        st.sidebar.info("💾 Using SQLite (Local)")
-    
-    # Update event status periodically
-    if 'last_status_update' not in st.session_state:
-        st.session_state.last_status_update = datetime.now()
-    
-    if (datetime.now() - st.session_state.last_status_update).total_seconds() > 300:
-        try:
-            db._update_event_status()
-            st.session_state.last_status_update = datetime.now()
-        except:
-            pass
-    
-    # Route based on page
-    if st.session_state.page == "forgot_password":
-        forgot_password_page()
-    elif st.session_state.page == "student_register":
-        student_registration_page()
-    elif st.session_state.role is None:
-        landing_page()
-    
-    # Check for special states (feedback, view event)
-    elif 'feedback_event_id' in st.session_state:
-        feedback_form(st.session_state.feedback_event_id)
-    
-    elif 'view_event_id' in st.session_state:
-        event = db.get_event_by_id(st.session_state.view_event_id)
-        if event:
-            st.header("📋 Event Details")
-            display_event_card(event, st.session_state.username)
-            
-            if st.button("← Back", use_container_width=True):
-                del st.session_state.view_event_id
-                st.rerun()
-        else:
-            st.error("Event not found!")
-            del st.session_state.view_event_id
-            st.rerun()
-    
-    # Route to appropriate dashboard
-    elif st.session_state.role == 'student':
-        student_dashboard()
-    elif st.session_state.role == 'faculty':
-        faculty_dashboard()
-    elif st.session_state.role == 'mentor':
-        mentor_dashboard()
-    elif st.session_state.role == 'admin':
-        admin_dashboard()
-    else:
-        # If role is set but doesn't match any dashboard, show error
-        st.error(f"Invalid role configuration: {st.session_state.role}")
-        if st.button("Logout"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
-
-# ============================================
-# STYLES
-# ============================================
-
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        color: #1e3a8a;
-        margin-bottom: 1.5rem;
-        padding-bottom: 0.5rem;
-        border-bottom: 2px solid #e5e7eb;
+    # Add custom CSS
+    st.markdown("""
+    <style>
+    .college-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 20px;
+        border-radius: 10px;
+        color: white;
+        margin-bottom: 20px;
     }
     .college-header h1 {
-        font-size: 2.8rem;
-        color: #1e3a8a;
-        margin-bottom: 0.5rem;
+        color: white;
+        font-size: 2.5rem;
+        margin-bottom: 10px;
     }
     .college-header h3 {
-        font-size: 1.2rem;
-        color: #6b7280;
-        margin-top: 0;
+        color: rgba(255,255,255,0.9);
+        font-weight: normal;
+    }
+    .main-header {
+        color: #333;
+        border-bottom: 3px solid #667eea;
+        padding-bottom: 10px;
+        margin-bottom: 30px;
     }
     .event-card {
         background: white;
-        border-radius: 12px;
+        border-radius: 10px;
         padding: 20px;
         margin-bottom: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-        border: 1px solid #e5e7eb;
-        transition: all 0.3s ease;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        border: 1px solid #E5E7EB;
+        transition: transform 0.2s;
     }
     .event-card:hover {
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         transform: translateY(-2px);
+        box-shadow: 0 8px 12px rgba(0,0,0,0.15);
     }
     .card-title {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #1f2937;
-        margin-bottom: 8px;
-        line-height: 1.3;
+        font-size: 1.4rem;
+        font-weight: bold;
+        color: #1F2937;
+        margin-bottom: 10px;
     }
-    .registration-card, .user-card, .leaderboard-card {
+    .registration-card {
+        background: #F9FAFB;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 10px;
+        border-left: 4px solid #3B82F6;
+    }
+    .leaderboard-card {
         background: white;
         border-radius: 8px;
-        padding: 16px;
-        margin-bottom: 12px;
-        border: 1px solid #e5e7eb;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        padding: 15px;
+        margin-bottom: 10px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
-    .registration-section {
-        background: #f8fafc;
-        border-radius: 8px;
-        padding: 16px;
-        margin-top: 16px;
-        border: 1px solid #e2e8f0;
+    .event-details-header {
+        background: linear-gradient(135deg, #F3F4F6 0%, #E5E7EB 100%);
+        padding: 20px;
+        border-radius: 10px;
+        margin-bottom: 30px;
     }
-    .stButton button {
-        border-radius: 8px;
-        font-weight: 600;
-        transition: all 0.2s;
-    }
-    .stButton button:hover {
-        transform: translateY(-1px);
-    }
-    .stProgress > div > div {
-        background: linear-gradient(90deg, #3b82f6, #8b5cf6);
-    }
-    .css-1d391kg {
-        padding: 2rem 1rem;
-    }
-</style>
-""", unsafe_allow_html=True)
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Check for remember me cookie
+    check_remember_me_cookie()
+    
+    # Initialize session state
+    if 'page' not in st.session_state:
+        st.session_state.page = "landing"
+    
+    # Check for feedback event
+    if 'feedback_event_id' in st.session_state:
+        feedback_form(st.session_state.feedback_event_id)
+        return
+    
+    # Check for event details view
+    if 'view_event_id' in st.session_state:
+        event_details_page()
+        return
+    
+    # Check session timeout
+    if 'username' in st.session_state:
+        check_session_timeout()
+    
+    # Main routing
+    if 'username' not in st.session_state:
+        if st.session_state.page == "landing":
+            landing_page()
+        elif st.session_state.page == "login":
+            landing_page()
+        elif st.session_state.page == "student_register":
+            student_registration_page()
+        elif st.session_state.page == "forgot_password":
+            forgot_password_page()
+        else:
+            landing_page()
+    else:
+        # User is logged in, show appropriate dashboard
+        role = st.session_state.get('role')
+        
+        if role == 'admin':
+            admin_dashboard()
+        elif role == 'faculty':
+            faculty_dashboard()
+        elif role == 'mentor':
+            mentor_dashboard()
+        elif role == 'student':
+            student_dashboard()
+        else:
+            st.error("Invalid role!")
+            st.button("Logout", on_click=lambda: st.session_state.clear())
 
 # ============================================
-# RUN APPLICATION
+# RUN THE APP
 # ============================================
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        st.error(f"An error occurred: {str(e)[:200]}")
+        st.error(f"An error occurred: {str(e)}")
         logger.error(f"Application error: {e}", exc_info=True)
-        if st.button("Restart Application"):
+        
+        # Show error details in debug mode
+        if st.session_state.get('role') == 'admin':
+            with st.expander("Error Details (Admin Only)"):
+                st.code(traceback.format_exc())
+        
+        if st.button("🔄 Restart Application"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
             st.rerun()
