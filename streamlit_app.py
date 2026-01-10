@@ -1792,25 +1792,25 @@ class DatabaseManager:
             cached = cache.get(cache_key)
             if cached is not None:
                 return cached
-        
+    
         try:
             if self.use_supabase:
                 events = self.client.select('events', limit=1000, 
-                                          order_by='event_date.desc', 
-                                          cache_ttl=cache_ttl, use_cache=use_cache)
+                                      order_by='event_date.desc', 
+                                      cache_ttl=cache_ttl, use_cache=use_cache)
             else:
                 events = self.client.execute_query(
-                    "SELECT * FROM events ORDER BY event_date DESC",
+                    "SELECT * FROM events ORDER BY event_date DESC LIMIT 1000",
                     fetchall=True, use_cache=use_cache
                 )
-            
+        
             events = events or []
-            
+        
             if use_cache:
                 cache.set(cache_key, events, ttl=cache_ttl)
-            
+        
             return events
-            
+        
         except Exception as e:
             logger.error(f"Error getting events: {e}")
             return []
@@ -3536,6 +3536,17 @@ def save_flyer_image(uploaded_file):
         logger.error(f"Error processing flyer image: {e}")
         return None
 
+def get_events_limited(self, limit=10, cache_ttl=60):
+    """Get limited number of events"""
+    try:
+        events = self.get_all_events(cache_ttl=cache_ttl)
+        if events and len(events) > limit:
+            return events[:limit]
+        return events or []
+    except Exception as e:
+        logger.error(f"Error getting limited events: {e}")
+        return []
+
 def generate_avatar_url(name, size=100):
     """Generate avatar URL based on name"""
     style = "avataaars"
@@ -3553,6 +3564,9 @@ def get_upcoming_events(limit=10):
         now = datetime.now()
         
         for event in events:
+            if len(upcoming_events) >= limit:
+                break
+                
             event_date = event.get('event_date')
             if isinstance(event_date, str):
                 try:
@@ -3574,9 +3588,6 @@ def get_upcoming_events(limit=10):
                     
                     if dt > now:
                         upcoming_events.append(event)
-                        
-                        if len(upcoming_events) >= limit:
-                            break
                             
                 except:
                     continue
@@ -3584,7 +3595,7 @@ def get_upcoming_events(limit=10):
         # Sort by date
         upcoming_events.sort(key=lambda x: x.get('event_date', ''))
         
-        return upcoming_events[:limit]
+        return upcoming_events
         
     except Exception as e:
         logger.error(f"Error getting upcoming events: {e}")
@@ -4197,20 +4208,23 @@ def landing_page():
         try:
             events = db.get_all_events(cache_ttl=60)
             students = db.get_leaderboard(limit=1000) if db.use_supabase else []
-            
+        
             col_stat1, col_stat2, col_stat3 = st.columns(3)
             with col_stat1:
-                st.metric("Total Events", len(events))
+                st.metric("Total Events", len(events) if events else 0)
             with col_stat2:
-                st.metric("Active Students", len(students))
+                st.metric("Active Students", len(students) if students else 0)
             with col_stat3:
-                upcoming = len([e for e in events if e.get('status') == 'upcoming'])
-                st.metric("Upcoming Events", upcoming)
-            
-            upcoming_events = db.get_upcoming_events(limit=5)
-            if upcoming_events:
+                if events:
+                    upcoming_count = len(get_upcoming_events(limit=1000))  # Get all upcoming
+                    st.metric("Upcoming Events", upcoming_count)
+                else:
+                    st.metric("Upcoming Events", 0)
+        
+            upcoming_events_list = get_upcoming_events(limit=5)
+            if upcoming_events_list:
                 st.markdown("**Next 5 Events:**")
-                for event in upcoming_events:
+                for event in upcoming_events_list:
                     st.markdown(f"- **{event.get('title', 'Event')}** ({format_date(event.get('event_date'))})")
         except:
             st.info("Statistics loading...")
@@ -5840,7 +5854,9 @@ def debug_event_creation():
     
     if st.button("Check Database Connection"):
         try:
-            events = db.get_all_events(limit=1, use_cache=False)
+            events = db.get_all_events(use_cache=False)
+            if events:
+                events = events[:1]  # Get first event only
             if events is not None:
                 st.success(f"✅ Database connection successful. Found {len(events) if events else 0} events.")
             else:
