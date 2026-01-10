@@ -7,7 +7,7 @@ WITH ENHANCED GAMIFICATION, ANALYTICS & NOTIFICATION SYSTEM
 
 import streamlit as st
 st.set_page_config(
-    page_title="G H Raisoni Event Manager",
+    page_title="G H Raisoni College of Engineering and Management, Jalgaon Event Manager",
     page_icon="🎓",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -3862,7 +3862,7 @@ def display_event_card(event, current_user=None, show_actions=True):
                                use_container_width=True, type="secondary",
                                help="Share this event"):
                         event_title = event.get('title', 'Cool Event')
-                        share_text = f"Check out '{event_title}' at G H Raisoni College Event Manager!\n\nEvent Date: {formatted_date}\nVenue: {venue}\n\nJoin the platform to discover more events!"
+                        share_text = f"Check out '{event_title}' at G H Raisoni College of Engineering and Management, Jalgaon Event Manager!\n\nEvent Date: {formatted_date}\nVenue: {venue}\n\nJoin the platform to discover more events!"
                         
                         st.code(share_text)
                         st.info("📋 Copy the text above to share")
@@ -4090,7 +4090,7 @@ def landing_page():
             st.markdown('<div style="font-size: 3rem;">🎓</div>', unsafe_allow_html=True)
     
     with col_header:
-        st.markdown(f'<div class="college-header"><h1>G H Raisoni College</h1><h3>Advanced Event Management System</h3></div>', 
+        st.markdown(f'<div class="college-header"><h1>G H Raisoni College of Engineering and Management, Jalgaon</h1><h3>Advanced Event Management System</h3></div>', 
                     unsafe_allow_html=True)
     
     st.markdown("---")
