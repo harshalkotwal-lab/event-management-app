@@ -1133,6 +1133,58 @@ class DatabaseManager:
             logger.error(f"Error getting all users: {e}")
             return []
 
+    def award_points(self, username, points, reason, description=""):
+        """Award points to a user"""
+        try:
+            user = self.get_user(username, use_cache=False)
+            if not user:
+                return False
+            
+            current_points = user.get('total_points', 0)
+            new_points = current_points + points
+            
+            update_data = {
+                'total_points': new_points,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            current_level = user.get('current_level', 1)
+            for level, config in GAMIFICATION_CONFIG['levels'].items():
+                if new_points >= config['points_required'] and level > current_level:
+                    update_data['current_level'] = level
+                    update_data['level_progress'] = 0
+                    
+                    self.unlock_achievement(
+                        username,
+                        f"level_{level}",
+                        f"Reached Level {level}: {config['name']}",
+                        "level_up",
+                        points * 2
+                    )
+                    
+                    self.create_notification(
+                        user_id=username,
+                        title=f"🎉 Level Up!",
+                        message=f"Congratulations! You've reached Level {level}: {config['name']}",
+                        notification_type="achievement",
+                        related_id=f"level_{level}"
+                    )
+            
+            success = self.client.update('users', {'username': username}, update_data, use_cache=False)
+            
+            if success:
+                self._clear_user_cache(username)
+                self._log_points_transaction(username, points, reason, description)
+                self._check_badge_unlocks(username)
+                
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error awarding points: {e}")
+            return False
+
     def get_users_by_role(self, role, cache_ttl=60):
         """Get users by role"""
         try:
@@ -2655,57 +2707,7 @@ def add_event(self, event_data):
     # GAMIFICATION & POINTS SYSTEM
     # ============================================
     
-    def award_points(self, username, points, reason, description=""):
-        """Award points to a user"""
-        try:
-            user = self.get_user(username, use_cache=False)
-            if not user:
-                return False
-            
-            current_points = user.get('total_points', 0)
-            new_points = current_points + points
-            
-            update_data = {
-                'total_points': new_points,
-                'updated_at': datetime.now().isoformat()
-            }
-            
-            current_level = user.get('current_level', 1)
-            for level, config in GAMIFICATION_CONFIG['levels'].items():
-                if new_points >= config['points_required'] and level > current_level:
-                    update_data['current_level'] = level
-                    update_data['level_progress'] = 0
-                    
-                    self.unlock_achievement(
-                        username,
-                        f"level_{level}",
-                        f"Reached Level {level}: {config['name']}",
-                        "level_up",
-                        points * 2
-                    )
-                    
-                    self.create_notification(
-                        user_id=username,
-                        title=f"🎉 Level Up!",
-                        message=f"Congratulations! You've reached Level {level}: {config['name']}",
-                        notification_type="achievement",
-                        related_id=f"level_{level}"
-                    )
-            
-            success = self.client.update('users', {'username': username}, update_data, use_cache=False)
-            
-            if success:
-                self._clear_user_cache(username)
-                self._log_points_transaction(username, points, reason, description)
-                self._check_badge_unlocks(username)
-                
-                return True
-            
-            return False
-            
-        except Exception as e:
-            logger.error(f"Error awarding points: {e}")
-            return False
+    
     
     def _log_points_transaction(self, username, points, reason, description):
         """Log points transaction for audit trail"""
