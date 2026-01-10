@@ -1681,61 +1681,105 @@ class DatabaseManager:
     # ============================================
     
     def add_event(self, event_data):
-        """Add new event"""
+        """Add new event with better error handling"""
         try:
+            # Validate required fields
+            required_fields = ['title', 'description', 'event_type', 'event_date', 'venue', 'organizer']
+            for field in required_fields:
+                if field not in event_data or not event_data[field]:
+                    return False, f"Missing required field: {field}"
+        
+            # Ensure event_date is properly formatted
+            event_date = event_data.get('event_date')
+            if isinstance(event_date, datetime):
+                event_date_str = event_date.isoformat()
+            elif isinstance(event_date, str):
+                event_date_str = event_date
+            else:
+                return False, "Invalid event date format"
+        
+            # Handle end_date
+            end_date = event_data.get('end_date')
+            if end_date:
+                if isinstance(end_date, datetime):
+                    end_date_str = end_date.isoformat()
+                elif isinstance(end_date, str):
+                    end_date_str = end_date
+                else:
+                    end_date_str = None
+            else:
+                end_date_str = None
+        
+            # Prepare event record
             event_record = {
                 'id': event_data.get('id', str(uuid.uuid4())),
-                'title': event_data.get('title'),
-                'description': event_data.get('description'),
+                'title': event_data.get('title').strip(),
+                'description': event_data.get('description', '').strip(),
                 'event_type': event_data.get('event_type'),
                 'event_category': event_data.get('event_category', 'Technical'),
-                'event_date': event_data.get('event_date'),
-                'end_date': event_data.get('end_date'),
-                'venue': event_data.get('venue'),
-                'organizer': event_data.get('organizer'),
+                'event_date': event_date_str,
+                'end_date': end_date_str,
+                'venue': event_data.get('venue', '').strip(),
+                'organizer': event_data.get('organizer', '').strip(),
                 'co_organizers': json.dumps(event_data.get('co_organizers', [])),
                 'event_link': event_data.get('event_link', ''),
                 'registration_link': event_data.get('registration_link', ''),
-                'max_participants': event_data.get('max_participants', 100),
+                'max_participants': int(event_data.get('max_participants', 100)),
                 'current_participants': 0,
-                'flyer_path': event_data.get('flyer_path'),
+                'flyer_path': event_data.get('flyer_path', ''),
                 'tags': json.dumps(event_data.get('tags', [])),
                 'prerequisites': event_data.get('prerequisites', ''),
                 'resources': json.dumps(event_data.get('resources', [])),
-                'created_by': event_data.get('created_by'),
-                'created_by_name': event_data.get('created_by_name'),
-                'ai_generated': event_data.get('ai_generated', False),
+                'created_by': event_data.get('created_by', ''),
+                'created_by_name': event_data.get('created_by_name', 'Unknown'),
+                'ai_generated': bool(event_data.get('ai_generated', False)),
                 'status': 'upcoming',
                 'mentor_id': event_data.get('mentor_id'),
                 'difficulty_level': event_data.get('difficulty_level', 'Beginner'),
                 'estimated_duration': event_data.get('estimated_duration'),
-                'has_certificate': event_data.get('has_certificate', False),
+                'has_certificate': bool(event_data.get('has_certificate', False)),
                 'certificate_template': event_data.get('certificate_template', ''),
                 'created_at': datetime.now().isoformat(),
                 'updated_at': datetime.now().isoformat(),
                 'views_count': 0,
                 'popularity_score': 0.0
             }
-            
+        
+            # Convert boolean to integer for SQLite if needed
+            if not self.use_supabase:
+                event_record['ai_generated'] = 1 if event_record['ai_generated'] else 0
+                event_record['has_certificate'] = 1 if event_record['has_certificate'] else 0
+        
+            logger.info(f"Attempting to create event: {event_record['title']}")
+        
             success = self.client.insert('events', event_record, use_cache=False)
-            
+        
             if success:
+                logger.info(f"Event created successfully: {event_record['title']}")
+            
+                # Clear cache
                 cache.delete("events_all")
                 cache.delete("events_upcoming")
-                
-                if event_record['created_by']:
-                    self.award_points(event_record['created_by'], 
-                                    GAMIFICATION_CONFIG['points']['event_creation'],
-                                    "event_creation", f"Created event: {event_record['title'][:30]}")
-                
-                self._notify_interested_users(event_record)
-                
-                return True, event_record['id']
-            return False, None
             
+                # Award points to creator if it's a user
+                if event_record['created_by'] and event_record['created_by'] not in ['admin@raisoni', 'faculty@raisoni']:
+                    self.award_points(event_record['created_by'], 
+                                GAMIFICATION_CONFIG['points']['event_creation'],
+                                "event_creation", 
+                                f"Created event: {event_record['title'][:30]}")
+            
+                # Notify interested users (placeholder for future implementation)
+                # self._notify_interested_users(event_record)
+            
+                return True, event_record['id']
+        
+            logger.error(f"Failed to insert event into database: {event_record['title']}")
+            return False, "Database insertion failed"
+        
         except Exception as e:
-            logger.error(f"Error adding event: {e}")
-            return False, None
+            logger.error(f"Error adding event: {str(e)}")
+            logger.error(f"Event data: {event_data}")
+            return False, str(e)
     
     def _notify_interested_users(self, event):
         """Notify users interested in similar events"""
@@ -5377,7 +5421,7 @@ def faculty_dashboard():
     
     with st.sidebar:
         st.markdown("### Navigation")
-        nav_options = ["Dashboard", "Create Event", "My Events", "Registrations", "Mentor Management"]
+        nav_options = ["Dashboard", "Create Event", "My Events", "Registrations", "Mentor Management", "Debug Events"]  # Added Debug
         
         if 'faculty_page' not in st.session_state:
             st.session_state.faculty_page = "Dashboard"
@@ -5412,6 +5456,9 @@ def faculty_dashboard():
     
     elif selected == "Mentor Management":
         mentor_management_page()
+
+    elif selected == "Debug Events":
+        debug_event_creation()
 
 def faculty_dashboard_page():
     """Faculty dashboard page"""
@@ -5526,54 +5573,68 @@ def create_event_page():
             
             submit_button = st.form_submit_button("Create Event", use_container_width=True, type="primary")
             
+            # In the manual event creation tab, update the submit section:
             if submit_button:
                 if not all([title, event_type, venue, organizer, description]):
                     st.error("Please fill all required fields (*)")
                 else:
-                    mentor_id = None
-                    if selected_mentor != "None" and active_mentors:
-                        mentor_name = selected_mentor.split(" (")[0]
-                        mentor = next((m for m in active_mentors if m['full_name'] == mentor_name), None)
-                        if mentor:
-                            mentor_id = mentor['id']
+                    try:
+                        mentor_id = None
+                        if selected_mentor != "None" and active_mentors:
+                            mentor_name = selected_mentor.split(" (")[0]
+                            mentor = next((m for m in active_mentors if m['full_name'] == mentor_name), None)
+                            if mentor:
+                                mentor_id = mentor['id']
+            
+                        flyer_path = save_flyer_image(flyer)
+            
+                        event_datetime = datetime.combine(event_date, event_time)
+            
+                        tags = [tag.strip() for tag in tags_input.split(',')] if tags_input else []
+            
+                        event_data = {
+                            'title': title.strip(),
+                            'description': description.strip(),
+                            'event_type': event_type,
+                            'event_category': event_category,
+                            'event_date': event_datetime.isoformat(),
+                            'venue': venue.strip(),
+                            'organizer': organizer.strip(),
+                            'event_link': event_link if event_link else None,
+                            'registration_link': registration_link if registration_link else None,
+                            'max_participants': int(max_participants),
+                            'difficulty_level': difficulty_level,
+                            'estimated_duration': int(estimated_duration) if estimated_duration else None,
+                            'has_certificate': has_certificate,
+                            'prerequisites': prerequisites.strip() if prerequisites else None,
+                            'tags': tags,
+                            'flyer_path': flyer_path,
+                            'created_by': st.session_state.username,
+                            'created_by_name': st.session_state.name,
+                            'ai_generated': False,
+                            'mentor_id': mentor_id
+                        }
+            
+                        with st.spinner("Creating event..."):
+                            success, result = db.add_event(event_data)
+                
+                            if success:
+                                event_id = result
+                                st.success(f"✅ Event '{title}' created successfully! 🎉")
                     
-                    flyer_path = save_flyer_image(flyer)
+                                if mentor_id:
+                                    st.info(f"✅ Mentor assigned: {selected_mentor}")
                     
-                    event_datetime = datetime.combine(event_date, event_time)
-                    
-                    tags = [tag.strip() for tag in tags_input.split(',')] if tags_input else []
-                    
-                    event_data = {
-                        'title': title,
-                        'description': description,
-                        'event_type': event_type,
-                        'event_category': event_category,
-                        'event_date': event_datetime.isoformat(),
-                        'venue': venue,
-                        'organizer': organizer,
-                        'event_link': event_link,
-                        'registration_link': registration_link,
-                        'max_participants': max_participants,
-                        'difficulty_level': difficulty_level,
-                        'estimated_duration': estimated_duration,
-                        'has_certificate': has_certificate,
-                        'prerequisites': prerequisites,
-                        'tags': tags,
-                        'flyer_path': flyer_path,
-                        'created_by': st.session_state.username,
-                        'created_by_name': st.session_state.name,
-                        'ai_generated': False,
-                        'mentor_id': mentor_id
-                    }
-                    
-                    success, event_id = db.add_event(event_data)
-                    if success:
-                        st.success(f"Event '{title}' created successfully! 🎉")
-                        if mentor_id:
-                            st.info(f"✅ Mentor assigned: {selected_mentor}")
-                        st.rerun()
-                    else:
-                        st.error("Failed to create event")
+                                # Clear form by rerunning
+                                time.sleep(2)
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Failed to create event: {result}")
+                                st.info("Please check the event details and try again.")
+            
+                    except Exception as e:
+                        st.error(f"❌ Error creating event: {str(e)}")
+                        logger.error(f"Event creation error: {e}")
     
     with tab2:
         st.subheader("🤖 AI-Powered Event Generator")
@@ -5736,6 +5797,62 @@ def create_event_page():
                             st.rerun()
                         else:
                             st.error("Failed to create event")
+
+def debug_event_creation():
+    """Debug function to check event creation issues"""
+    st.header("🛠️ Event Creation Debug")
+    
+    st.markdown("### Test Event Creation")
+    
+    with st.form("debug_event_form"):
+        test_title = st.text_input("Test Title", value="Test Workshop")
+        test_description = st.text_area("Test Description", value="This is a test event")
+        test_type = st.selectbox("Event Type", COLLEGE_CONFIG['event_types'][:3])
+        test_venue = st.text_input("Venue", value="Seminar Hall")
+        test_organizer = st.text_input("Organizer", value="Test Department")
+        
+        if st.form_submit_button("Test Create Event"):
+            event_data = {
+                'title': test_title,
+                'description': test_description,
+                'event_type': test_type,
+                'event_category': 'Technical',
+                'event_date': (datetime.now() + timedelta(days=7)).isoformat(),
+                'venue': test_venue,
+                'organizer': test_organizer,
+                'created_by': st.session_state.username,
+                'created_by_name': st.session_state.name,
+                'max_participants': 50
+            }
+            
+            st.info("Testing with data:")
+            st.json(event_data)
+            
+            success, result = db.add_event(event_data)
+            
+            if success:
+                st.success(f"✅ Test event created successfully! ID: {result}")
+            else:
+                st.error(f"❌ Test failed: {result}")
+    
+    st.markdown("---")
+    st.markdown("### Database Connection Check")
+    
+    if st.button("Check Database Connection"):
+        try:
+            events = db.get_all_events(limit=1, use_cache=False)
+            if events is not None:
+                st.success(f"✅ Database connection successful. Found {len(events) if events else 0} events.")
+            else:
+                st.error("❌ Database returned None")
+        except Exception as e:
+            st.error(f"❌ Database error: {e}")
+    
+    st.markdown("---")
+    st.markdown("### Current Events Count")
+    
+    events = db.get_all_events(use_cache=False)
+    st.info(f"Total events in database: {len(events) if events else 0}")
 
 def faculty_events_page():
     """Faculty events management page"""
