@@ -4034,7 +4034,7 @@ def landing_page():
         try:
             logo_path = "ghribmjal-logo.jpg"
             if os.path.exists(logo_path):
-                st.image(logo_path, width=100)
+                st.image(logo_path, width=250)
             else:
                 st.markdown('<div style="font-size: 3rem;">🎓</div>', unsafe_allow_html=True)
         except:
