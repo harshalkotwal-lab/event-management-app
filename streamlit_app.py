@@ -4574,11 +4574,13 @@ def student_dashboard():
     if student:
         col_avatar, col_name = st.sidebar.columns([1, 3])
         with col_avatar:
-            avatar = student.get('avatar_url', '👤')
-            st.markdown(f'<div style="font-size: 2rem;">{avatar}</div>', unsafe_allow_html=True)
-        with col_name:
-            st.markdown(f"**{student.get('name')}**")
-            st.caption(f"@{student.get('username')}")
+            avatar_url = student.get('avatar_url', '')
+            if avatar_url and avatar_url.startswith('http'):
+                # Render as image
+                st.image(avatar_url, width=50)
+            else:
+                # Fallback to emoji
+                st.markdown(f'<div style="font-size: 2rem;">👤</div>', unsafe_allow_html=True)
         
         st.sidebar.markdown("---")
         
@@ -5010,8 +5012,11 @@ def leaderboard_page():
                     st.markdown(f'<div style="font-size: 1.5rem; text-align: center; font-weight: bold;">{rank}</div>', unsafe_allow_html=True)
             
             with col_info:
-                avatar = student.get('avatar_url', '👤')
-                st.markdown(f'<div style="display: flex; align-items: center; gap: 10px;"><span style="font-size: 1.5rem;">{avatar}</span><div><div style="font-weight: bold; font-size: 1.1rem;">{student.get("name")}</div><div style="color: #666; font-size: 0.9rem;">{student.get("roll_no", "")} | {student.get("department", "")}</div></div></div>', unsafe_allow_html=True)
+            avatar_url = student.get('avatar_url', '')
+            if avatar_url and avatar_url.startswith('http'):
+                st.image(avatar_url, width=40)
+            else:
+                st.markdown(f'<span style="font-size: 1.5rem;">👤</span>', unsafe_allow_html=True)
             
             with col_points:
                 points = student.get('points', student.get('total_points', 0))
@@ -5242,12 +5247,11 @@ def profile_page():
     col_avatar, col_info = st.columns([1, 3])
     
     with col_avatar:
-        avatar = student.get('avatar_url', '👤')
-        st.markdown(f'<div style="font-size: 4rem; text-align: center;">{avatar}</div>', unsafe_allow_html=True)
-        
-        if st.button("Change Avatar", use_container_width=True):
-            st.session_state.profile_edit = "avatar"
-            st.rerun()
+        avatar_url = student.get('avatar_url', '')
+        if avatar_url and avatar_url.startswith('http'):
+            st.image(avatar_url, width=150)  # Larger for profile
+        else:
+            st.markdown(f'<div style="font-size: 6rem; text-align: center;">👤</div>', unsafe_allow_html=True)
     
     with col_info:
         st.markdown(f"# {student.get('name', 'Student')}")
