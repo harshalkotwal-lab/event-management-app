@@ -4041,90 +4041,173 @@ def landing_page():
             st.markdown('<div style="font-size: 3rem;">🎓</div>', unsafe_allow_html=True)
     
     with col_header:
-        st.markdown(f'<div class="college-header"><h1>G H Raisoni College of Engineering and Management, Jalgaon</h1><h3>Advanced Event Management System</h3></div>', 
+        st.markdown(f'<div class="college-header"><h1>G H Raisoni College of Engineering and Management, Jalgaon</h1><h3>🏆 Your Path to Leadership Starts Here</h3></div>', 
                     unsafe_allow_html=True)
     
     st.markdown("---")
     
-    tab_about, tab_features, tab_stats = st.tabs(["About", "Features", "Live Stats"])
+    tab_about, tab_points, tab_strategy = st.tabs(["🚀 How to Win", "💰 Earn Points", "🏆 Leaderboard Strategy"])
     
     with tab_about:
         st.markdown("""
-        ### Welcome to G H Raisoni Event Management System
+        ### 🎮 Master the Points System & Dominate the Leaderboard!
         
-        **Your all-in-one platform for:**
-        - Discovering college events and activities
-        - Registering for workshops, hackathons, seminars
-        - Tracking your participation and achievements
-        - Competing with peers on the leaderboard
-        - Earning points and badges for participation
+        **Your Journey to College Recognition:**
+        - **Earn Points** for every college activity
+        - **Level Up** from Beginner to Legend status
+        - **Win Badges** for special achievements
+        - **Get Featured** on college leaderboards
         
-        **Powered by advanced features:**
-        - Real-time notifications
-        - Gamification system
-        - Analytics dashboard
-        - Feedback system
-        - Certificate generation
+        **Why Participate?**
+        - 🏆 **College Recognition**: Top performers featured on noticeboards
+        - 📜 **Certificates**: Digital certificates for achievements
+        - 🎁 **Special Access**: Priority for premium events
+        - 📊 **Portfolio Building**: Track your extracurricular growth
+        
+        **Quick Start Guide:**
+        1. Complete your profile (Instant 100 pts!)
+        2. Register for your first event (+50 pts)
+        3. Attend regularly (+25 pts per event)
+        4. Provide feedback (+15 pts)
+        5. Login daily (+10 pts streak bonus!)
         """)
     
-    with tab_features:
-        col_feat1, col_feat2 = st.columns(2)
+    with tab_points:
+        col1, col2 = st.columns(2)
         
-        with col_feat1:
+        with col1:
             st.markdown("""
-            **🎮 Gamification**
-            - Earn points for participation
-            - Unlock badges and achievements
-            - Level up based on activity
-            - Daily login streaks
+            ### 📈 How to Earn Points
             
-            **📊 Analytics**
-            - Personal progress tracking
-            - Department comparisons
-            - Event participation stats
-            - Points history
+            **🎯 Event Participation:**
+            - **Registration**: 50 pts per event
+            - **Attendance**: 25 pts per event  
+            - **Shortlisted**: 100 pts
+            - **Runner-up**: 150 pts
+            - **Winner**: 200 pts
+            
+            **🌟 Daily Activities:**
+            - **Daily Login**: 10 pts (Streak bonus up to 50!)
+            - **Profile Completion**: 100 pts
+            - **Feedback Submission**: 15 pts
+            
+            **🚀 Bonus Points:**
+            - **Event Creation**: 20 pts
+            - **Invite Friends**: 50 pts per friend
+            - **Excellent Work**: 75 pts
+            - **Innovation Award**: 100 pts
             """)
         
-        with col_feat2:
+        with col2:
             st.markdown("""
-            **🔔 Smart Notifications**
-            - Event reminders
-            - Registration confirmations
-            - Achievement unlocks
-            - System announcements
+            ### 🏅 Achievement Levels
             
-            **🎯 Event Features**
-            - Advanced search and filtering
-            - Like and interest tracking
-            - Feedback system
-            - Certificate management
+            **Level Progression:**
+            ```
+            Level 1: Beginner (0 pts)
+            Level 2: Learner (500 pts)  
+            Level 3: Contributor (1500 pts)
+            Level 4: Expert (3000 pts)
+            Level 5: Master (5000 pts)
+            Level 6: Grand Master (10000 pts)
+            Level 7: Legend (20000 pts) 👑
+            ```
+            
+            **🎖️ Badges You Can Earn:**
+            - 🏅 Participant (First registration)
+            - ⭐ Shortlisted (Top performer)
+            - 🏆 Winner (Event champion)
+            - 👑 Top 10 Leader (Monthly)
+            - 🎖️ Top 25 Achiever
+            - 🌟 Rising Star (Top 50)
+            - 🚀 Most Active (Consistent participation)
+            
+            **Pro Tip:** Complete 2 events per month = 150+ guaranteed points!
             """)
     
-    with tab_stats:
-        try:
-            events = db.get_all_events(cache_ttl=60)
-            students = db.get_leaderboard(limit=1000) if db.use_supabase else []
+    with tab_strategy:
+        st.markdown("""
+        ### 🏆 Leaderboard Domination Strategy
         
-            col_stat1, col_stat2, col_stat3 = st.columns(3)
-            with col_stat1:
-                st.metric("Total Events", len(events) if events else 0)
-            with col_stat2:
-                st.metric("Active Students", len(students) if students else 0)
-            with col_stat3:
-                if events:
-                    upcoming_count = len(get_upcoming_events(limit=1000))
-                    st.metric("Upcoming Events", upcoming_count)
-                else:
-                    st.metric("Upcoming Events", 0)
+        **📊 Weekly Game Plan:**
+        ```
+        Monday: Login + Register for upcoming events (+60 pts)
+        Tuesday: Attend any ongoing event (+25 pts)
+        Wednesday: Provide feedback (+15 pts)
+        Thursday: Like & mark events interested (+5 pts)
+        Friday: Check leaderboard position
+        Weekend: Attend workshops/hackathons (+75-200 pts)
+        ```
         
-            upcoming_events_list = get_upcoming_events(limit=5)
-            if upcoming_events_list:
-                st.markdown("**Next 5 Events:**")
-                for event in upcoming_events_list:
-                    st.markdown(f"- **{event.get('title', 'Event')}** ({format_date(event.get('event_date'))})")
-        except:
-            st.info("Statistics loading...")
+        **🎯 Smart Point Strategies:**
+        
+        1. **The Quantity Strategy:**
+           - Register for ALL events (50 pts each)
+           - Attend minimum 3 events weekly (75 pts)
+           - Daily login streak (70 pts weekly)
+           - **Weekly Total:** 300+ pts
+        
+        2. **The Quality Strategy:**
+           - Win 1 competition monthly (200 pts)
+           - Runner-up in 2 events (300 pts)
+           - Provide quality feedback (60 pts monthly)
+           - **Monthly Total:** 560+ pts
+        
+        3. **The Consistency Strategy:**
+           - Never miss daily login (300 pts monthly)
+           - Attend every department event (500 pts monthly)
+           - Complete all profiles/skills (100 pts)
+           - **Monthly Total:** 900+ pts
+        
+        **🔥 Pro Moves:**
+        - Create your own event: +20 pts + leadership recognition
+        - Team up with friends: Compete department-wise
+        - Target hackathons: Highest point rewards (200+ pts)
+        - Complete profile 100%: Instant 100 pts boost
+        
+        **📅 Monthly Milestone Targets:**
+        - **Bronze Tier:** 500 pts (Maintain Level 2)
+        - **Silver Tier:** 1000 pts (Reach Level 3)
+        - **Gold Tier:** 2000 pts (Top 50 ranking)
+        - **Platinum Tier:** 4000+ pts (Top 10 ranking)
+        
+        **👀 Current Top Performers Tip:** The #1 student averages 15 events/month with 3 wins!
+        """)
     
+    st.markdown("---")
+    
+    # Show live stats
+    try:
+        events = db.get_all_events(cache_ttl=60)
+        leaderboard = db.get_leaderboard(limit=5)
+        
+        st.subheader("🔥 Live Leaderboard Snapshot")
+        
+        if leaderboard:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if len(leaderboard) > 0:
+                    st.metric("#1 Rank", f"{leaderboard[0].get('name', 'Student')}", 
+                             f"{leaderboard[0].get('total_points', 0)} pts")
+            with col2:
+                if len(leaderboard) > 1:
+                    st.metric("#2 Rank", f"{leaderboard[1].get('name', 'Student')}", 
+                             f"{leaderboard[1].get('total_points', 0)} pts")
+            with col3:
+                if len(leaderboard) > 2:
+                    st.metric("#3 Rank", f"{leaderboard[2].get('name', 'Student')}", 
+                             f"{leaderboard[2].get('total_points', 0)} pts")
+            
+            st.caption("Join now to compete with these top performers!")
+        else:
+            st.info("Be the first to top the leaderboard!")
+            
+    except:
+        st.info("Live stats loading...")
+    
+    st.markdown("---")
+    st.subheader("🔐 Ready to Start Your Journey?")
+   
     st.markdown("---")
     st.subheader("🔐 Login to Your Account")
     
