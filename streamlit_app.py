@@ -4034,11 +4034,11 @@ def landing_page():
         try:
             logo_path = "ghribmjal-logo.jpg"
             if os.path.exists(logo_path):
-                st.image(logo_path, width=250)
+                st.image(logo_path, width=200)  # Changed from 100 to 200
             else:
-                st.markdown('<div style="font-size: 3rem;">🎓</div>', unsafe_allow_html=True)
+                st.markdown('<div style="font-size: 6rem;">🎓</div>', unsafe_allow_html=True)  # Increased from 3rem to 6rem
         except:
-            st.markdown('<div style="font-size: 3rem;">🎓</div>', unsafe_allow_html=True)
+            st.markdown('<div style="font-size: 6rem;">🎓</div>', unsafe_allow_html=True)  # Increased from 3rem to 6rem
     
     with col_header:
         st.markdown(f'<div class="college-header"><h1>G H Raisoni College of Engineering and Management, Jalgaon</h1><h3>🏆 Your Path to Leadership Starts Here</h3></div>', 
@@ -4046,7 +4046,7 @@ def landing_page():
     
     st.markdown("---")
     
-    tab_about, tab_points, tab_strategy = st.tabs(["🚀 How to Win", "💰 Earn Points", "🏆 Leaderboard Strategy"])
+    tab_about, tab_points, tab_strategy, tab_stats = st.tabs(["🚀 How to Win", "💰 Earn Points", "🏆 Leaderboard Strategy", "📊 Live Statistics"])
     
     with tab_about:
         st.markdown("""
@@ -4174,36 +4174,165 @@ def landing_page():
         **👀 Current Top Performers Tip:** The #1 student averages 15 events/month with 3 wins!
         """)
     
-    st.markdown("---")
-    
-    # Show live stats
-    try:
-        events = db.get_all_events(cache_ttl=60)
-        leaderboard = db.get_leaderboard(limit=5)
-        
-        st.subheader("🔥 Live Leaderboard Snapshot")
-        
-        if leaderboard:
-            col1, col2, col3 = st.columns(3)
+    with tab_stats:
+        try:
+            # Get live statistics
+            with st.spinner("Loading live statistics..."):
+                events = db.get_all_events(cache_ttl=60)
+                users = db.get_all_users(cache_ttl=60)
+                leaderboard = db.get_leaderboard(limit=10)
+                
+                if events is None:
+                    events = []
+                if users is None:
+                    users = []
+                if leaderboard is None:
+                    leaderboard = []
+            
+            # Overall Statistics
+            st.subheader("📈 Platform Overview")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            
             with col1:
-                if len(leaderboard) > 0:
-                    st.metric("#1 Rank", f"{leaderboard[0].get('name', 'Student')}", 
-                             f"{leaderboard[0].get('total_points', 0)} pts")
+                total_events = len(events)
+                st.metric("Total Events", total_events)
+            
             with col2:
-                if len(leaderboard) > 1:
-                    st.metric("#2 Rank", f"{leaderboard[1].get('name', 'Student')}", 
-                             f"{leaderboard[1].get('total_points', 0)} pts")
+                total_students = len([u for u in users if u.get('role') == 'student'])
+                st.metric("Active Students", total_students)
+            
             with col3:
-                if len(leaderboard) > 2:
-                    st.metric("#3 Rank", f"{leaderboard[2].get('name', 'Student')}", 
-                             f"{leaderboard[2].get('total_points', 0)} pts")
+                upcoming_events = len([e for e in events if e.get('status') == 'upcoming'])
+                st.metric("Upcoming Events", upcoming_events)
             
-            st.caption("Join now to compete with these top performers!")
-        else:
-            st.info("Be the first to top the leaderboard!")
+            with col4:
+                total_points = sum(u.get('total_points', 0) for u in users if u.get('role') == 'student')
+                st.metric("Total Points Awarded", f"{total_points:,}")
             
-    except:
-        st.info("Live stats loading...")
+            st.markdown("---")
+            
+            # Leaderboard Section
+            st.subheader("🏆 Current Top 10 Leaderboard")
+            
+            if leaderboard:
+                # Create a nice leaderboard display
+                for i, student in enumerate(leaderboard[:10], 1):
+                    with st.container():
+                        col_rank, col_info, col_points, col_level = st.columns([1, 4, 2, 2])
+                        
+                        with col_rank:
+                            if i == 1:
+                                st.markdown(f'<div style="font-size: 1.5rem; font-weight: bold; color: gold;">🥇</div>', unsafe_allow_html=True)
+                            elif i == 2:
+                                st.markdown(f'<div style="font-size: 1.5rem; font-weight: bold; color: silver;">🥈</div>', unsafe_allow_html=True)
+                            elif i == 3:
+                                st.markdown(f'<div style="font-size: 1.5rem; font-weight: bold; color: #cd7f32;">🥉</div>', unsafe_allow_html=True)
+                            else:
+                                st.markdown(f'<div style="font-size: 1.2rem; font-weight: bold;">#{i}</div>', unsafe_allow_html=True)
+                        
+                        with col_info:
+                            st.markdown(f"**{student.get('name', 'Student')}**")
+                            st.caption(f"{student.get('department', 'General')} | {student.get('year', 'Year')}")
+                        
+                        with col_points:
+                            points = student.get('total_points', 0)
+                            st.markdown(f'<div style="font-size: 1.3rem; font-weight: bold; color: #3B82F6;">{points}</div>', unsafe_allow_html=True)
+                            st.caption("points")
+                        
+                        with col_level:
+                            level = student.get('current_level', 1)
+                            level_name = GAMIFICATION_CONFIG['levels'].get(level, {}).get('name', 'Beginner')
+                            st.markdown(f'<div style="font-size: 1.1rem; font-weight: bold; color: #10B981;">Lvl {level}</div>', unsafe_allow_html=True)
+                            st.caption(level_name)
+                        
+                        st.markdown("---")
+            else:
+                st.info("No leaderboard data available yet. Be the first to join!")
+            
+            # Event Statistics
+            st.markdown("---")
+            st.subheader("📅 Event Statistics")
+            
+            col_ev1, col_ev2, col_ev3 = st.columns(3)
+            
+            with col_ev1:
+                # Event types distribution
+                event_types = {}
+                for event in events:
+                    event_type = event.get('event_type', 'Other')
+                    event_types[event_type] = event_types.get(event_type, 0) + 1
+                
+                if event_types:
+                    st.markdown("**Event Types:**")
+                    for etype, count in sorted(event_types.items(), key=lambda x: x[1], reverse=True)[:5]:
+                        st.markdown(f"- {etype}: {count}")
+            
+            with col_ev2:
+                # Status distribution
+                status_counts = {'upcoming': 0, 'ongoing': 0, 'completed': 0}
+                for event in events:
+                    status = event.get('status', 'upcoming')
+                    if status in status_counts:
+                        status_counts[status] += 1
+                
+                st.markdown("**Event Status:**")
+                for status, count in status_counts.items():
+                    if count > 0:
+                        status_emoji = {'upcoming': '🟢', 'ongoing': '🟡', 'completed': '🔴'}.get(status, '⚪')
+                        st.markdown(f"- {status_emoji} {status.title()}: {count}")
+            
+            with col_ev3:
+                # Department participation
+                if events and leaderboard:
+                    dept_points = {}
+                    for student in leaderboard:
+                        dept = student.get('department', 'Unknown')
+                        points = student.get('total_points', 0)
+                        dept_points[dept] = dept_points.get(dept, 0) + points
+                    
+                    if dept_points:
+                        st.markdown("**Top Departments:**")
+                        for dept, points in sorted(dept_points.items(), key=lambda x: x[1], reverse=True)[:3]:
+                            st.markdown(f"- {dept}: {points} pts")
+            
+            # Quick Facts
+            st.markdown("---")
+            st.subheader("💡 Quick Facts")
+            
+            fact_col1, fact_col2 = st.columns(2)
+            
+            with fact_col1:
+                if leaderboard:
+                    top_student = leaderboard[0] if len(leaderboard) > 0 else None
+                    if top_student:
+                        st.info(f"**Top Performer:** {top_student.get('name')} leads with {top_student.get('total_points', 0)} points!")
+                
+                if events:
+                    most_popular = max(events, key=lambda x: x.get('current_participants', 0), default=None)
+                    if most_popular:
+                        st.info(f"**Most Popular Event:** '{most_popular.get('title', 'Event')}' has {most_popular.get('current_participants', 0)} registrations!")
+            
+            with fact_col2:
+                if users:
+                    recent_users = sorted([u for u in users if u.get('role') == 'student'], 
+                                        key=lambda x: x.get('created_at', ''), 
+                                        reverse=True)[:3]
+                    if recent_users:
+                        st.success(f"**New Joiners:** {len(recent_users)} new students joined recently!")
+                
+                # Calculate average points
+                if leaderboard:
+                    avg_points = sum(s.get('total_points', 0) for s in leaderboard) / len(leaderboard) if leaderboard else 0
+                    st.success(f"**Average Score:** {avg_points:.0f} points among top performers")
+            
+            # Last Updated
+            st.caption(f"📊 Statistics updated: {datetime.now().strftime('%I:%M %p, %d %b %Y')}")
+            
+        except Exception as e:
+            st.error("Unable to load live statistics. Please try again later.")
+            if st.session_state.get('role') == 'admin':
+                st.code(f"Error: {str(e)}")
     
     st.markdown("---")
     st.subheader("🔐 Ready to Start Your Journey?")
