@@ -316,15 +316,15 @@ class Validators:
     
     @staticmethod
     def validate_roll_number(roll_no: str) -> Tuple[bool, str]:
-        """Validate roll number format"""
+        """Accept any roll number format"""
         if not roll_no:
             return False, "Roll number required"
-        
-        pattern = r'^[A-Z]{2,4}\d{4,7}$'
-        if re.match(pattern, roll_no, re.IGNORECASE):
+    
+        # Accept any non-empty string
+        if len(roll_no.strip()) > 2:  # At least 3 characters
             return True, "Valid roll number"
-        
-        return False, "Invalid roll number format (e.g., CSE2023001)"
+    
+        return False, "Roll number is too short"
     
     @staticmethod
     def sanitize_input(text: str, max_length: int = 500) -> str:
@@ -4475,20 +4475,17 @@ def student_registration_page():
         
         if submit:
             errors = []
-            
+    
             if password != confirm_pass:
                 errors.append("Passwords don't match")
-            
+    
             if not all([name, roll_no, email, mobile, username, password]):
                 errors.append("Please fill all required fields (*)")
-            
+    
             if not terms:
                 errors.append("You must agree to the Terms & Conditions")
-            
-            is_valid_roll, roll_msg = Validators.validate_roll_number(roll_no)
-            if not is_valid_roll:
-                errors.append(roll_msg)
-            
+    
+    
             is_valid_mobile, mobile_msg = Validators.validate_mobile(mobile)
             if not is_valid_mobile:
                 errors.append(mobile_msg)
