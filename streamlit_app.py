@@ -5012,11 +5012,11 @@ def leaderboard_page():
                     st.markdown(f'<div style="font-size: 1.5rem; text-align: center; font-weight: bold;">{rank}</div>', unsafe_allow_html=True)
             
             with col_info:
-            avatar_url = student.get('avatar_url', '')
-            if avatar_url and avatar_url.startswith('http'):
-                st.image(avatar_url, width=40)
-            else:
-                st.markdown(f'<span style="font-size: 1.5rem;">👤</span>', unsafe_allow_html=True)
+                avatar_url = student.get('avatar_url', '')
+                if avatar_url and avatar_url.startswith('http'):
+                    st.image(avatar_url, width=40)
+                else:
+                    st.markdown(f'<span style="font-size: 1.5rem;">👤</span>', unsafe_allow_html=True)
             
             with col_points:
                 points = student.get('points', student.get('total_points', 0))
