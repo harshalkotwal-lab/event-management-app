@@ -419,8 +419,7 @@ class SupabaseClient:
                 else:
                     raise
     
-    def execute_query(self, table, method='GET', data=None, filters=None, limit=1000, 
-                     order_by=None, cache_ttl=60, use_cache=True):
+    def execute_query(self, table, method='GET', data=None, filters=None, limit=1000, order_by=None, cache_ttl=60, use_cache=True):
         """Execute REST API query to Supabase with enhanced performance"""
         # Check cache first
         if method == 'GET' and use_cache and CACHE_ENABLED:
@@ -428,38 +427,48 @@ class SupabaseClient:
             cached_data = cache.get(cache_key)
             if cached_data is not None:
                 return cached_data
-        
+    
         try:
             import requests
-            
+        
             url = f"{self.url}/rest/v1/{table}"
-            
+        
             # Build query parameters
             params = {'limit': str(limit)}
-            
+        
             if filters:
                 for k, v in filters.items():
                     if v is not None:
                         if isinstance(v, dict):
+                            # Handle operators like gte, lte, etc.
                             for op, val in v.items():
-                                params[f"{k}"] = f"{op}.{val}"
+                                # Fix: Properly format timestamp values
+                                if isinstance(val, str) and ('T' in val or ' ' in val):
+                                    # Ensure proper URL encoding for timestamps
+                                    params[f"{k}"] = f"{op}.{val}"
+                                else:
+                                    params[f"{k}"] = f"{op}.{val}"
                         else:
-                            params[f"{k}"] = f"eq.{v}"
-            
+                            # Simple equality filter
+                            if isinstance(v, str) and ('T' in v or ' ' in v):
+                                params[f"{k}"] = f"eq.{v}"
+                            else:
+                                params[f"{k}"] = f"eq.{v}"
+        
             if order_by:
                 params['order'] = order_by
-            
+        
             # Set timeout
             timeout = 10 if method == 'GET' else 30
-            
+        
             # Execute request with retry
             response = self._execute_with_retry(
                 self._make_request, url, method, params, data, timeout
             )
-            
+        
             if response is None:
                 return None
-            
+        
             # Process response
             result = None
             if method == 'GET':
@@ -475,11 +484,14 @@ class SupabaseClient:
             elif method == 'DELETE':
                 result = response.status_code in [200, 204]
                 self._invalidate_cache(table)
-            
+        
             return result
-                
+            
         except Exception as e:
             logger.error(f"Supabase API error: {e}")
+            logger.error(f"URL: {url}")
+            logger.error(f"Method: {method}")
+            logger.error(f"Params: {params}")
             return None
     
     def _make_request(self, url, method, params, data, timeout):
@@ -1142,11 +1154,11 @@ class DatabaseManager:
             twenty_four_hours_ago = (datetime.now() - timedelta(hours=24)).isoformat()
         
             if self.use_supabase:
-                # Check points_history table
+                # Fix: Use proper filter format for timestamps
                 recent_awards = self.client.select('points_history', {
                     'student_username': username,
                     'reason': reason,
-                    'awarded_at': f'gte.{twenty_four_hours_ago}'
+                    'awarded_at': {'gte': twenty_four_hours_ago}  # Correct format
                 }, limit=1)
             
                 if recent_awards:
