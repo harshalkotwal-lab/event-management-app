@@ -1135,26 +1135,69 @@ class DatabaseManager:
             return []
 
     def award_points(self, username, points, reason, description=""):
-        """Award points to a user"""
+        """Award points to a user with DUPLICATE PREVENTION"""
         try:
+            # ===== DUPLICATE PREVENTION CHECK =====
+            # Check if similar points were awarded in last 24 hours
+            twenty_four_hours_ago = (datetime.now() - timedelta(hours=24)).isoformat()
+        
+            if self.use_supabase:
+                # Check points_history table
+                recent_awards = self.client.select('points_history', {
+                    'student_username': username,
+                    'reason': reason,
+                    'awarded_at': f'gte.{twenty_four_hours_ago}'
+                }, limit=1)
+            
+                if recent_awards:
+                    logger.warning(f"🚫 DUPLICATE POINTS BLOCKED: {username} already received points for '{reason}' in last 24 hours")
+                    return False
+                
+                # Also check registrations table for event-based points
+                if 'event_' in reason:
+                    # Extract event ID if possible
+                    event_match = re.search(r'event_(\w+)_([a-f0-9-]+)', reason)
+                    if event_match:
+                        status = event_match.group(1)
+                        reg_id = event_match.group(2) if len(event_match.groups()) > 1 else None
+                    
+                        # Check if points already awarded in registrations table
+                        reg_check = self.client.select('registrations', {'id': reg_id}, limit=1) if reg_id else None
+                        if reg_check and reg_check[0].get('points_awarded', 0) > 0:
+                            logger.warning(f"🚫 DUPLICATE EVENT POINTS BLOCKED: {username} already has {reg_check[0].get('points_awarded')} points for registration {reg_id}")
+                            return False
+            else:
+                # SQLite version
+                recent_awards = self.client.execute_query(
+                    "SELECT id FROM points_history WHERE student_username = ? AND reason = ? AND awarded_at >= ?",
+                    (username, reason, twenty_four_hours_ago), fetchone=True
+                )
+                if recent_awards:
+                    logger.warning(f"🚫 DUPLICATE POINTS BLOCKED: {username} already received points for '{reason}' in last 24 hours")
+                    return False
+        
+            # ===== PROCEED WITH POINTS AWARD =====
             user = self.get_user(username, use_cache=False)
             if not user:
+                logger.error(f"User {username} not found for points award")
                 return False
-            
+        
             current_points = user.get('total_points', 0)
             new_points = current_points + points
-            
+        
             update_data = {
                 'total_points': new_points,
                 'updated_at': datetime.now().isoformat()
             }
-            
+        
+            # Check for level up
             current_level = user.get('current_level', 1)
             for level, config in GAMIFICATION_CONFIG['levels'].items():
                 if new_points >= config['points_required'] and level > current_level:
                     update_data['current_level'] = level
                     update_data['level_progress'] = 0
-                    
+                
+                    # Award level up achievement
                     self.unlock_achievement(
                         username,
                         f"level_{level}",
@@ -1162,7 +1205,8 @@ class DatabaseManager:
                         "level_up",
                         points * 2
                     )
-                    
+                
+                    # Send notification
                     self.create_notification(
                         user_id=username,
                         title=f"🎉 Level Up!",
@@ -1170,21 +1214,212 @@ class DatabaseManager:
                         notification_type="achievement",
                         related_id=f"level_{level}"
                     )
-            
+        
+            # Update user points
             success = self.client.update('users', {'username': username}, update_data, use_cache=False)
-            
+        
             if success:
+                # Clear user cache
                 self._clear_user_cache(username)
-                self._log_points_transaction(username, points, reason, description)
-                self._check_badge_unlocks(username)
-                
-                return True
             
+                # Log the points transaction
+                self._log_points_transaction(username, points, reason, description)
+            
+                # Check for badge unlocks
+                self._check_badge_unlocks(username)
+            
+                # Send notification to user
+                self.create_notification(
+                    user_id=username,
+                    title=f"🏆 {points} Points Awarded!",
+                    message=f"You earned {points} points for: {reason}",
+                    notification_type="points_awarded",
+                    related_id=reason
+                )
+            
+                logger.info(f"✅ Points awarded: {username} +{points}pts for '{reason}'")
+                return True
+        
+            logger.error(f"Failed to update points for {username}")
             return False
+        
+        except Exception as e:
+            logger.error(f"Error awarding points to {username}: {e}")
+            return False
+
+    def _log_points_transaction(self, username, points, reason, description=""):
+        """Log points transaction to prevent duplicates"""
+        try:
+            # Create a points history record
+            points_record = {
+                'id': str(uuid.uuid4()),
+                'student_username': username,
+                'points': points,
+                'reason': reason,
+                'description': description,
+                'awarded_by': 'system',
+                'awarded_at': datetime.now().isoformat()
+            }
+        
+            # Extract event ID if present in reason
+            if 'event_' in reason:
+                event_match = re.search(r'event_(\w+)_([a-f0-9-]+)', reason)
+                if event_match and len(event_match.groups()) > 1:
+                    points_record['event_id'] = event_match.group(2)
+        
+            # Insert into points_history table
+            if self.use_supabase:
+                return self.client.insert('points_history', points_record, use_cache=False)
+            else:
+                return self.client.insert('points_history', points_record, use_cache=False)
             
         except Exception as e:
-            logger.error(f"Error awarding points: {e}")
+            logger.error(f"Error logging points transaction: {e}")
             return False
+
+    def update_registration_status(self, registration_id, status, mentor_notes=None, points_awarded=0, badges_awarded=""):
+        """Update registration status and award points with duplicate prevention"""
+        try:
+            # Define point limits per status
+            point_limits = {
+                'confirmed': 50,
+                'present': 25,
+                'winner': 200,
+                'runner_up': 150,
+                'shortlisted': 100
+            }
+        
+            # Validate points based on status
+            if status in point_limits:
+                if points_awarded > point_limits[status]:
+                    points_awarded = point_limits[status]  # Cap at limit
+                    logger.warning(f"Capped points to {point_limits[status]} for status {status}")
+            else:
+                # For other statuses, points should be 0
+                if points_awarded > 0:
+                    logger.warning(f"Status {status} should not have points. Setting to 0.")
+                    points_awarded = 0
+        
+            # Get registration details first
+            if self.use_supabase:
+                results = self.client.select('registrations', {'id': registration_id}, limit=1)
+                if not results:
+                    return False, "Registration not found"
+                registration = results[0]
+            else:
+                registration = self.client.execute_query(
+                    "SELECT * FROM registrations WHERE id = ?",
+                    (registration_id,), fetchone=True
+                )
+                if not registration:
+                    return False, "Registration not found"
+            
+            # CHECK 1: If points were already awarded for this registration
+            current_points = registration.get('points_awarded', 0)
+            if current_points > 0 and points_awarded > 0:
+                return False, f"Points already awarded ({current_points} pts). Cannot award again."
+        
+            # CHECK 2: If same status already applied with points
+            current_status = registration.get('status', '')
+            if current_status == status and current_points > 0 and points_awarded > 0:
+                return False, f"Status already set to {status} with {current_points} points. Points cannot be awarded again."
+        
+            # CHECK 3: Prevent status downgrade with points
+            status_hierarchy = {
+                'pending': 0,
+                'confirmed': 1,
+                'present': 2,
+                'shortlisted': 3,
+                'runner_up': 4,
+                'winner': 5
+            }
+        
+            current_level = status_hierarchy.get(current_status.lower(), 0)
+            new_level = status_hierarchy.get(status.lower(), 0)
+        
+            if new_level < current_level and points_awarded > 0:
+                return False, f"Cannot downgrade status from {current_status} to {status} with points."
+            
+            update_data = {
+                'status': status,
+                'updated_at': datetime.now().isoformat()
+            }
+        
+            if mentor_notes:
+                update_data['mentor_notes'] = mentor_notes
+        
+            if points_awarded > 0:
+                update_data['points_awarded'] = points_awarded
+            
+                # Award points to student with duplicate prevention
+                student_username = registration['student_username']
+                event_title = registration.get('event_title', 'Event')
+            
+                # Create unique reason to prevent duplicate awards
+                unique_reason = f"event_{status.lower()}_{registration_id}"
+            
+                success = self.award_points(
+                    student_username, 
+                    points_awarded,
+                    unique_reason,
+                    f"{status} in {event_title[:30]}"
+                )
+            
+                if not success:
+                    return False, "Failed to award points (possible duplicate)"
+        
+            if badges_awarded:
+                update_data['badges_awarded'] = badges_awarded
+            
+            if status == 'present' and 'checked_in_at' not in registration:
+                update_data['checked_in_at'] = datetime.now().isoformat()
+        
+            if status == 'completed' and 'checked_out_at' not in registration:
+                update_data['checked_out_at'] = datetime.now().isoformat()
+                # Calculate time spent if checked_in exists
+                if registration.get('checked_in_at'):
+                    try:
+                        checked_in = datetime.fromisoformat(registration['checked_in_at'].replace('Z', '+00:00'))
+                        time_spent = int((datetime.now() - checked_in).total_seconds() / 60)  # minutes
+                        update_data['time_spent'] = time_spent
+                    except:
+                        pass
+        
+            success = self.client.update('registrations', {'id': registration_id}, update_data, use_cache=False)
+        
+            if success:
+                # Clear relevant caches
+                self._clear_registration_cache(registration['student_username'])
+                cache.delete(f"registrations_event_{registration['event_id']}")
+            
+                # Send notification to student if points were awarded
+                if points_awarded > 0:
+                    self.create_notification(
+                        user_id=registration['student_username'],
+                        title=f"🏆 {points_awarded} Points Awarded!",
+                        message=f"You earned {points_awarded} points for {status.lower()} in '{registration.get('event_title', 'Event')}'",
+                        notification_type="points_awarded",
+                        related_id=registration['event_id']
+                    )
+            
+                # Also send status update notification
+                self.create_notification(
+                    user_id=registration['student_username'],
+                    title=f"📝 Status Updated",
+                    message=f"Your registration for '{registration.get('event_title', 'Event')}' is now {status}",
+                    notification_type="status_update",
+                    related_id=registration['event_id']
+                )
+            
+                logger.info(f"Updated registration {registration_id} to {status} with {points_awarded} points")
+                return True, "Status updated successfully"
+            else:
+                return False, "Failed to update status"
+            
+        except Exception as e:
+            logger.error(f"Error updating registration status: {e}")
+            return False, str(e)
+
 
     def get_users_by_role(self, role, cache_ttl=60):
         """Get users by role"""
