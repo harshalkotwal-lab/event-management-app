@@ -4423,51 +4423,137 @@ def landing_page():
     
     with tab_stats:
         try:
-            # Get live statistics
-            with st.spinner("Loading live statistics..."):
-                events = db.get_all_events(cache_ttl=60)
-                users = db.get_all_users(cache_ttl=60)
-                leaderboard = db.get_leaderboard(limit=10)
-                
-                if events is None:
-                    events = []
-                if users is None:
-                    users = []
-                if leaderboard is None:
-                    leaderboard = []
+            # Get fresh data from database (no cache)
+            with st.spinner("Calculating live statistics from database..."):
+                # Get all students from database
+                all_users = db.get_all_users(use_cache=False)
+                students = [u for u in all_users if u and u.get('role') == 'student']
             
+                # Get all events
+                all_events = db.get_all_events(use_cache=False) or []
+            
+                # Get all registrations
+                registrations = []
+                for event in all_events:
+                    event_regs = db.get_registrations_by_event(event.get('id')) or []
+                    registrations.extend(event_regs)
+            
+                # Get all points history for verification
+                points_history = []
+                if db.use_supabase:
+                    points_history = db.client.select('points_history', limit=1000, use_cache=False) or []
+                else:
+                    points_history = db.client.execute_query(
+                        "SELECT * FROM points_history ORDER BY awarded_at DESC LIMIT 1000",
+                        fetchall=True, use_cache=False
+                    ) or []
+        
             # Overall Statistics
             st.subheader("📈 Platform Overview")
-            
+        
             col1, col2, col3, col4 = st.columns(4)
-            
+        
             with col1:
-                total_events = len(events)
+                total_events = len(all_events)
                 st.metric("Total Events", total_events)
-            
+        
             with col2:
-                total_students = len([u for u in users if u.get('role') == 'student'])
+                total_students = len(students)
                 st.metric("Active Students", total_students)
-            
+        
             with col3:
-                upcoming_events = len([e for e in events if e.get('status') == 'upcoming'])
+                upcoming_events = len([e for e in all_events if e.get('status') == 'upcoming'])
                 st.metric("Upcoming Events", upcoming_events)
-            
+        
             with col4:
-                total_points = sum(u.get('total_points', 0) for u in users if u.get('role') == 'student')
-                st.metric("Total Points Awarded", f"{total_points:,}")
-            
+                # Calculate total points from users table
+                total_points_db = sum(s.get('total_points', 0) for s in students)
+                st.metric("Total Points Awarded", f"{total_points_db:,}")
+        
             st.markdown("---")
+        
+            # VERIFIED LEADERBOARD - Calculated from multiple sources
+            st.subheader("✅ Verified Top 10 Leaderboard")
+        
+            if students:
+                # Calculate points from multiple sources for verification
+                leaderboard_data = []
             
-            # Leaderboard Section
-            st.subheader("🏆 Current Top 10 Leaderboard")
+                for student in students:
+                    username = student.get('username')
+                    name = student.get('name', 'Unknown')
+                    department = student.get('department', 'N/A')
+                    year = student.get('year', 'N/A')
+                
+                    # Source 1: Direct from users table
+                    points_from_users = student.get('total_points', 0)
+                    level_from_users = student.get('current_level', 1)
+                
+                    # Source 2: Calculate from points_history
+                    points_from_history = 0
+                    if points_history:
+                        for entry in points_history:
+                            if entry.get('student_username') == username:
+                                points_from_history += entry.get('points', 0)
+                
+                    # Source 3: Calculate from registrations
+                    points_from_registrations = 0
+                    if registrations:
+                        for reg in registrations:
+                            if reg.get('student_username') == username:
+                                points_from_registrations += reg.get('points_awarded', 0)
+                
+                    # Verification status
+                    verification_status = "✅"
+                    verification_notes = ""
+                
+                    # Check consistency
+                    if points_from_users != points_from_history:
+                        verification_status = "⚠️"
+                        verification_notes = f"DB:{points_from_users} ≠ History:{points_from_history}"
+                    elif points_from_users != points_from_registrations:
+                        verification_status = "⚠️"
+                        verification_notes = f"DB:{points_from_users} ≠ Reg:{points_from_registrations}"
+                
+                    # Calculate correct level based on verified points
+                    verified_points = points_from_users  # Using DB as source
+                    correct_level = 1
+                    level_name = "Beginner"
+                
+                    for level_num, config in GAMIFICATION_CONFIG['levels'].items():
+                        if verified_points >= config['points_required']:
+                            correct_level = level_num
+                            level_name = config['name']
+                
+                    # Check if stored level matches calculated level
+                    if level_from_users != correct_level:
+                        verification_status = "🔁"
+                        verification_notes = f"Level {level_from_users}→{correct_level}"
+                
+                    leaderboard_data.append({
+                        'username': username,
+                        'name': name,
+                        'department': department,
+                        'year': year,
+                        'points_db': points_from_users,
+                        'points_history': points_from_history,
+                        'points_reg': points_from_registrations,
+                        'verified_points': verified_points,
+                        'stored_level': level_from_users,
+                        'calculated_level': correct_level,
+                        'level_name': level_name,
+                        'verification': verification_status,
+                        'notes': verification_notes
+                    })
             
-            if leaderboard:
-                # Create a nice leaderboard display
-                for i, student in enumerate(leaderboard[:10], 1):
+                # Sort by verified points
+                leaderboard_data.sort(key=lambda x: x['verified_points'], reverse=True)
+            
+                # Display top 10
+                for i, student in enumerate(leaderboard_data[:10], 1):
                     with st.container():
-                        col_rank, col_info, col_points, col_level = st.columns([1, 4, 2, 2])
-                        
+                        col_rank, col_info, col_points, col_level, col_verify = st.columns([1, 3, 1.5, 1.5, 1])
+                    
                         with col_rank:
                             if i == 1:
                                 st.markdown(f'<div style="font-size: 1.5rem; font-weight: bold; color: gold;">🥇</div>', unsafe_allow_html=True)
@@ -4477,109 +4563,141 @@ def landing_page():
                                 st.markdown(f'<div style="font-size: 1.5rem; font-weight: bold; color: #cd7f32;">🥉</div>', unsafe_allow_html=True)
                             else:
                                 st.markdown(f'<div style="font-size: 1.2rem; font-weight: bold;">#{i}</div>', unsafe_allow_html=True)
-                        
-                        with col_info:
-                            st.markdown(f"**{student.get('name', 'Student')}**")
-                            st.caption(f"{student.get('department', 'General')} | {student.get('year', 'Year')}")
-                        
-                        with col_points:
-                            points = student.get('total_points', 0)
-                            st.markdown(f'<div style="font-size: 1.3rem; font-weight: bold; color: #3B82F6;">{points}</div>', unsafe_allow_html=True)
-                            st.caption("points")
-                        
-                        with col_level:
-                            level = student.get('current_level', 1)
-                            level_name = GAMIFICATION_CONFIG['levels'].get(level, {}).get('name', 'Beginner')
-                            st.markdown(f'<div style="font-size: 1.1rem; font-weight: bold; color: #10B981;">Lvl {level}</div>', unsafe_allow_html=True)
-                            st.caption(level_name)
-                        
-                        st.markdown("---")
-            else:
-                st.info("No leaderboard data available yet. Be the first to join!")
-            
-            # Event Statistics
-            st.markdown("---")
-            st.subheader("📅 Event Statistics")
-            
-            col_ev1, col_ev2, col_ev3 = st.columns(3)
-            
-            with col_ev1:
-                # Event types distribution
-                event_types = {}
-                for event in events:
-                    event_type = event.get('event_type', 'Other')
-                    event_types[event_type] = event_types.get(event_type, 0) + 1
-                
-                if event_types:
-                    st.markdown("**Event Types:**")
-                    for etype, count in sorted(event_types.items(), key=lambda x: x[1], reverse=True)[:5]:
-                        st.markdown(f"- {etype}: {count}")
-            
-            with col_ev2:
-                # Status distribution
-                status_counts = {'upcoming': 0, 'ongoing': 0, 'completed': 0}
-                for event in events:
-                    status = event.get('status', 'upcoming')
-                    if status in status_counts:
-                        status_counts[status] += 1
-                
-                st.markdown("**Event Status:**")
-                for status, count in status_counts.items():
-                    if count > 0:
-                        status_emoji = {'upcoming': '🟢', 'ongoing': '🟡', 'completed': '🔴'}.get(status, '⚪')
-                        st.markdown(f"- {status_emoji} {status.title()}: {count}")
-            
-            with col_ev3:
-                # Department participation
-                if events and leaderboard:
-                    dept_points = {}
-                    for student in leaderboard:
-                        dept = student.get('department', 'Unknown')
-                        points = student.get('total_points', 0)
-                        dept_points[dept] = dept_points.get(dept, 0) + points
                     
-                    if dept_points:
-                        st.markdown("**Top Departments:**")
-                        for dept, points in sorted(dept_points.items(), key=lambda x: x[1], reverse=True)[:3]:
-                            st.markdown(f"- {dept}: {points} pts")
+                        with col_info:
+                            st.markdown(f"**{student['name']}**")
+                            st.caption(f"{student['department']} | {student['year']}")
+                            if student['notes']:
+                                st.caption(f"*{student['notes']}*")
+                    
+                        with col_points:
+                            points = student['verified_points']
+                            st.markdown(f'<div style="font-size: 1.3rem; font-weight: bold; color: #3B82F6;">{points}</div>', unsafe_allow_html=True)
+                            st.caption(f"DB: {student['points_db']}")
+                    
+                        with col_level:
+                            level = student['calculated_level']
+                            st.markdown(f'<div style="font-size: 1.1rem; font-weight: bold; color: #10B981;">Lvl {level}</div>', unsafe_allow_html=True)
+                            st.caption(student['level_name'])
+                            if student['stored_level'] != student['calculated_level']:
+                                st.caption(f"Stored: {student['stored_level']}")
+                    
+                        with col_verify:
+                            st.markdown(f'<div style="font-size: 1.5rem;">{student["verification"]}</div>', unsafe_allow_html=True)
+                            st.caption("Status")
+                    
+                        st.markdown("---")
             
-            # Quick Facts
+                # Data Consistency Report
+                st.markdown("---")
+                st.subheader("📊 Data Consistency Report")
+            
+                col_cons1, col_cons2, col_cons3 = st.columns(3)
+            
+                with col_cons1:
+                    # Count verification statuses
+                    verified_count = sum(1 for s in leaderboard_data[:10] if s['verification'] == '✅')
+                    total_count = len(leaderboard_data[:10])
+                    st.metric("✅ Verified Entries", f"{verified_count}/{total_count}")
+            
+                with col_cons2:
+                    # Average points discrepancy
+                    discrepancies = []
+                    for student in leaderboard_data[:10]:
+                        if student['points_db'] != student['points_history']:
+                            discrepancies.append(abs(student['points_db'] - student['points_history']))
+                
+                    if discrepancies:
+                        avg_discrepancy = sum(discrepancies) / len(discrepancies)
+                        st.metric("Avg Points Gap", f"{avg_discrepancy:.1f}")
+                    else:
+                        st.metric("Avg Points Gap", "0.0")
+            
+                with col_cons3:
+                    # Level consistency
+                    level_mismatches = sum(1 for s in leaderboard_data[:10] if s['stored_level'] != s['calculated_level'])
+                    st.metric("Level Mismatches", level_mismatches)
+            
+                # Show raw data for verification (collapsible)
+                with st.expander("📋 View Raw Verification Data"):
+                    verification_df = pd.DataFrame([
+                        {
+                            'Rank': i+1,
+                            'Name': s['name'],
+                            'Points (DB)': s['points_db'],
+                            'Points (History)': s['points_history'],
+                            'Points (Reg)': s['points_reg'],
+                            'Level (Stored)': s['stored_level'],
+                            'Level (Calc)': s['calculated_level'],
+                            'Status': s['verification'],
+                            'Notes': s['notes']
+                        }
+                        for i, s in enumerate(leaderboard_data[:10])
+                    ])
+                    st.dataframe(verification_df, use_container_width=True)
+                
+                    # Download button
+                    csv = verification_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download Verification Data",
+                        data=csv,
+                        file_name="leaderboard_verification.csv",
+                        mime="text/csv"
+                    )
+            
+            else:
+                st.info("No student data available for leaderboard.")
+        
+            # Database Statistics
             st.markdown("---")
-            st.subheader("💡 Quick Facts")
+            st.subheader("🗃️ Database Statistics")
+        
+            col_db1, col_db2, col_db3 = st.columns(3)
+        
+            with col_db1:
+                total_points_history = sum(entry.get('points', 0) for entry in points_history)
+                st.metric("Points in History", total_points_history)
+        
+            with col_db2:
+                total_points_registrations = sum(reg.get('points_awarded', 0) for reg in registrations)
+                st.metric("Points in Registrations", total_points_registrations)
+        
+            with col_db3:
+                total_points_users = sum(s.get('total_points', 0) for s in students)
+                st.metric("Points in Users", total_points_users)
+        
+            # Data consistency check
+            st.markdown("---")
+            st.subheader("🔍 Data Integrity Check")
+        
+            if total_points_db > 0:
+                # Calculate discrepancy percentage
+                max_points = max(total_points_history, total_points_registrations, total_points_users)
+                min_points = min(total_points_history, total_points_registrations, total_points_users)
             
-            fact_col1, fact_col2 = st.columns(2)
-            
-            with fact_col1:
-                if leaderboard:
-                    top_student = leaderboard[0] if len(leaderboard) > 0 else None
-                    if top_student:
-                        st.info(f"**Top Performer:** {top_student.get('name')} leads with {top_student.get('total_points', 0)} points!")
+                if max_points > 0:
+                    discrepancy_pct = ((max_points - min_points) / max_points) * 100
                 
-                if events:
-                    most_popular = max(events, key=lambda x: x.get('current_participants', 0), default=None)
-                    if most_popular:
-                        st.info(f"**Most Popular Event:** '{most_popular.get('title', 'Event')}' has {most_popular.get('current_participants', 0)} registrations!")
-            
-            with fact_col2:
-                if users:
-                    recent_users = sorted([u for u in users if u.get('role') == 'student'], 
-                                        key=lambda x: x.get('created_at', ''), 
-                                        reverse=True)[:3]
-                    if recent_users:
-                        st.success(f"**New Joiners:** {len(recent_users)} new students joined recently!")
-                
-                # Calculate average points
-                if leaderboard:
-                    avg_points = sum(s.get('total_points', 0) for s in leaderboard) / len(leaderboard) if leaderboard else 0
-                    st.success(f"**Average Score:** {avg_points:.0f} points among top performers")
-            
+                    if discrepancy_pct < 1:
+                        st.success(f"✅ Excellent data consistency! ({discrepancy_pct:.2f}% variation)")
+                    elif discrepancy_pct < 5:
+                        st.info(f"⚠️ Good data consistency ({discrepancy_pct:.2f}% variation)")
+                    else:
+                        st.warning(f"⚠️ Data inconsistency detected ({discrepancy_pct:.2f}% variation)")
+                else:
+                    st.info("No points data available for comparison")
+            else:
+                st.info("No points data available for integrity check")
+        
             # Last Updated
-            st.caption(f"📊 Statistics updated: {datetime.now().strftime('%I:%M %p, %d %b %Y')}")
-            
+            st.caption(f"🔄 Last calculated: {datetime.now().strftime('%I:%M:%S %p, %d %b %Y')}")
+            st.caption("💡 All calculations performed directly on database entries with cross-verification")
+        
         except Exception as e:
-            st.error("Unable to load live statistics. Please try again later.")
+            st.error(f"❌ Error calculating statistics: {str(e)[:100]}")
             if st.session_state.get('role') == 'admin':
-                st.code(f"Error: {str(e)}")
+                with st.expander("Error Details"):
+                    st.code(traceback.format_exc())
     
     st.markdown("---")
     st.subheader("🔐 Ready to Start Your Journey?")
